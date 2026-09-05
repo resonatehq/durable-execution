@@ -16,28 +16,24 @@ thousand lines.
 Here is the target — a research agent that plans searches, fans them out, and
 synthesizes a cited report:
 
-```ts
-async function research(context: Context, question: string) {
-  // Plan the searches
-  const queries = await context.run(agent,
-    `Plan the searches for: ${question}`
-  );
+```python
+@resonate
+async def research(question: str):
+    # Plan the searches
+    queries = await agent(f"Plan the searches for: {question}")
 
-  // Fan out the searches
-  const results = await Promise.allSettled(
-    queries.map((q) => context.rpc(search, q))
-  );
+    # Fan out the searches
+    results = await gather(search.rpc(q) for q in queries)
 
-  // Synthesize the results
-  return await context.run(agent,
-    `Write a cited report. ${question}: ${results}`
-  );
-}
+    # Synthesize the results
+    return await agent(f"Write a cited report. {question}: {results}")
 ```
 
-Ordinary async/await. No state machines, no workflow DSL, no YAML. `run` executes
-a function durably in this process; `rpc` invokes a function durably in *another*
-process. Both are resumable. `Promise.allSettled` does what it always did.
+Ordinary async/await. No state machines, no workflow DSL, no YAML, no context
+object threaded through every call. One decorator.
+
+`await agent(...)` runs durably in this process. `search.rpc(q)` runs durably in
+another one — same function, different machine. `gather` does what it always did.
 
 Kill this program at any point and restart it. It resumes.
 
