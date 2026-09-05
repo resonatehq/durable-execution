@@ -4,7 +4,7 @@ Building a durable execution engine from first principles. Production-grade. Pla
 
 ## Intro
 
-[Watch the one-minute intro](videos/intro.mp4)
+https://github.com/user-attachments/assets/176e33d3-54db-46ae-8d03-6f85529f8c25
 
 ## The Idea
 
