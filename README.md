@@ -2,6 +2,10 @@
 
 Building a durable execution engine from first principles. Production-grade. Planet-scale.
 
+## Intro
+
+[Watch the one-minute intro](videos/intro.mp4)
+
 ## The Idea
 
 A durable function survives the process that runs it. Crash the machine mid-flight,
