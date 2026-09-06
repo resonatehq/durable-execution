@@ -14,10 +14,10 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
   const [animated, setAnimated] = useState(false);
   const [active, setActive] = useState(0);
 
-  // Empty bookends only exist while animating, so the static diagram stays clean.
-  const cells = animated
-    ? [{ label: '', frames: [] }, ...columns, { label: '', frames: [] }]
-    : columns;
+  // One trailing empty cell, only while animating, so the cycle ends on nothing
+  // and wraps back through it. There is deliberately no leading one: at rest the
+  // figure must show a real state, not a blank frame.
+  const cells = animated ? [...columns, { label: '', frames: [] }] : columns;
 
   const centre = useCallback((index) => {
     const wrap = wrapRef.current;

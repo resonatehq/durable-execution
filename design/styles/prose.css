@@ -313,14 +313,23 @@ body {
   padding-top: 8px;
 }
 
-.index-title { font-size: 25px; line-height: 1.3; }
+/* both are spans inside a grid item, so they need blockifying — otherwise
+   they run together on one line and the dek's margin is dropped. */
+.index-title {
+  display: block;
+  font-size: 25px;
+  line-height: 1.3;
+  text-wrap: balance;
+}
 
 .index-dek {
+  display: block;
   font-family: var(--font-sans), Helvetica, Arial, sans-serif;
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--grey-1);
   margin-top: 7px;
+  max-width: 46em;
 }
 
 /* ---------- contact rows ---------- */
