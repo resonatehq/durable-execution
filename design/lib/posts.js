@@ -21,10 +21,12 @@ export function getPost(slug) {
   return { slug, frontmatter: { ...data, date: isoDate(data.date) }, source: content };
 }
 
+// Reading order, oldest first — each post builds on the one before it.
+// Slug breaks ties, since the numeric prefix is the real sequence.
 export function getAllPosts() {
   return getSlugs()
     .map((slug) => ({ slug, ...getPost(slug).frontmatter }))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort((a, b) => a.date.localeCompare(b.date) || a.slug.localeCompare(b.slug));
 }
 
 // "2026-09-06" -> "2026.09"
