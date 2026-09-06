@@ -88,8 +88,8 @@ PENDING, RESOLVED, REJECTED = "pending", "resolved", "rejected"
 @dataclass(frozen=True)
 class Promise:
     id: str
-    params: Any = None
     state: str = PENDING
+    param: Any = None
     value: Any = None
 ```
 
@@ -100,13 +100,13 @@ class Store:
     def __init__(self):
         self._db: dict[str, Promise] = {}
 
-    def create(self, id: str, params: Any) -> Promise:
-        return self._db.setdefault(id, Promise(id, params))
+    def create(self, id: str, param: Any) -> Promise:
+        return self._db.setdefault(id, Promise(id, param=param))
 
     def settle(self, id: str, state: str, value: Any) -> Promise:
         p = self._db[id]
         if p.state == PENDING:
-            self._db[id] = Promise(id, p.params, state, value)
+            self._db[id] = Promise(id, state, p.param, value)
         return self._db[id]
 ```
 
@@ -115,33 +115,33 @@ job. Ignore that for now — a real one is a database, and swapping it changes
 nothing above this line. What matters is the interface — two operations — and
 three properties of it.
 
-The params are on the promise so that a process which did not make the call can
+The param is on the promise so that a process which did not make the call can
 still make it — an id on its own does not say what to run.
 
 All three properties show up in one session, which is the whole specification:
 
 ```python name="Store, in one session"
-#                                 Promise(id, params, state, value)
+#                                 Promise(id, state, param, value)
 
 s = Store()
 
-s.create("a", 1)                # Promise("a", 1, PENDING)
-s.create("a", 2)                # Promise("a", 1, PENDING)      <- 2 discarded
+s.create("a", 1)                # Promise("a", PENDING, 1)
+s.create("a", 2)                # Promise("a", PENDING, 1)      <- 2 discarded
 
-s.settle("a", RESOLVED, 9)      # Promise("a", 1, RESOLVED, 9)
-s.settle("a", RESOLVED, 8)      # Promise("a", 1, RESOLVED, 9)  <- 8 discarded
-s.settle("a", REJECTED, Err())  # Promise("a", 1, RESOLVED, 9)  <- so is Err
+s.settle("a", RESOLVED, 9)      # Promise("a", RESOLVED, 1, 9)
+s.settle("a", RESOLVED, 8)      # Promise("a", RESOLVED, 1, 9)  <- 8 discarded
+s.settle("a", REJECTED, Err())  # Promise("a", RESOLVED, 1, 9)  <- so is Err
 
-s.create("a", 3)                # Promise("a", 1, RESOLVED, 9)  <- replay sees
+s.create("a", 3)                # Promise("a", RESOLVED, 1, 9)  <- replay sees
 ```
 
-Nothing after the first create changes the params, and nothing after the first
+Nothing after the first create changes the param, and nothing after the first
 settle changes the outcome. Read down the right-hand column and the three
 properties name themselves.
 
 **`create` is idempotent.** Call it once or a thousand times with the same id
-and you get the same promise, whatever params you pass after the first — those
-are of record too. This is what makes replay work: a restarted program calls
+and you get the same promise, whatever param you pass after the first — the
+first one is of record too. This is what makes replay work: a restarted program calls
 `create` on ids that already exist and gets back what happened last time.
 
 **Settling is first-writer-wins.** `settle` moves a pending promise to
