@@ -106,7 +106,7 @@ class Store:
     def settle(self, id: str, state: str, value: Any) -> Promise:
         p = self._db[id]
         if p.state == PENDING:
-            self._db[id] = Promise(id, state, value)
+            self._db[id] = Promise(id, p.params, state, value)
         return self._db[id]
 ```
 
