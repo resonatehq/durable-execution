@@ -13,7 +13,8 @@ belong there — a search index behind someone else's credentials, a model that
 needs a GPU this box does not have, a tool that is itself an agent and runs for
 an hour.
 
-So the call has to go somewhere else. The obvious version sends it and waits:
+So the call has to go somewhere else. The obvious version sends the call and
+waits:
 
 ```python name="rpc, the obvious way"
 async def rpc(store, id, target, param):
@@ -32,31 +33,31 @@ async def rpc(store, id, target, param):
 Two things in there are worth a second look before the objection.
 
 The loop re-reads the promise by calling `create` again. That is not a trick —
-`create` is idempotent, so after the first call it is a read that happens to be
-spelled like a write. One operation, two uses.
+`create` is idempotent, so after the first call `create` is a read that
+happens to be spelled like a write. One operation, two uses.
 
-And `send` is allowed to be sloppy. If it delivers twice, the far side calls
-`create` on the same id twice and the second one changes nothing. At-least-once
-delivery is safe here because the receiver is idempotent, which is a property we
-already had and did not have to add.
+And `send` is allowed to be sloppy. If `send` delivers twice, the far side
+calls `create` on the same id twice and the second call changes nothing.
+At-least-once delivery is safe here because the receiver is idempotent, which
+is a property we already had and did not have to add.
 
-## What it costs to wait
+## What waiting costs
 
 The function is correct. Kill the process mid-wait and the machinery from the
-last post replays it: the promises that settled are found, the work behind them
-is skipped, and the loop picks up where it was. Interruption-tolerant, as
-before.
+last post replays the function: the promises that settled are found, the work
+behind them is skipped, and the loop picks up where the loop was.
+Interruption-tolerant, as before.
 
-What it is not is cheap. For the whole duration of that call, a process sits in
-a `sleep` loop holding a task nobody else can claim. If the remote tool takes
-four minutes, you have rented a process for four minutes to do nothing. If it is
-another agent, make that an hour. Scale the fleet to the number of calls
-*in flight* rather than the number of calls *running*, and most of what you are
-paying for is waiting.
+What the design is not is cheap. For the whole duration of that call, a
+process sits in a `sleep` loop holding a task nobody else can claim. If the
+remote tool takes four minutes, you have rented a process for four minutes to
+do nothing. If the tool is another agent, make that an hour. Scale the fleet
+to the number of calls *in flight* rather than the number of calls *running*,
+and most of what you are paying for is waiting.
 
 The usual answer is to make waiting cheaper — more coroutines per process,
-smaller runtimes, bigger boxes. That is a real engineering direction and it
-tops out where you would expect.
+smaller runtimes, bigger boxes. That is a real engineering direction, and tops
+out where you would expect.
 
 The other answer is to stop waiting.
 
@@ -80,13 +81,13 @@ with the `create` and the `settle` pulled apart.
 
 <PullQuote>A local call is a promise you settle yourself. A remote call is a promise you do not.</PullQuote>
 
-Which raises the question the `sleep` loop was avoiding: if this process is not
-going to settle the promise, why is it still here?
+Which raises the question the `sleep` loop was avoiding: if this process is
+not going to settle the promise, why is this process still here?
 
 ## Unwinding
 
-It does not have to be. Give `invoke` a second branch — dispatch the call, then
-stop:
+This process does not have to be. Give `invoke` a second branch — dispatch the
+call, then stop:
 
 ```python name="invoke"
 async def invoke(store, id, func, *args):
@@ -108,12 +109,13 @@ async def invoke(store, id, func, *args):
     return p.value
 ```
 
-`Blocked` is not an error. It is how the frame says *I cannot make progress and
-neither can anyone above me*, and the only thing it does is unwind the stack —
-past `agent`, past every frame between, out of `execute_until_blocked_inner`
-entirely.
+`Blocked` is not an error but how the frame says *I cannot make progress and
+neither can anyone above me*, and the only thing `Blocked` does is unwind the
+stack — past `agent`, past every frame between, out of
+`execute_until_blocked_inner` entirely.
 
-Which is where the outer half finally gets the branch it has been missing:
+Which is where the outer half finally gets the branch missing since the last
+post:
 
 ```python name="execute_until_blocked_outer"
 async def execute_until_blocked_outer(queue, store):
@@ -131,11 +133,11 @@ async def execute_until_blocked_outer(queue, store):
     await queue.complete(task)
 ```
 
-Nine lines instead of six. The task goes back, unclaimed, and the process moves
-on to whatever else is in the queue. Nothing is waiting anywhere. There is no
-coroutine parked on a socket, no timer, no row marked *in progress* — the
-execution simply is not running, and the only trace it left is a pending promise
-and a note to wake this task when that promise settles.
+Nine lines instead of six. The task goes back, unclaimed, and the process
+moves on to whatever else is in the queue. Nothing is waiting anywhere. There
+is no coroutine parked on a socket, no timer, no row marked *in progress* —
+the execution simply is not running, and the only trace left behind is a
+pending promise and a note to wake this task when that promise settles.
 
 <Figure
   number="Fig. 1"
@@ -155,18 +157,18 @@ and a note to wake this task when that promise settles.
 
 ## Resuming
 
-Later — a second, an hour — the other process finishes and settles the promise.
-The subscription fires, the task goes back on the queue, and some worker, not
-necessarily the one that started it, claims it.
+Later — a second, an hour — the other process finishes and settles the
+promise. The subscription fires, the task goes back on the queue, and some
+worker, not necessarily the one that started the run, claims the task.
 
-That worker does the only thing it knows how to do: it runs the function from
-the top.
+That worker does the only thing any worker knows how to do: runs the function
+from the top.
 
-`agent` starts again with the same prompt. `invoke` derives the same id for the
-first call, finds it settled, and returns the recorded value without touching
-the model. Same for the second. Same for the remote call that suspended us,
-which is settled now because that is what woke us. The fourth call is pending
-and local, so this time the work actually happens.
+`agent` starts again with the same prompt. `invoke` derives the same id for
+the first call, finds the promise settled, and returns the recorded value
+without touching the model. Same for the second. Same for the remote call that
+suspended us, settled now because that settle is what woke us. The fourth call
+is pending and local, so this time the work actually happens.
 
 <Figure
   number="Fig. 2"
@@ -233,7 +235,7 @@ recovery story for each is a different piece of engineering.
 ## What that leaves
 
 Suspension is the part of the programming model that was missing. What is left
-is what makes it safe under load:
+is what makes suspension safe under load:
 
 - **The queue.** Claims, leases, and what happens when the claimant dies holding
   one. The outer half calls `claim` and `release` as though those were simple.

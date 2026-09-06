@@ -27,13 +27,13 @@ async def agent(prompt: str):
     return response["content"]
 ```
 
-That is the whole program, and it is a good program. It is also ephemeral: it
-exists only as long as the process running it. `messages`, the loop position,
-the half-finished tool call — all of it lives in one process's memory. Kill the
-process and it is gone.
+That is the whole program, and a good one. The program is also ephemeral,
+alive only as long as the process running it. `messages`, the loop position,
+the half-finished tool call — all of that lives in one process's memory. Kill
+the process and the whole lot is gone.
 
-Here is what it does to the stack. Two calls, one frame each, pushed and popped
-by `agent` and nothing underneath them:
+Here is that program on the stack. Two calls, one frame each, pushed and
+popped by `agent` and nothing underneath them:
 
 <Figure
   number="Fig. 1"
@@ -57,20 +57,20 @@ victim. When that happens you start over from the first token: every model call
 paid for twice, every tool call run twice. Nineteen successful steps are not
 recoverable, because nothing wrote them down.
 
-Notice what that program is, though: nothing in it mentions crashing. It is
-interruption-agnostic code, and it buys interruption-intolerant execution. Hold
-on to both halves of that — the rest of this post is an argument about which of
-them you are allowed to keep.
+Notice what that program already is, though: nothing in the code mentions
+crashing. Interruption-agnostic code, buying interruption-intolerant
+execution. Hold on to both halves of that — the rest of this post is an
+argument about which half you are allowed to keep.
 
 ## Where this sits
 
-Running a durable function splits in two, and it is worth naming both halves
+Running a durable function splits in two, and both halves are worth naming
 before starting, because only one of them is the subject here.
 
-`execute_until_blocked_outer` deals with the world outside the function. It
-takes a task off a queue, claims it so that no one else picks up the same work,
-runs the function, and then completes or reschedules the task depending on how
-that went:
+`execute_until_blocked_outer` deals with the world outside the function. The
+outer half takes a task off a queue, claims the task so that no one else picks
+up the same work, runs the function, and then completes or reschedules the
+task depending on how that went:
 
 ```python name="execute_until_blocked_outer"
 async def execute_until_blocked_outer(queue, store):
@@ -82,9 +82,9 @@ async def execute_until_blocked_outer(queue, store):
     await queue.complete(task)
 ```
 
-That is close to all of it. The outer half is short, and the parts of it that
-are hard — what a claim means when the claimant dies, how long a claim lasts —
-are properties of the queue, not of this function.
+That is nearly the whole of the outer half. The half is short, and the parts
+that are hard — what a claim means when the claimant dies, how long a claim
+lasts — are properties of the queue, not of this function.
 
 `execute_until_blocked_inner` is the part that runs your code: start the
 function, or restart it, and carry it forward until it finishes or reaches
@@ -135,10 +135,10 @@ class Store:
         return self._db[id]
 ```
 
-This one is a dict, so it dies with the process and is useless for the actual
-job. Ignore that for now — a real one is a database, and swapping it changes
-nothing above this line. What matters is the interface — two operations — and
-three properties of it.
+This one is a dict, so the store dies with the process and is useless for the
+actual job. Ignore that for now — a real store is a database, and swapping one
+for the other changes nothing above this line. What matters is the interface —
+two operations — and three properties of that interface.
 
 The param is on the promise so that a process which did not make the call can
 still make it — an id on its own does not say what to run.
@@ -164,10 +164,11 @@ Nothing after the first create changes the param, and nothing after the first
 settle changes the outcome. Read down the right-hand column and the three
 properties name themselves.
 
-**`create` is idempotent.** Call it once or a thousand times with the same id
-and you get the same promise, whatever param you pass after the first — the
-first one is of record too. This is what makes replay work: a restarted program
-calls `create` on ids that already exist and gets back what happened last time.
+**`create` is idempotent.** Call `create` once or a thousand times with the
+same id and you get the same promise, whatever param you pass after the first
+— the first one is of record too. This is what makes replay work: a restarted
+program calls `create` on ids that already exist and gets back what happened
+last time.
 
 **Settling is first-writer-wins.** `settle` moves a pending promise to
 `RESOLVED` or `REJECTED`, and refuses to move a settled one anywhere. A step
@@ -179,12 +180,12 @@ write — which, if someone beat you to it, is their outcome and not the one you
 just passed in. So the rule at every call site is: settle, then read what came
 back, then return or raise from that. Never from your local result.
 
-Skipping it looks harmless until two workers run the same step. Worker A calls
-the model and gets a response. Worker B calls the model and its request times
-out. Both settle the promise; the store keeps whichever landed first, say A's
-value. If B raises its own timeout instead of reading back, the two workers now
-disagree about what that step did, and they carry that disagreement forward into
-two different message histories for the same run.
+Skipping the read-back looks harmless until two workers run the same step.
+Worker A calls the model and gets a response. Worker B calls the model and the
+request times out. Both settle the promise; the store keeps whichever landed
+first, say A's value. If B raises its own timeout instead of reading back, the
+two workers now disagree about what that step did, and carry that disagreement
+forward into two different message histories for the same run.
 
 <PullQuote>The promise is the record. If you do not read it, you are not using it.</PullQuote>
 
@@ -225,9 +226,9 @@ run.
 
 </Details>
 
-Everything else in a durable execution engine is a policy on top of these three
-properties. That is the claim of this post, and it is worth being suspicious of,
-so watch how far it goes.
+Everything else in a durable execution engine is a policy on top of these
+three properties. That is the claim of this post, and worth being suspicious
+of, so watch how far the claim goes.
 
 ### Wrapping by hand
 
@@ -302,11 +303,11 @@ async def agent(prompt: str, store: Store, run_id: str):
     return response["content"]
 ```
 
-This works. It is what most teams end up with, and it is correct as written.
-There is nothing wrong with it except the cost.
+This works. Most teams end up here, and the code is correct as written.
+Nothing is wrong with the approach except the cost.
 
-Here is what it does to the stack for one call, while `agent` is working through
-`await llm(messages)`.
+Here is what the bookkeeping does to the stack for one call, while `agent` is
+working through `await llm(messages)`.
 
 <Figure
   number="Fig. 2"
@@ -325,16 +326,16 @@ Here is what it does to the stack for one call, while `agent` is working through
   />
 </Figure>
 
-Three things happen, in that order, and all three happen in `agent`'s own frame.
-The bookkeeping is not underneath the business logic, it is interleaved with it.
-That is not a metaphor for the maintenance problem, it is the maintenance
-problem: there is no layer to fix, only call sites.
+Three things happen, in that order, and all three happen in `agent`'s own
+frame. The bookkeeping is not underneath the business logic but interleaved
+with it. That is not a metaphor for the maintenance problem. That is the
+maintenance problem: there is no layer to fix, only call sites.
 
 Note the `p =` on both settle branches. That assignment is the whole third
-property. Write `store.settle(id, RESOLVED, value)` without it and the code still runs,
-still passes tests, and quietly returns local outcomes that the store disagrees
-with. It fails only when two workers overlap, which is exactly the case the
-store exists for.
+property. Write `store.settle(id, RESOLVED, value)` without the assignment and
+the code still runs, still passes tests, and quietly returns local outcomes
+the store disagrees with. The failure comes only when two workers overlap,
+which is exactly the case the store exists for.
 
 The obvious cost is that fourteen lines of agent became sixty-four. Everything
 between the rules is bookkeeping; what is left outside them is the program you
@@ -342,9 +343,9 @@ meant to write — eight lines of it, with its three calls swallowed by the
 blocks. Three call sites, three copies of the same block.
 
 This is interruption-aware code: the program is now written in terms of the
-interruptions it has to survive. It does buy interruption-tolerant execution,
-which is what you wanted. The awareness is the price, and it is charged at every
-call site.
+interruptions the program has to survive. The trade does buy
+interruption-tolerant execution, which is what you wanted. The awareness is
+the price, and the price is charged at every call site.
 
 The duplication part is easy to fix — factor it out:
 
@@ -369,20 +370,20 @@ Which turns every call site into one line:
 response = await durable(store, f"{run_id}.{step}", llm, messages)
 ```
 
-Good. The duplication is gone, and the read-back is now written once instead of
-at every call site. It also changes the picture above: create, call, and settle
-now happen in `durable`'s frame, one level below `agent`. Hold onto that, it is
-where this is going.
+Good. The duplication is gone, and the read-back is now written once instead
+of at every call site. The helper also changes the picture above: create,
+call, and settle now happen in `durable`'s frame, one level below `agent`.
+Hold on to that; that is where this is going.
 
 Three things are not gone.
 
-**The store and the id are part of the signature.** `agent` needs a `store` and
-a `run_id` to be durable, so every caller needs them — and so does everything
-`agent` calls, which is why `llm` and the tools now take them too, and why they
-must pass them on again to anything they call. The id handed down is the parent
-of the ids that come back: step `run1.2` creates `run1.2.1` beneath it. That is
-how durability composes, and it is also how it leaks: upward through the type of
-every function that participates in it.
+**The store and the id are part of the signature.** `agent` needs a `store`
+and a `run_id` to be durable, so every caller needs them — and so does
+everything `agent` calls, which is why `llm` and the tools now take them too,
+and why they must pass them on again to anything they call. The id handed down
+is the parent of the ids that come back: step `run1.2` creates `run1.2.1`
+beneath. That is how durability composes, and also how durability leaks:
+upward through the type of every function that participates.
 
 **The id is a counter, and the counter has to be right.** In a straight line of
 code you can name your steps `"plan"`, `"search"`, `"report"`. In a loop there
@@ -396,12 +397,13 @@ from the first run, and the agent resumes with someone else's answer. No test
 catches this; it shows up as an agent that occasionally continues a conversation
 it never had.
 
-**A step can still run twice.** Between `llm(messages)` returning and the settle
-committing, the process can die. The call happened, the record did not, and on
-restart you make it again. You can shrink that window but you cannot close it,
-so the honest position is that steps execute at least once, and anything with an
-external effect has to tolerate it. First-writer-wins plus reading back is what
-keeps that from turning into disagreement.
+**A step can still run twice.** Between `llm(messages)` returning and the
+settle committing, the process can die. The call happened, the record did not,
+and on restart you make the call again. You can shrink that window but you
+cannot close the window, so the honest position is that steps execute at least
+once, and anything with an external effect has to tolerate that.
+First-writer-wins plus reading back is what keeps at-least-once from turning
+into disagreement.
 
 The third one is a property of the problem, not of this approach — it does not
 change in the next section. The first two do.
@@ -410,12 +412,12 @@ change in the next section. The first two do.
 
 ## Interruption-agnostic code
 
-Look at what `durable` actually does. It takes an identity, checks whether an
-outcome is known, produces one if it is not, records it, and reports whatever
-the store ended up holding. Nothing in it mentions agents, models, or tools. It
-is not specific to this program, and there is no version of it that would be —
-the shape is the same for every call in every durable function anyone will ever
-write.
+Look at what `durable` actually does: takes an identity, checks whether an
+outcome is known, produces one if not, records the outcome, and reports
+whatever the store ended up holding. Nothing in the helper mentions agents,
+models, or tools. No version of the helper would be specific to this program —
+the shape is the same for every call in every durable function anyone will
+ever write.
 
 The best solution is to stop threading that by hand and make it the primitive.
 Persist promises, and let the call sites use them.
@@ -439,11 +441,11 @@ async def agent(prompt: str):
 ```
 
 Same program as the top of this post. The bookkeeping did not move into a
-helper; it moved under the language. `await llm(messages)` derives an id,
-creates the promise, runs the call if it is pending, settles it, reads it back,
-and returns or raises from the stored outcome. A crash and restart replays the
-function, finds the promises that survived, and skips past the work they
-represent.
+helper; the bookkeeping moved under the language. `await llm(messages)`
+derives an id, creates the promise, runs the call if the promise is pending,
+settles the promise, reads back what the store holds, and returns or raises
+from that. A crash and restart replays the function, finds the promises that
+survived, and skips past the work they represent.
 
 Interruption-agnostic code, interruption-tolerant execution. Nothing about the
 guarantee changed between this section and the last one — what moved is where
@@ -471,13 +473,13 @@ Here is what that does to the stack for the same call.
   />
 </Figure>
 
-The call site no longer calls `llm`. It calls `invoke`, and `invoke` is the
-runtime's frame — it derives the id, creates the promise, calls the real
-function, and settles the promise with whatever came back. The frames above
+The call site no longer calls `llm` but `invoke`, and `invoke` is the
+runtime's frame — deriving the id, creating the promise, calling the real
+function, and settling the promise with whatever came back. The frames above
 `invoke` are always these three, in this order, whatever the call underneath
-happens to be. That is the manual diagram with one frame slid underneath it —
-the same frame `durable` pushed, except you no longer pass it a store or an id,
-and you no longer have to remember to call it.
+happens to be. That is the manual diagram with one frame slid underneath, the
+same frame `durable` pushed, except you no longer pass a store or an id and no
+longer have to remember to call the thing at all.
 
 Step 2 is the interesting one on a restart. `invoke` derives the same id, finds
 the promise already settled from a previous life of this program, and returns
@@ -487,12 +489,12 @@ Every frame in that picture disappears when the process dies. The promise
 created in step 3 does not. That is the entire trick: the stack is ephemeral, so
 put the record somewhere the stack is not.
 
-The store is gone from the signature — the decorator supplies it. The counter is
-gone too. It still exists, but it is maintained by code whose only job is to
-maintain it, so it is computed the same way on every replay rather than
+The store is gone from the signature — the decorator supplies the store. The
+counter is gone too. The counter still exists, maintained by code whose only
+job is maintaining it, so the same id is computed on every replay rather than
 depending on you not having written an `if` in the wrong place. And the `p =`
 you have to remember thirty times is written once, in the runtime, where
-forgetting it is a bug someone else already found.
+forgetting is a bug someone else already found.
 
 ## Why promises
 

@@ -225,6 +225,8 @@ body {
 
 .card-lang { color: var(--accent); }
 
+.card pre .kw { color: var(--code-kw); }
+
 .card pre {
   margin: 0;
   padding: 18px 16px;

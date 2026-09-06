@@ -11,11 +11,13 @@
   --accent-soft: rgba(74, 107, 143, 0.24);
   --grey-1: #6b7075;
   --grey-2: #8e9398;
+  --code-kw: #7f858b;
   --measure: 720px;
   --wide: 1180px;
 }
 
 [data-theme='dark'] {
+  --code-kw: #878d93;
   --bg: #111315;
   --card: #181a1d;
   --ink: #e4e6e9;
@@ -34,6 +36,7 @@
    JS has not run — print, crawlers, a blocked script. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    --code-kw: #878d93;
     --bg: #111315;
     --card: #181a1d;
     --ink: #e4e6e9;
