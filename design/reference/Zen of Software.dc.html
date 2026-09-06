@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;1,8..60,300;1,8..60,400&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300;1,6..72,400&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #fcfcfd; }
+  body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; font-family: 'Source Serif 4', Georgia, serif; }
+  [data-type="serif"] { font-family: 'Source Serif 4', Georgia, serif; }
+  [data-type="sans"] { font-family: 'Instrument Sans', Helvetica, Arial, sans-serif; letter-spacing: -0.005em; }
+  [data-type="sans"] h1, [data-type="sans"] h2 { letter-spacing: -0.026em; font-weight: 500; }
+  [data-type="sans"] p { font-size: 18.5px; }
+  [data-type="classic"] { font-family: 'Newsreader', Georgia, serif; }
+  * { box-sizing: border-box; }
+  a { color: var(--ink, #26282b); text-decoration: none; border-bottom: 1px solid var(--accentSoft, rgba(74,107,143,0.4)); transition: border-color 160ms ease, color 160ms ease; }
+  a:hover { color: var(--accent, #4a6b8f); border-bottom-color: var(--accent, #4a6b8f); }
+  ::selection { background: var(--accentSoft, rgba(74,107,143,0.22)); }
+  @keyframes zos-rise { from { transform: translateY(12px); } to { transform: none; } }
+  [data-reveal] { opacity: 1; }
+  .zos-armed [data-reveal] { transition: opacity 700ms ease, transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .zos-armed [data-reveal]:not(.zos-in) { opacity: 0; transform: translateY(12px); }
+  @media print { [data-reveal] { opacity: 1 !important; transform: none !important; } }
+  @media (prefers-reduced-motion: reduce) {
+    [data-reveal] { opacity: 1 !important; transform: none !important; transition: none !important; }
+    [data-hero] { animation: none !important; }
+  }
+  [data-justify="on"] p { text-align: justify; text-justify: inter-word; hyphens: auto; -webkit-hyphens: auto; }
+  [data-justify="on"] figcaption, [data-justify="on"] blockquote p, [data-justify="on"] aside, [data-justify="on"] pre { text-align: left; hyphens: manual; }
+  [data-sidenote] { position: absolute; top: 30px; left: 100%; width: 170px; margin-left: 40px; padding-left: 14px; border-left: 1px solid var(--rule, rgba(38,40,43,0.14)); }
+  @media (max-width: 1160px) {
+    [data-sidenote] { position: static; width: auto; max-width: 32em; margin: 20px 0 0; padding-left: 14px; }
+  }
+  .zos-armed [data-reveal].zos-in { opacity: 1; transform: none; }
+</style>
+</helmet>
+
+<div lang="en" data-justify="{{ justifyMode }}" data-type="{{ typeMode }}" style="--accent: {{ accent }}; --accentSoft: {{ accentSoft }}; --bg: {{ bg }}; --card: {{ card }}; --ink: {{ ink }}; --muted: {{ muted }}; --rule: {{ rule }}; --measure: {{ measure }}px; background: var(--bg, #fcfcfd); color: var(--ink, #26282b); min-height: 100vh; overflow-x: clip;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 30px 40px; max-width: 1180px; margin: 0 auto;">
+    <a href="#" onClick="{{ goPost }}" style="border: none; display: flex; align-items: center; gap: 11px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13px; color: var(--muted, #5f6469);">
+      <span style="display: block; width: 9px; height: 9px; background: var(--accent, #4a6b8f); transform: rotate(45deg);"></span>
+      <span>scattered thoughts on paper</span>
+    </a>
+    <nav style="display: flex; align-items: center; gap: 26px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13px; color: var(--muted, #5f6469);">
+      <a href="#" onClick="{{ goIndex }}" style="border: none;">Writing</a>
+      <a href="#" onClick="{{ goAbout }}" style="border: none;">About</a>
+      <button onClick="{{ toggleTheme }}" style="border: 1px solid var(--rule, rgba(38,40,43,0.14)); background: transparent; color: var(--muted, #5f6469); font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12px; padding: 5px 11px; border-radius: 999px; cursor: pointer;">{{ themeLabel }}</button>
+    </nav>
+  </header>
+
+  <div style="max-width: 1180px; margin: 0 auto; padding: 0 40px;">
+    <div style="height: 1px; background: var(--rule, rgba(38,40,43,0.11));"></div>
+  </div>
+
+  <sc-if value="{{ isPost }}" hint-placeholder-val="{{ true }}">
+  <main style="max-width: var(--measure, 720px); margin: 0 auto; padding: 100px 24px 40px; position: relative;">
+
+    <div style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted, #8e9398); display: flex; gap: 14px; align-items: center; animation: zos-rise 700ms ease;" data-hero="">
+      <span>Essay</span>
+      <span style="display: block; width: 18px; height: 1px; background: var(--rule, rgba(38,40,43,0.2));"></span>
+      <span>September 2026</span>
+    </div>
+
+    <h1 style="font-weight: 400; font-size: 56px; line-height: 1.06; letter-spacing: -0.022em; margin: 22px 0 0; text-wrap: balance; animation: zos-rise 700ms 60ms ease;">The Zen of Software</h1>
+
+    <p style="font-style: italic; font-weight: 300; font-size: 21px; line-height: 1.5; color: var(--muted, #5f6469); margin: 20px 0 0; max-width: 34em; animation: zos-rise 700ms 120ms ease;">A state, an action, an answer — and what each definition after them makes impossible.</p>
+
+    <div style="display: flex; align-items: center; gap: 12px; margin: 38px 0 0; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13px; color: var(--muted, #5f6469); animation: zos-rise 700ms 180ms ease;">
+      <span>6 min read</span>
+      <span style="opacity: 0.5;">·</span>
+      <span>Sept 5, 2026</span>
+    </div>
+
+    <div style="height: 68px;"></div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">A system is not its code. Fix three types — what a state is, what can be asked of it, what it answers — and a moment records all three.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>StateAction</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">axiom State  : Type
+axiom Action : Type
+axiom Output : Type
+
+structure StateAction where
+  state  : State
+  action : Action
+  output : Output
+
+abbrev Trace := Nat → StateAction</pre>
+    </div>
+
+    <figure data-reveal="" style="margin: 48px 0 0; padding: 0;">
+      <div style="border: 1px solid var(--rule, rgba(38,40,43,0.11)); background: var(--card, #ffffff); border-radius: 3px; padding: 34px 26px 30px;">
+        <div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 18px;">
+          <div style="border: 1px solid var(--rule, rgba(38,40,43,0.14)); border-radius: 2px; padding: 14px 16px; text-align: center;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--ink, #26282b);">state</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--muted, #8e9398); margin-top: 5px;">t</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 130px;">
+            <div style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent, #4a6b8f);">action</div>
+            <div style="display: flex; align-items: center; gap: 6px; width: 100%;">
+              <span style="flex: 1; height: 1px; background: var(--accent, #4a6b8f); opacity: 0.55;"></span>
+              <span style="width: 5px; height: 5px; background: var(--accent, #4a6b8f); transform: rotate(45deg);"></span>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted, #6b7075); display: flex; gap: 8px;">
+              <span>next : State → Action → State × Output</span>
+            </div>
+          </div>
+          <div style="border: 1px solid var(--rule, rgba(38,40,43,0.14)); border-radius: 2px; padding: 14px 16px; text-align: center;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--ink, #26282b);">state</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--muted, #8e9398); margin-top: 5px;">t + 1</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--accent, #4a6b8f); margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--rule, rgba(38,40,43,0.11));">+ output</div>
+          </div>
+        </div>
+      </div>
+      <figcaption style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12.5px; line-height: 1.6; color: var(--muted, #6b7075); margin: 14px 0 0; display: flex; gap: 10px;">
+        <span style="color: var(--accent, #4a6b8f); flex: none;">Fig. 1</span>
+        <span>One transition of <code style="font-family: 'JetBrains Mono', monospace;">next</code>. It is total, so every action has an answer — and the answer, not the state, is the part anyone outside can see.</span>
+      </figcaption>
+    </figure>
+
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">A trace alone is just a list; what makes one real is a place to begin and a total rule that turns a state and an action into the next state and an answer.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Next, Valid</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">abbrev Next := State → Action → State × Output
+
+def Valid (init : State) (next : Next)
+    (trace : Trace) : Prop :=
+  (trace 0).state = init
+  ∧ ∀ t : Nat,
+      next (trace t).state (trace t).action
+        = ((trace (t + 1)).state, (trace t).output)</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">Put <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.82em;">init</code> and <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.82em;">next</code> in one place and the object gets a name; a machine does not describe behavior, it generates it.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Machine, Runs</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">structure Machine where
+  init : State
+  next : Next
+
+def Runs (m : Machine) (tr : Trace) : Prop :=
+  Valid m.init m.next tr</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">But only part of a trace is anyone else’s business. Strip the states — they are ours — and what is left is the observable behavior: what was asked, and what came back.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Behavior, Abstracts</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">abbrev Behavior := Nat → Action × Output
+
+def observe (tr : Trace) : Behavior :=
+  fun t => ((tr t).action, (tr t).output)
+
+def Abstracts (spec impl : Machine) : Prop :=
+  ∀ tr, Runs impl tr →
+    ∃ tr', Runs spec tr' ∧ observe tr' = observe tr</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 26px 0 0;">No abstraction function anywhere in that. A specification and an implementation are not different kinds of document — they are two machines, and one stands for the other when nothing you can ask will tell them apart.</p>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">It is still a claim about infinitely many traces, so in practice you exhibit an abstraction function and prove a single commuting square.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Abs, Refines</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">abbrev Abs := State → State
+
+def Refines (spec impl : Machine) (abs : Abs) : Prop :=
+  abs impl.init = spec.init
+  ∧ ∀ s a,
+      (abs (impl.next s a).1, (impl.next s a).2)
+        = spec.next (abs s) a</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 26px 0 0;"><code style="font-family: 'JetBrains Mono', monospace; font-size: 0.82em;">Refines</code> implies <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.82em;">Abstracts</code>, and not the other way round — which is the honest shape of every proof technique. Both are reflexive and transitive, so machines are ordered: <em>specification</em> is not a kind of artifact but a position, and the same object specifies what implements it and implements what specifies it.</p>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">Proving that is expensive, so mostly we sample it — and sampling needs one more judgement, because the rule answers every action, including the absurd ones, while which actions <em>should</em> be asked is ours to decide.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Legal, Broken</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">abbrev Legal := State → Action → Bool
+
+/-- Does the trace break in its first `n` steps? -/
+def Broken [BEq State] [BEq Output]
+    (init : State) (next : Next) (legal : Legal)
+    (trace : Trace) (n : Nat) : Bool :=
+  !((trace 0).state == init)
+  || (List.range n).any fun t =>
+       legal (trace t).state (trace t).action
+       && !(next (trace t).state (trace t).action
+              == ((trace (t + 1)).state, (trace t).output))</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">So a test is not a function or a fixture: it is a list of actions you feed in, and a trace is what comes out.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Test, run</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">abbrev Test := List Action
+
+def run (init : State) (next : Next) (test : Test) :
+    List StateAction :=
+  (test.foldl
+    (fun (acc, s) a =>
+      let (s', o) := next s a
+      (acc ++ [{ state := s, action := a, output := o }], s'))
+    ([], init)).1</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">Which lets us ask the only real question about a suite — if every test in it passes, do we know the system is right?</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Complete</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">abbrev Sut := Test → List StateAction
+
+variable (sut : Sut)
+variable (init : State) (next : Next)
+
+def Passes (test : Test) : Prop :=
+  sut test = run init next test
+
+def Complete (suite : List Test) : Prop :=
+  (∀ t ∈ suite, Passes sut init next t) →
+    ∀ t, Passes sut init next t</pre>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">Which is the same relation as before, narrowed to a finite list. <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.82em;">Passes</code> compares one behavior; <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.82em;">Abstracts</code> compares all of them at once. Sampled or proved.</p>
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin: 76px 0 0;">
+      <span style="display: block; width: 40px; height: 1px; background: var(--rule, rgba(38,40,43,0.14));"></span>
+      <span style="display: block; width: 5px; height: 5px; background: var(--accent, #4a6b8f); transform: rotate(45deg); opacity: 0.75;"></span>
+      <span style="display: block; width: 40px; height: 1px; background: var(--rule, rgba(38,40,43,0.14));"></span>
+    </div>
+  </main>
+  </sc-if>
+
+
+  <sc-if value="{{ isIndex }}" hint-placeholder-val="{{ false }}">
+  <main style="max-width: var(--measure, 720px); margin: 0 auto; padding: 100px 24px 40px;">
+    <h1 style="font-weight: 400; font-size: 44px; line-height: 1.1; letter-spacing: -0.02em; margin: 0;">Writing</h1>
+    <p style="font-style: italic; font-weight: 300; font-size: 20px; line-height: 1.5; color: var(--muted, #5f6469); margin: 16px 0 0;">Short pieces, mostly about keeping things small.</p>
+
+    <div style="margin: 64px 0 0; display: flex; flex-direction: column;">
+      <a href="#" onClick="{{ goPost }}" style="border: none; display: grid; grid-template-columns: 92px 1fr; gap: 20px; padding: 26px 0; border-top: 1px solid var(--rule, rgba(38,40,43,0.11));">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #8e9398); padding-top: 8px;">2026.09</span>
+        <span>
+          <span style="display: block; font-size: 25px; line-height: 1.3;">The Zen of Software</span>
+          <span style="display: block; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13.5px; line-height: 1.6; color: var(--muted, #6b7075); margin-top: 7px;">A state, an action, and a total rule — and what each definition makes impossible.</span>
+        </span>
+      </a>
+      <a href="#" style="border: none; display: grid; grid-template-columns: 92px 1fr; gap: 20px; padding: 26px 0; border-top: 1px solid var(--rule, rgba(38,40,43,0.11));">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #8e9398); padding-top: 8px;">2026.07</span>
+        <span>
+          <span style="display: block; font-size: 25px; line-height: 1.3;">On writing the interface first</span>
+          <span style="display: block; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13.5px; line-height: 1.6; color: var(--muted, #6b7075); margin-top: 7px;">The API is the design document nobody admits to writing.</span>
+        </span>
+      </a>
+      <a href="#" style="border: none; display: grid; grid-template-columns: 92px 1fr; gap: 20px; padding: 26px 0; border-top: 1px solid var(--rule, rgba(38,40,43,0.11));">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #8e9398); padding-top: 8px;">2026.05</span>
+        <span>
+          <span style="display: block; font-size: 25px; line-height: 1.3;">Latency is a feeling</span>
+          <span style="display: block; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13.5px; line-height: 1.6; color: var(--muted, #6b7075); margin-top: 7px;">Notes from a month spent staring at percentiles.</span>
+        </span>
+      </a>
+      <a href="#" style="border: none; display: grid; grid-template-columns: 92px 1fr; gap: 20px; padding: 26px 0; border-top: 1px solid var(--rule, rgba(38,40,43,0.11)); border-bottom: 1px solid var(--rule, rgba(38,40,43,0.11));">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #8e9398); padding-top: 8px;">2026.02</span>
+        <span>
+          <span style="display: block; font-size: 25px; line-height: 1.3;">Small tools, sharp edges</span>
+          <span style="display: block; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13.5px; line-height: 1.6; color: var(--muted, #6b7075); margin-top: 7px;">In defense of software that assumes you know what you are doing.</span>
+        </span>
+      </a>
+    </div>
+  </main>
+  </sc-if>
+
+  <sc-if value="{{ isAbout }}" hint-placeholder-val="{{ false }}">
+  <main style="max-width: var(--measure, 720px); margin: 0 auto; padding: 100px 24px 40px;">
+    <h1 style="font-weight: 400; font-size: 44px; line-height: 1.1; letter-spacing: -0.02em; margin: 0;">About</h1>
+
+    <div style="margin: 44px 0 0; height: 260px; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; background: var(--card, #ffffff);">
+      {{ stripePlaceholderTall }}
+      <span style="position: relative; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted, #6b7075); background: var(--bg, #fcfcfd); border: 1px solid var(--rule, rgba(38,40,43,0.11)); padding: 7px 12px; border-radius: 2px;">drop portrait here</span>
+    </div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 40px 0 0;">I write software and, occasionally, about it.</p>
+    <p style="font-size: 20px; line-height: 1.74; margin: 26px 0 0;">This is a place for the thinking that does not fit in a commit message — mostly notes on simplicity, interfaces, and the slow work of keeping systems legible.</p>
+    <p style="font-size: 20px; line-height: 1.74; margin: 26px 0 0;">Nothing here is finished. That is the format.</p>
+
+    <div style="margin: 56px 0 0; padding-top: 26px; border-top: 1px solid var(--rule, rgba(38,40,43,0.11)); display: flex; flex-direction: column; gap: 12px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 14px;">
+      <div style="display: grid; grid-template-columns: 90px 1fr; gap: 16px;"><span style="color: var(--muted, #8e9398);">Email</span><a href="#">hello@example.com</a></div>
+      <div style="display: grid; grid-template-columns: 90px 1fr; gap: 16px;"><span style="color: var(--muted, #8e9398);">Elsewhere</span><span style="display: flex; gap: 16px;"><a href="#">GitHub</a><a href="#">RSS</a></span></div>
+    </div>
+  </main>
+  </sc-if>
+
+  <footer style="max-width: var(--measure, 720px); margin: 0 auto; padding: 96px 24px 120px;">
+    <div style="height: 1px; background: var(--rule, rgba(38,40,43,0.11)); margin: 0 0 20px;"></div>
+    <div style="display: flex; justify-content: space-between; gap: 20px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12.5px; color: var(--muted, #8e9398);">
+      <span>scattered thoughts on paper</span>
+      <span style="display: flex; gap: 18px;"><a href="#" style="border: none;">RSS</a><a href="#" style="border: none;">GitHub</a></span>
+    </div>
+  </footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;typeface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Source Serif&quot;,&quot;options&quot;:[&quot;Source Serif&quot;,&quot;Sans&quot;,&quot;Newsreader&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Typography&quot;},&quot;justify&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Typography&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#4a6b8f&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#4a6b8f&quot;,&quot;#3f6b57&quot;,&quot;#6b6f76&quot;,&quot;#8a5a7a&quot;],&quot;section&quot;:&quot;Look&quot;},&quot;measure&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:720,&quot;min&quot;:600,&quot;max&quot;:820,&quot;step&quot;:10,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;dark&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Look&quot;}}">
+const E = React.createElement;
+
+const LIGHT = { bg: '#fcfcfd', card: '#ffffff', ink: '#26282b', muted: '#5f6469', rule: 'rgba(38,40,43,0.11)', bar: '#d3d5d8', stripeA: '#f5f6f7', stripeB: '#e9eaec' };
+const DARK  = { bg: '#111315', card: '#181a1d', ink: '#e4e6e9', muted: '#949a9f', rule: 'rgba(228,230,233,0.14)', bar: '#32363a', stripeA: '#181a1d', stripeB: '#202427' };
+
+class Component extends DCLogic {
+  state = { screen: 'post', dark: false };
+
+  componentDidMount() {
+    this.state.dark = !!this.props.dark;
+    this.forceUpdate();
+
+    this.onScroll = () => this.watch();
+    window.addEventListener('scroll', this.onScroll, { passive: true });
+    window.addEventListener('resize', this.onScroll);
+    this.onScroll();
+
+    // only hide-then-reveal once JS is confirmed running AND the animation clock advances
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const t0 = document.timeline.currentTime;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (document.timeline.currentTime > t0) document.documentElement.classList.add('zos-armed');
+        this.watch();
+      }));
+    }
+
+    this.obs = new IntersectionObserver(entries => {
+      entries.forEach(en => { if (en.isIntersecting) { en.target.classList.add('zos-in'); this.obs.unobserve(en.target); } });
+    }, { rootMargin: '0px 0px -12% 0px' });
+    this.watch();
+  }
+
+  componentDidUpdate() { this.watch(); }
+
+  watch() {
+    if (!this.obs) return;
+    document.querySelectorAll('[data-reveal]:not(.zos-in)').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 0 || r.top < window.innerHeight * 0.88) { el.classList.add('zos-in'); return; }
+      this.obs.observe(el);
+    });
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('scroll', this.onScroll);
+    window.removeEventListener('resize', this.onScroll);
+    if (this.obs) this.obs.disconnect();
+  }
+
+  theme() { return this.state.dark ? DARK : LIGHT; }
+  accent() {
+    if (this.props.accent) return this.props.accent;
+    return this.state.dark ? '#7d9fc4' : '#4a6b8f';
+  }
+
+  stripes(id) {
+    const th = this.theme();
+    return E('svg', { width: '100%', height: '100%', preserveAspectRatio: 'none', style: { position: 'absolute', inset: 0, opacity: 0.85 } },
+      E('defs', null,
+        E('pattern', { id, width: 10, height: 10, patternTransform: 'rotate(45)', patternUnits: 'userSpaceOnUse' },
+          E('rect', { width: 10, height: 10, fill: th.stripeA }),
+          E('rect', { width: 4, height: 10, fill: th.stripeB })
+        )
+      ),
+      E('rect', { width: '100%', height: '100%', fill: 'url(#' + id + ')' })
+    );
+  }
+
+  // Fig 1 — bars draw in as you scroll; the tail runs hot
+
+
+
+  go(screen) {
+    return e => {
+      e.preventDefault();
+      this.setState({ screen }, () => window.scrollTo(0, 0));
+    };
+  }
+
+  renderVals() {
+    const th = this.theme(), accent = this.accent();
+    return {
+      accent,
+      accentSoft: accent + '3d',
+      bg: th.bg, card: th.card, ink: th.ink, muted: th.muted, rule: th.rule,
+      measure: this.props.measure ?? 720,
+      justifyMode: this.props.justify ? 'on' : 'off',
+      typeMode: this.props.typeface === 'Sans' ? 'sans' : (this.props.typeface === 'Newsreader' ? 'classic' : 'serif'),
+      isPost: this.state.screen === 'post',
+      isIndex: this.state.screen === 'index',
+      isAbout: this.state.screen === 'about',
+      goPost: this.go('post'),
+      goIndex: this.go('index'),
+      goAbout: this.go('about'),
+      toggleTheme: () => this.setState(s => ({ dark: !s.dark })),
+      themeLabel: this.state.dark ? 'Light' : 'Dark',
+      stripePlaceholderTall: this.stripes('zosStripeB')
+    };
+  }
+}
+
+</script>
+</body>
+</html>

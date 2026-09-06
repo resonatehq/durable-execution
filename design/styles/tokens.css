@@ -1,0 +1,31 @@
+:root {
+  --bg: #fcfcfd;
+  --card: #ffffff;
+  --ink: #26282b;
+  --muted: #5f6469;
+  --rule: rgba(38, 40, 43, 0.11);
+  --rule-strong: rgba(38, 40, 43, 0.14);
+  --rule-card: rgba(38, 40, 43, 0.09);
+  --rule-tick: rgba(38, 40, 43, 0.2);
+  --accent: #4a6b8f;
+  --accent-soft: rgba(74, 107, 143, 0.24);
+  --grey-1: #6b7075;
+  --grey-2: #8e9398;
+  --measure: 720px;
+  --wide: 1180px;
+}
+
+[data-theme='dark'] {
+  --bg: #111315;
+  --card: #181a1d;
+  --ink: #e4e6e9;
+  --muted: #949a9f;
+  --rule: rgba(228, 230, 233, 0.14);
+  --rule-strong: rgba(228, 230, 233, 0.18);
+  --rule-card: rgba(228, 230, 233, 0.1);
+  --rule-tick: rgba(228, 230, 233, 0.25);
+  --accent: #7d9fc4;
+  --accent-soft: rgba(125, 159, 196, 0.24);
+  --grey-1: #949a9f;
+  --grey-2: #8e9398;
+}

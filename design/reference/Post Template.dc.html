@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;1,8..60,300;1,8..60,400&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #fcfcfd; }
+  body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; font-family: 'Source Serif 4', Georgia, serif; }
+  * { box-sizing: border-box; }
+  a { color: var(--ink, #26282b); text-decoration: none; border-bottom: 1px solid var(--accentSoft, rgba(74,107,143,0.4)); transition: border-color 160ms ease, color 160ms ease; }
+  a:hover { color: var(--accent, #4a6b8f); border-bottom-color: var(--accent, #4a6b8f); }
+  ::selection { background: var(--accentSoft, rgba(74,107,143,0.22)); }
+  @keyframes zos-rise { from { transform: translateY(12px); } to { transform: none; } }
+  [data-reveal] { opacity: 1; }
+  .zos-armed [data-reveal] { transition: opacity 700ms ease, transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .zos-armed [data-reveal]:not(.zos-in) { opacity: 0; transform: translateY(12px); }
+  .zos-armed [data-reveal].zos-in { opacity: 1; transform: none; }
+  @media print { [data-reveal] { opacity: 1 !important; transform: none !important; } }
+  @media (prefers-reduced-motion: reduce) {
+    [data-reveal] { opacity: 1 !important; transform: none !important; transition: none !important; }
+    [data-hero] { animation: none !important; }
+  }
+  [data-sidenote] { position: absolute; top: 30px; left: 100%; width: 170px; margin-left: 40px; padding-left: 14px; border-left: 1px solid var(--rule, rgba(38,40,43,0.14)); }
+  @media (max-width: 1160px) {
+    [data-sidenote] { position: static; width: auto; max-width: 32em; margin: 20px 0 0; padding-left: 14px; }
+  }
+</style>
+</helmet>
+
+<div lang="en" style="--accent: {{ accent }}; --accentSoft: {{ accentSoft }}; --bg: {{ bg }}; --card: {{ card }}; --ink: {{ ink }}; --muted: {{ muted }}; --rule: {{ rule }}; --measure: {{ measure }}px; background: var(--bg, #fcfcfd); color: var(--ink, #26282b); min-height: 100vh; overflow-x: clip;">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 30px 40px; max-width: 1180px; margin: 0 auto;">
+    <a href="/" style="border: none; display: flex; align-items: center; gap: 11px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13px; color: var(--muted, #5f6469);">
+      <span style="display: block; width: 9px; height: 9px; background: var(--accent, #4a6b8f); transform: rotate(45deg);"></span>
+      <span>scattered thoughts on paper</span>
+    </a>
+    <nav style="display: flex; align-items: center; gap: 26px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13px; color: var(--muted, #5f6469);">
+      <a href="/writing" style="border: none;">Writing</a>
+      <a href="/about" style="border: none;">About</a>
+      <button onClick="{{ toggleTheme }}" style="border: 1px solid var(--rule, rgba(38,40,43,0.14)); background: transparent; color: var(--muted, #5f6469); font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12px; padding: 5px 11px; border-radius: 999px; cursor: pointer;">{{ themeLabel }}</button>
+    </nav>
+  </header>
+
+  <div style="max-width: 1180px; margin: 0 auto; padding: 0 40px;">
+    <div style="height: 1px; background: var(--rule, rgba(38,40,43,0.11));"></div>
+  </div>
+
+  <main style="max-width: var(--measure, 720px); margin: 0 auto; padding: 100px 24px 40px; position: relative;">
+
+    <div style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted, #8e9398); display: flex; gap: 14px; align-items: center; animation: zos-rise 700ms ease;" data-hero="">
+      <span>Essay</span>
+      <span style="display: block; width: 18px; height: 1px; background: var(--rule, rgba(38,40,43,0.2));"></span>
+      <span>Month 2026</span>
+    </div>
+
+    <h1 style="font-weight: 400; font-size: 56px; line-height: 1.06; letter-spacing: -0.022em; margin: 22px 0 0; text-wrap: balance; animation: zos-rise 700ms 60ms ease;">Post title goes here</h1>
+
+    <p style="font-style: italic; font-weight: 300; font-size: 21px; line-height: 1.5; color: var(--muted, #5f6469); margin: 20px 0 0; max-width: 34em; animation: zos-rise 700ms 120ms ease;">One sentence that says what the piece argues, not what it covers.</p>
+
+    <div style="display: flex; align-items: center; gap: 12px; margin: 38px 0 0; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 13px; color: var(--muted, #5f6469); animation: zos-rise 700ms 180ms ease;">
+      <span>0 min read</span>
+      <span style="opacity: 0.5;">·</span>
+      <span>Month 0, 2026</span>
+    </div>
+
+    <div style="height: 68px;"></div>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 0;">Opening line. Short — one clause if you can manage it.</p>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 26px 0 0;">Body paragraph. The measure is 720px so that four or five of these read as a rhythm rather than a wall. Keep them short and let the white space do the pacing.</p>
+
+    <div style="position: relative;">
+      <p style="font-size: 20px; line-height: 1.74; margin: 26px 0 0;">A paragraph that earns an aside. The note sits in the right margin above 1160px and falls inline below that.</p>
+      <aside data-sidenote="" style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12.5px; line-height: 1.65; color: var(--muted, #6b7075);">Marginalia. One thought, two sentences at most.</aside>
+    </div>
+
+    <h2 style="font-weight: 400; font-size: 33px; line-height: 1.2; letter-spacing: -0.012em; margin: 84px 0 0;">A section heading</h2>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 56px 0 0;">One sentence introducing the code below. Say what it makes impossible, not what it does.</p>
+
+    <div data-reveal="" style="margin: 34px 0 0; border: 1px solid var(--rule, rgba(38,40,43,0.11)); border-radius: 3px; overflow: hidden; background: var(--card, #ffffff);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--rule, rgba(38,40,43,0.09)); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--muted, #6b7075);">
+        <span>Name</span>
+        <span style="color: var(--accent, #4a6b8f);">Lean 4</span>
+      </div>
+      <pre style="margin: 0; padding: 18px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13.5px; line-height: 1.85; color: var(--ink, #26282b); overflow-x: auto;">def example : Nat → Nat :=
+  fun n => n + 1</pre>
+    </div>
+
+    <blockquote data-reveal="" style="margin: 58px 0 0; padding: 0 0 0 26px; border-left: 2px solid var(--accent, #4a6b8f);">
+      <p style="font-weight: 300; font-style: italic; font-size: 28px; line-height: 1.38; margin: 0;">A line worth stopping on.</p>
+    </blockquote>
+
+    <figure data-reveal="" style="margin: 62px 0 0; padding: 0;">
+      <div style="border: 1px solid var(--rule, rgba(38,40,43,0.11)); background: var(--card, #ffffff); border-radius: 3px; padding: 34px 26px; min-height: 220px; display: flex; align-items: center; justify-content: center;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted, #8e9398);">animation or diagram component mounts here</span>
+      </div>
+      <figcaption style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12.5px; line-height: 1.6; color: var(--muted, #6b7075); margin: 14px 0 0; display: flex; gap: 10px;">
+        <span style="color: var(--accent, #4a6b8f); flex: none;">Fig. 1</span>
+        <span>One sentence. The caption carries the claim; the figure only illustrates it.</span>
+      </figcaption>
+    </figure>
+
+    <figure data-reveal="" style="margin: 68px auto 0; padding: 0; width: 100vw; max-width: 1180px; position: relative; left: 50%; transform: translateX(-50%);">
+      <div style="border: 1px solid var(--rule, rgba(38,40,43,0.11)); background: var(--card, #ffffff); border-radius: 3px; height: 380px; display: flex; align-items: center; justify-content: center;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted, #8e9398);">full-bleed figure — breaks the measure, stays inside 1180px</span>
+      </div>
+      <figcaption style="font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12.5px; line-height: 1.6; color: var(--muted, #6b7075); margin: 14px 0 0; display: flex; gap: 10px; max-width: var(--measure, 720px);">
+        <span style="color: var(--accent, #4a6b8f); flex: none;">Fig. 2</span>
+        <span>Use this when the figure is the argument rather than support for it.</span>
+      </figcaption>
+    </figure>
+
+    <p style="font-size: 20px; line-height: 1.74; margin: 62px 0 0;">Closing paragraph. Land it in one line if the piece has earned it.</p>
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin: 76px 0 0;">
+      <span style="display: block; width: 40px; height: 1px; background: var(--rule, rgba(38,40,43,0.14));"></span>
+      <span style="display: block; width: 5px; height: 5px; background: var(--accent, #4a6b8f); transform: rotate(45deg); opacity: 0.75;"></span>
+      <span style="display: block; width: 40px; height: 1px; background: var(--rule, rgba(38,40,43,0.14));"></span>
+    </div>
+  </main>
+
+  <footer style="max-width: var(--measure, 720px); margin: 0 auto; padding: 96px 24px 120px;">
+    <div style="height: 1px; background: var(--rule, rgba(38,40,43,0.11)); margin: 0 0 20px;"></div>
+    <div style="display: flex; justify-content: space-between; gap: 20px; font-family: 'Instrument Sans', Helvetica, sans-serif; font-size: 12.5px; color: var(--muted, #8e9398);">
+      <span>scattered thoughts on paper</span>
+      <span style="display: flex; gap: 18px;"><a href="/rss.xml" style="border: none;">RSS</a><a href="#" style="border: none;">GitHub</a></span>
+    </div>
+  </footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#4a6b8f&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#4a6b8f&quot;,&quot;#3f6b57&quot;,&quot;#6b6f76&quot;,&quot;#8a5a7a&quot;],&quot;section&quot;:&quot;Look&quot;},&quot;measure&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:720,&quot;min&quot;:600,&quot;max&quot;:820,&quot;step&quot;:10,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;dark&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Look&quot;}}">
+const LIGHT = { bg: '#fcfcfd', card: '#ffffff', ink: '#26282b', muted: '#5f6469', rule: 'rgba(38,40,43,0.11)' };
+const DARK  = { bg: '#111315', card: '#181a1d', ink: '#e4e6e9', muted: '#949a9f', rule: 'rgba(228,230,233,0.14)' };
+
+class Component extends DCLogic {
+  state = { dark: false };
+
+  componentDidMount() {
+    if (this.props.dark) this.setState({ dark: true });
+
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const t0 = document.timeline.currentTime;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (document.timeline.currentTime > t0) document.documentElement.classList.add('zos-armed');
+        this.watch();
+      }));
+    }
+
+    this.obs = new IntersectionObserver(entries => {
+      entries.forEach(en => {
+        if (en.isIntersecting) { en.target.classList.add('zos-in'); this.obs.unobserve(en.target); }
+      });
+    }, { rootMargin: '0px 0px -12% 0px' });
+
+    this.onScroll = () => this.watch();
+    window.addEventListener('scroll', this.onScroll, { passive: true });
+    this.watch();
+  }
+
+  componentDidUpdate() { this.watch(); }
+
+  watch() {
+    if (!this.obs) return;
+    document.querySelectorAll('[data-reveal]:not(.zos-in)').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 0 || r.top < window.innerHeight * 0.88) { el.classList.add('zos-in'); return; }
+      this.obs.observe(el);
+    });
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('scroll', this.onScroll);
+    if (this.obs) this.obs.disconnect();
+  }
+
+  renderVals() {
+    const th = this.state.dark ? DARK : LIGHT;
+    const accent = this.props.accent || (this.state.dark ? '#7d9fc4' : '#4a6b8f');
+    return {
+      accent,
+      accentSoft: accent + '3d',
+      bg: th.bg, card: th.card, ink: th.ink, muted: th.muted, rule: th.rule,
+      measure: this.props.measure ?? 720,
+      themeLabel: this.state.dark ? 'Light' : 'Dark',
+      toggleTheme: () => this.setState(s => ({ dark: !s.dark }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>
