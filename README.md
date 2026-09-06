@@ -57,13 +57,18 @@ Kill this program at any point and restart it. It resumes.
 ## Layout
 
 ```
-code/   the engine, built up in steps
-notes/  the reasoning: designs, proofs, dead ends
+code/     the engine, built up in steps
+notes/    the reasoning: designs, proofs, dead ends
+design/   the site, and the posts it publishes
+videos/   source video files
 ```
 
 `notes/` is the part you cannot get from reading the source. Every non-obvious
 decision in `code/` should have an entry explaining what the alternatives were and
 why they lost.
+
+Posts live in `design/content/writing` as MDX and are rendered by the site in
+`design/`. See `design/README.md` for how to add one.
 
 ## Status
 
