@@ -250,9 +250,10 @@ Here is what it does to the stack for one call, while `agent` is working through
 >
   <StackEvolution
     columns={[
-      { label: '1', frames: ['agent', 'store.create'] },
-      { label: '2', frames: ['agent', 'llm(messages)'] },
-      { label: '3', frames: ['agent', 'store.settle'] },
+      { label: '1', frames: ['agent'] },
+      { label: '2', frames: ['agent', 'store.create'] },
+      { label: '3', frames: ['agent', 'llm(messages)'] },
+      { label: '4', frames: ['agent', 'store.settle'] },
     ]}
   />
 </Figure>
@@ -372,10 +373,11 @@ Here is what that does to the stack for the same call.
   <StackEvolution
     accentFrames={['invoke']}
     columns={[
-      { label: '1', frames: ['agent', 'invoke'] },
-      { label: '2', frames: ['agent', 'invoke', 'create promise'] },
-      { label: '3', frames: ['agent', 'invoke', 'llm(messages)'] },
-      { label: '4', frames: ['agent', 'invoke', 'settle promise'] },
+      { label: '1', frames: ['agent'] },
+      { label: '2', frames: ['agent', 'invoke'] },
+      { label: '3', frames: ['agent', 'invoke', 'create promise'] },
+      { label: '4', frames: ['agent', 'invoke', 'llm(messages)'] },
+      { label: '5', frames: ['agent', 'invoke', 'settle promise'] },
     ]}
   />
 </Figure>
@@ -388,12 +390,12 @@ happens to be. That is the manual diagram with one frame slid underneath it —
 the same frame `durable` pushed, except you no longer pass it a store or an id,
 and you no longer have to remember to call it.
 
-Step 1 is the interesting one on a restart. `invoke` derives the same id, finds
+Step 2 is the interesting one on a restart. `invoke` derives the same id, finds
 the promise already settled from a previous life of this program, and returns
-its value without ever reaching step 3. The model is not called again.
+its value without ever reaching step 4. The model is not called again.
 
 Every frame in that picture disappears when the process dies. The promise
-created in step 2 does not. That is the entire trick: the stack is ephemeral, so
+created in step 3 does not. That is the entire trick: the stack is ephemeral, so
 put the record somewhere the stack is not.
 
 The store is gone from the signature — the decorator supplies it. The counter is
