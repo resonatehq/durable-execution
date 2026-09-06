@@ -1,68 +1,102 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-// Renders every column at once — that is the finished, correct diagram, and it
-// is what static export, print, and a failed hydration all show. With JS and
-// motion allowed, a highlight steps along the columns and then returns to rest,
-// so the animation departs from the resting state rather than arriving at it.
-export default function StackEvolution({ columns, accentFrames = [], interval = 1100 }) {
-  const ref = useRef(null);
-  const [active, setActive] = useState(-1);
+// Static — no JS, print, reduced motion — every state renders side by side,
+// which is the complete diagram and the correct first paint.
+//
+// With JS and motion allowed the same states become a filmstrip: one stack in
+// place, growing a frame at a time as the track slides right, from nothing up
+// to the deepest stack and back to nothing.
+export default function StackEvolution({ columns, accentFrames = [], interval = 1150 }) {
+  const wrapRef = useRef(null);
+  const trackRef = useRef(null);
+  const [animated, setAnimated] = useState(false);
+  const [active, setActive] = useState(0);
+
+  // Empty bookends only exist while animating, so the static diagram stays clean.
+  const cells = animated
+    ? [{ label: '', frames: [] }, ...columns, { label: '', frames: [] }]
+    : columns;
+
+  const centre = useCallback((index) => {
+    const wrap = wrapRef.current;
+    const track = trackRef.current;
+    if (!wrap || !track) return;
+    const cell = track.children[index];
+    if (!cell) return;
+    const offset = cell.offsetLeft + cell.offsetWidth / 2 - wrap.clientWidth / 2;
+    track.style.transform = `translateX(${-offset}px)`;
+  }, []);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    setAnimated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!animated) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
 
     let timer = null;
+    let i = 0;
 
-    const stop = () => {
-      if (timer) clearInterval(timer);
-      timer = null;
-      setActive(-1);
-    };
-
-    const start = () => {
-      if (timer) return;
-      let i = 0;
-      setActive(0);
-      timer = setInterval(() => {
-        // One extra step past the end is the rest state.
-        i = (i + 1) % (columns.length + 1);
-        setActive(i === columns.length ? -1 : i);
-      }, interval);
+    const step = () => {
+      i = (i + 1) % cells.length;
+      setActive(i);
+      centre(i);
     };
 
     const io = new IntersectionObserver(
-      ([entry]) => (entry.isIntersecting ? start() : stop()),
+      ([entry]) => {
+        if (entry.isIntersecting && !timer) {
+          timer = setInterval(step, interval);
+        } else if (!entry.isIntersecting && timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      },
       { threshold: 0.35 },
     );
-    io.observe(el);
+
+    io.observe(wrap);
+    centre(i);
+
+    const onResize = () => centre(i);
+    window.addEventListener('resize', onResize);
 
     return () => {
       io.disconnect();
-      stop();
+      if (timer) clearInterval(timer);
+      window.removeEventListener('resize', onResize);
     };
-  }, [columns.length, interval]);
+  }, [animated, cells.length, interval, centre]);
 
   return (
-    <div className="stack" ref={ref}>
-      {columns.map((col, ci) => (
-        <div key={col.label} className={`stack-col${ci === active ? ' is-active' : ''}`}>
-          <div className="stack-num">{col.label}</div>
-          <div className="stack-frames">
-            {[...col.frames].reverse().map((frame) => (
-              <div
-                key={frame}
-                className={`stack-frame${accentFrames.includes(frame) ? ' is-accent' : ''}`}
-              >
-                {frame}
-              </div>
-            ))}
+    <div className={`stack${animated ? ' is-animated' : ''}`} ref={wrapRef}>
+      <div className="stack-track" ref={trackRef}>
+        {cells.map((col, ci) => (
+          <div
+            key={`${col.label}-${ci}`}
+            className={`stack-col${animated && ci === active ? ' is-active' : ''}${
+              col.frames.length === 0 ? ' is-empty' : ''
+            }`}
+          >
+            <div className="stack-num">{col.label}</div>
+            <div className="stack-frames">
+              {[...col.frames].reverse().map((frame) => (
+                <div
+                  key={frame}
+                  className={`stack-frame${accentFrames.includes(frame) ? ' is-accent' : ''}`}
+                >
+                  {frame}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
