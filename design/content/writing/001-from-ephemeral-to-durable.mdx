@@ -16,14 +16,15 @@ async def agent(prompt: str):
     response = await llm(messages)
     messages.append(response)
 
-    while response.tool_calls:
-        for call in response.tool_calls:
-            messages.append(await tool(call))
+    while "tool" in response:
+        name, args = response["tool"]
+        result = await tools[name](**args)
+        messages.append({"role": "tool", "content": result})
 
         response = await llm(messages)
         messages.append(response)
 
-    return response.content
+    return response["content"]
 ```
 
 That is the whole program, and it is a good program. It is also ephemeral: it
@@ -229,22 +230,21 @@ async def agent(prompt: str, store: Store, run_id: str):
     response = p.value
     messages.append(response)
 
-    while response.tool_calls:
-        for call in response.tool_calls:
-            step += 1
-            id = f"{run_id}.{step}"
+    while "tool" in response:
+        name, args = response["tool"]
+        step += 1
+        id = f"{run_id}.{step}"
 
-            p = store.create(id, call)
-            if p.state == PENDING:
-                try:
-                    p = store.settle(id, RESOLVED, await tool(call))
-                except Exception as e:
-                    p = store.settle(id, REJECTED, e)
+        p = store.create(id, response["tool"])
+        if p.state == PENDING:
+            try:
+                p = store.settle(id, RESOLVED, await tools[name](**args))
+            except Exception as e:
+                p = store.settle(id, REJECTED, e)
 
-            if p.state == REJECTED:
-                raise p.value
-
-            messages.append(p.value)
+        if p.state == REJECTED:
+            raise p.value
+        messages.append({"role": "tool", "content": p.value})
 
         step += 1
         id = f"{run_id}.{step}"
@@ -261,7 +261,7 @@ async def agent(prompt: str, store: Store, run_id: str):
         response = p.value
         messages.append(response)
 
-    return response.content
+    return response["content"]
 ```
 
 This works. It is what most teams end up with, and it is correct as written.
@@ -295,8 +295,8 @@ still passes tests, and quietly returns local outcomes that the store disagrees
 with. It fails only when two workers overlap, which is exactly the case the
 store exists for.
 
-The obvious cost is that thirteen lines of agent became fifty. Three call sites,
-three copies of the same twelve lines. That part is easy to fix — factor it
+The obvious cost is that fourteen lines of agent became forty-nine. Three call
+sites, three copies of the same twelve lines. That part is easy to fix — factor it
 out:
 
 ```python name="durable"
@@ -374,14 +374,15 @@ async def agent(prompt: str):
     response = await llm(messages)
     messages.append(response)
 
-    while response.tool_calls:
-        for call in response.tool_calls:
-            messages.append(await tool(call))
+    while "tool" in response:
+        name, args = response["tool"]
+        result = await tools[name](**args)
+        messages.append({"role": "tool", "content": result})
 
         response = await llm(messages)
         messages.append(response)
 
-    return response.content
+    return response["content"]
 ```
 
 Same program as the top of this post. The bookkeeping did not move into a
