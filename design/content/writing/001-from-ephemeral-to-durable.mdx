@@ -141,12 +141,12 @@ properties name themselves.
 
 **`create` is idempotent.** Call it once or a thousand times with the same id
 and you get the same promise, whatever param you pass after the first — the
-first one is of record too. This is what makes replay work: a restarted program calls
-`create` on ids that already exist and gets back what happened last time.
+first one is of record too. This is what makes replay work: a restarted program
+calls `create` on ids that already exist and gets back what happened last time.
 
 **Settling is first-writer-wins.** `settle` moves a pending promise to
-`RESOLVED` or `REJECTED`, and refuses to move a settled one anywhere. A step that runs twice cannot
-produce two different outcomes of record.
+`RESOLVED` or `REJECTED`, and refuses to move a settled one anywhere. A step
+that runs twice cannot produce two different outcomes of record.
 
 **Settling returns the promise, and it is not necessarily yours.** This is the
 one that is easy to skip. `settle` returns whatever is in the store *after* the
@@ -167,7 +167,7 @@ The same rule covers restarts, not just races. On replay the promise may already
 be rejected from the first run. You raise the stored error. You do not call the
 model again to find out.
 
-As properties, which is how they are actually checked:
+<Details summary="the same three, as properties">
 
 ```python name="properties"
 @given(ids, values, values)
@@ -183,8 +183,10 @@ def test_first_settle_wins(id, a, b):
 @given(ids, values, values)
 def test_settled_stays_settled(id, a, b):
     s = Store(); s.create(id, a); s.settle(id, RESOLVED, a)
-    assert s.create(id).value == a == s.settle(id, REJECTED, b).value
+    assert s.create(id, b).value == a == s.settle(id, REJECTED, b).value
 ```
+
+</Details>
 
 Everything else in a durable execution engine is a policy on top of these three
 properties. That is the claim of this post, and it is worth being suspicious of,
