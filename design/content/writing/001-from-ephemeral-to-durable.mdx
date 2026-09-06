@@ -32,6 +32,24 @@ exists only as long as the process running it. `messages`, the loop position,
 the half-finished tool call — all of it lives in one process's memory. Kill the
 process and it is gone.
 
+Here is what it does to the stack. Two calls, one frame each, pushed and popped
+by `agent` and nothing underneath them:
+
+<Figure
+  number="Fig. 1"
+  caption="The whole of it. Every frame here lives in one process's memory, and none of it outlives that process."
+>
+  <StackEvolution
+    columns={[
+      { label: '1', frames: ['agent'] },
+      { label: '2', frames: ['agent', 'llm(messages)'] },
+      { label: '3', frames: ['agent'] },
+      { label: '4', frames: ['agent', 'tools[name]'] },
+      { label: '5', frames: ['agent'] },
+    ]}
+  />
+</Figure>
+
 For a function that runs in ten milliseconds, nobody cares. This one runs for
 minutes. It makes twenty model calls and a dozen tool calls, and over those
 minutes a deploy happens, a spot instance is reclaimed, an OOM killer picks a
@@ -291,7 +309,7 @@ Here is what it does to the stack for one call, while `agent` is working through
 `await llm(messages)`.
 
 <Figure
-  number="Fig. 1"
+  number="Fig. 2"
   caption="Create, call, settle — pushed and popped one at a time, all of them by agent itself."
 >
   <StackEvolution
@@ -434,7 +452,7 @@ the awareness lives. It went out of your program and into the runtime.
 Here is what that does to the stack for the same call.
 
 <Figure
-  number="Fig. 2"
+  number="Fig. 3"
   caption="The same three frames, over one that stays. invoke is pushed once and outlives all three."
 >
   <StackEvolution
@@ -517,4 +535,5 @@ project goes:
 - **At-least-once, and living with it.** The window is still there. It gets
   handled once, in one place, instead of at every call site.
 
-That is roughly five thousand lines. The next post replaces the dict.
+That is roughly five thousand lines. The next post is about the calls this
+process does not make itself.

@@ -1,0 +1,248 @@
+---
+title: From Blocking to Suspended
+dek: An RPC is a promise someone else settles — and once you see it that way, waiting stops costing a process.
+standfirst: The last post recorded work this process did. This one is about the work it does not do.
+kind: Note
+date: 2026-09-07
+readTime: 11 min read
+---
+
+The agent from the [last post](/writing/001-from-ephemeral-to-durable/) calls
+its tools in the same process it runs in. That holds until one of them does not
+belong there — a search index behind someone else's credentials, a model that
+needs a GPU this box does not have, a tool that is itself an agent and runs for
+an hour.
+
+So the call has to go somewhere else. The obvious version sends it and waits:
+
+```python name="rpc, the obvious way"
+async def rpc(store, id, target, param):
+    p = store.create(id, param)
+    await send(target, id, param)
+
+    while p.state == PENDING:
+        await sleep(0.5)
+        p = store.create(id, param)
+
+    if p.state == REJECTED:
+        raise p.value
+    return p.value
+```
+
+Two things in there are worth a second look before the objection.
+
+The loop re-reads the promise by calling `create` again. That is not a trick —
+`create` is idempotent, so after the first call it is a read that happens to be
+spelled like a write. One operation, two uses.
+
+And `send` is allowed to be sloppy. If it delivers twice, the far side calls
+`create` on the same id twice and the second one changes nothing. At-least-once
+delivery is safe here because the receiver is idempotent, which is a property we
+already had and did not have to add.
+
+## What it costs to wait
+
+The function is correct. Kill the process mid-wait and the machinery from the
+last post replays it: the promises that settled are found, the work behind them
+is skipped, and the loop picks up where it was. Interruption-tolerant, as
+before.
+
+What it is not is cheap. For the whole duration of that call, a process sits in
+a `sleep` loop holding a task nobody else can claim. If the remote tool takes
+four minutes, you have rented a process for four minutes to do nothing. If it is
+another agent, make that an hour. Scale the fleet to the number of calls
+*in flight* rather than the number of calls *running*, and most of what you are
+paying for is waiting.
+
+The usual answer is to make waiting cheaper — more coroutines per process,
+smaller runtimes, bigger boxes. That is a real engineering direction and it
+tops out where you would expect.
+
+The other answer is to stop waiting.
+
+## An RPC is a promise someone else settles
+
+Look at what the remote call actually consists of, in the vocabulary we already
+have:
+
+```python name="the whole difference"
+p = store.create(id, param)          # here
+                                     #
+store.settle(id, RESOLVED, value)    # over there, later
+```
+
+In the last post those two lines were four lines apart in the same function, on
+the same stack, in the same process. Here they are in different processes, and
+possibly minutes or hours apart.
+
+That is the entire difference. Not a different primitive — the same promise,
+with the `create` and the `settle` pulled apart.
+
+<PullQuote>A local call is a promise you settle yourself. A remote call is a promise you do not.</PullQuote>
+
+Which raises the question the `sleep` loop was avoiding: if this process is not
+going to settle the promise, why is it still here?
+
+## Unwinding
+
+It does not have to be. Give `invoke` a second branch — dispatch the call, then
+stop:
+
+```python name="invoke"
+async def invoke(store, id, func, *args):
+    p = store.create(id, args)
+
+    if p.state == PENDING:
+        if func.remote:
+            await send(func.target, id, args)
+            raise Blocked(id)
+
+        try:
+            result = await func(store, id, *args)
+            p = store.settle(id, RESOLVED, result)
+        except Exception as e:
+            p = store.settle(id, REJECTED, e)
+
+    if p.state == REJECTED:
+        raise p.value
+    return p.value
+```
+
+`Blocked` is not an error. It is how the frame says *I cannot make progress and
+neither can anyone above me*, and the only thing it does is unwind the stack —
+past `agent`, past every frame between, out of `execute_until_blocked_inner`
+entirely.
+
+Which is where the outer half finally gets the branch it has been missing:
+
+```python name="execute_until_blocked_outer"
+async def execute_until_blocked_outer(queue, store):
+    task = await queue.claim()
+    if task is None:
+        return
+
+    try:
+        await execute_until_blocked_inner(store, task)
+    except Blocked as b:
+        await store.subscribe(b.id, task)
+        await queue.release(task)
+        return
+
+    await queue.complete(task)
+```
+
+Nine lines instead of six. The task goes back, unclaimed, and the process moves
+on to whatever else is in the queue. Nothing is waiting anywhere. There is no
+coroutine parked on a socket, no timer, no row marked *in progress* — the
+execution simply is not running, and the only trace it left is a pending promise
+and a note to wake this task when that promise settles.
+
+<Figure
+  number="Fig. 1"
+  caption="Blocked unwinds every frame. What is left is a pending promise with the task's name against it."
+>
+  <StackEvolution
+    accentFrames={['invoke']}
+    columns={[
+      { label: '1', frames: ['agent'] },
+      { label: '2', frames: ['agent', 'invoke'] },
+      { label: '3', frames: ['agent', 'invoke', 'send'] },
+      { label: '4', frames: ['agent', 'invoke'] },
+      { label: '5', frames: ['agent'] },
+    ]}
+  />
+</Figure>
+
+## Resuming
+
+Later — a second, an hour — the other process finishes and settles the promise.
+The subscription fires, the task goes back on the queue, and some worker, not
+necessarily the one that started it, claims it.
+
+That worker does the only thing it knows how to do: it runs the function from
+the top.
+
+`agent` starts again with the same prompt. `invoke` derives the same id for the
+first call, finds it settled, and returns the recorded value without touching
+the model. Same for the second. Same for the remote call that suspended us,
+which is settled now because that is what woke us. The fourth call is pending
+and local, so this time the work actually happens.
+
+<Figure
+  number="Fig. 2"
+  caption="Replay rebuilds the stack by re-running it. The first three invokes return from the store; only the fourth does any work."
+>
+  <StackEvolution
+    accentFrames={['invoke']}
+    columns={[
+      { label: '1', frames: ['agent'] },
+      { label: '2', frames: ['agent', 'invoke'] },
+      { label: '3', frames: ['agent'] },
+      { label: '4', frames: ['agent', 'invoke'] },
+      { label: '5', frames: ['agent'] },
+      { label: '6', frames: ['agent', 'invoke'] },
+      { label: '7', frames: ['agent'] },
+      { label: '8', frames: ['agent', 'invoke', 'llm'] },
+    ]}
+  />
+</Figure>
+
+Nothing was restored. No stack was serialised, no coroutine was frozen and
+thawed, no continuation was captured. The frames in Fig. 2 are new frames that
+happen to look exactly like the old ones, because the same function run over the
+same settled promises takes the same path.
+
+<PullQuote>The stack was not saved. It was rebuilt, from the only thing that was.</PullQuote>
+
+That is the bill the last post paid in advance. Replay was already how a crash
+recovered; suspension is just a crash you chose.
+
+## What this cost
+
+Almost nothing, which is the point worth being suspicious of. So: exactly what
+is new?
+
+`create` and `settle` are untouched. The three properties from the last post —
+`create` idempotent, settling first-writer-wins, settling returns what the store
+holds — hold exactly as they did, and every one of them is load-bearing here.
+Idempotent `create` is what makes a duplicated dispatch harmless. First-writer-
+wins is what stops a retried remote call from overwriting the answer we already
+woke up on. Reading back is what makes the resumed run agree with whoever
+settled the promise.
+
+What is new sits beside the promises rather than inside them: a subscription
+from a promise id to a task, and a queue that the subscription pushes to. Both
+are bookkeeping about promises. Neither changes what a promise means.
+
+<Details summary="Why not just keep the connection open">
+
+The `sleep` loop is not the only blocking design. You could hold the socket, or
+park a coroutine on a future, or keep a thread. All of them work, and all of
+them tie the call's lifetime to a particular process's lifetime.
+
+That is the property being traded away. Once suspension goes through the store,
+the caller and the callee never need to be alive at the same time. The caller
+can be deployed over, moved to another region, or scaled to zero between the
+dispatch and the answer. A held connection cannot survive any of those, and the
+recovery story for each is a different piece of engineering.
+
+</Details>
+
+<Ornament />
+
+## What that leaves
+
+Suspension is the part of the programming model that was missing. What is left
+is what makes it safe under load:
+
+- **The queue.** Claims, leases, and what happens when the claimant dies holding
+  one. The outer half calls `claim` and `release` as though those were simple.
+- **The subscription.** It has to survive the process that registered it, and it
+  has to fire exactly once per settle even though settles can be retried.
+- **A real store.** The dict has to become something several processes can share
+  — which is where `create` and `settle` have to keep those three properties
+  under concurrent writers.
+
+And one thing the programming model gets for free, which the next post starts
+from: if a caller can suspend on one promise, it can suspend on several. Fan-out
+is not a new mechanism. It is this one, with more ids.
