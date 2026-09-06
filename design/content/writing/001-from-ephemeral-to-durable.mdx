@@ -13,16 +13,17 @@ feeds the results back, and repeats until the model stops asking.
 ```python name="agent"
 async def agent(prompt: str):
     messages = [{"role": "user", "content": prompt}]
+    response = await llm(messages)
+    messages.append(response)
 
-    while True:
+    while response.tool_calls:
+        for call in response.tool_calls:
+            messages.append(await tool(call))
+
         response = await llm(messages)
         messages.append(response)
 
-        if not response.tool_calls:
-            return response.content
-
-        for call in response.tool_calls:
-            messages.append(await tool(call))
+    return response.content
 ```
 
 That is the whole program, and it is a good program. It is also ephemeral: it
@@ -167,7 +168,11 @@ The same rule covers restarts, not just races. On replay the promise may already
 be rejected from the first run. You raise the stored error. You do not call the
 model again to find out.
 
-<Details summary="the same three, as properties">
+<Details summary="The three properties, as tests">
+
+`ids` and `values` are Hypothesis strategies — any identifier, any outcome. Each
+property runs over a few hundred generated triples, so these are claims about
+every id and every pair of outcomes, not about the one session above.
 
 ```python name="properties"
 @given(ids, values, values)
@@ -186,6 +191,14 @@ def test_settled_stays_settled(id, a, b):
     assert s.create(id, b).value == a == s.settle(id, REJECTED, b).value
 ```
 
+The third chains a `create` and a `settle` through one assert, so both halves of
+*settled stays settled* land in a single line: a later create sees the settled
+value, and a later settle cannot move it.
+
+What the card leaves out is the import and the two strategy definitions. They
+are three more lines of setup on a block that is here to be read rather than
+run.
+
 </Details>
 
 Everything else in a durable execution engine is a policy on top of these three
@@ -201,28 +214,22 @@ way, then return or raise based on what the store says.
 ```python name="agent, wrapped by hand"
 async def agent(prompt: str, store: Store, run_id: str):
     messages = [{"role": "user", "content": prompt}]
-    step = 0
+    step = 1
+    id = f"{run_id}.{step}"
 
-    while True:
-        step += 1
-        id = f"{run_id}.{step}"
+    p = store.create(id, messages)
+    if p.state == PENDING:
+        try:
+            p = store.settle(id, RESOLVED, await llm(messages))
+        except Exception as e:
+            p = store.settle(id, REJECTED, e)
 
-        p = store.create(id, messages)
-        if p.state == PENDING:
-            try:
-                p = store.settle(id, RESOLVED, await llm(messages))
-            except Exception as e:
-                p = store.settle(id, REJECTED, e)
+    if p.state == REJECTED:
+        raise p.value
+    response = p.value
+    messages.append(response)
 
-        if p.state == REJECTED:
-            raise p.value
-        response = p.value
-
-        messages.append(response)
-
-        if not response.tool_calls:
-            return response.content
-
+    while response.tool_calls:
         for call in response.tool_calls:
             step += 1
             id = f"{run_id}.{step}"
@@ -238,6 +245,23 @@ async def agent(prompt: str, store: Store, run_id: str):
                 raise p.value
 
             messages.append(p.value)
+
+        step += 1
+        id = f"{run_id}.{step}"
+
+        p = store.create(id, messages)
+        if p.state == PENDING:
+            try:
+                p = store.settle(id, RESOLVED, await llm(messages))
+            except Exception as e:
+                p = store.settle(id, REJECTED, e)
+
+        if p.state == REJECTED:
+            raise p.value
+        response = p.value
+        messages.append(response)
+
+    return response.content
 ```
 
 This works. It is what most teams end up with, and it is correct as written.
@@ -271,8 +295,8 @@ still passes tests, and quietly returns local outcomes that the store disagrees
 with. It fails only when two workers overlap, which is exactly the case the
 store exists for.
 
-The obvious cost is that eight lines of agent became thirty-five, and the
-twenty-seven are all the same twenty-seven. That part is easy to fix — factor it
+The obvious cost is that thirteen lines of agent became fifty. Three call sites,
+three copies of the same twelve lines. That part is easy to fix — factor it
 out:
 
 ```python name="durable"
@@ -347,16 +371,17 @@ Persist promises, and let the call sites use them.
 @resonate
 async def agent(prompt: str):
     messages = [{"role": "user", "content": prompt}]
+    response = await llm(messages)
+    messages.append(response)
 
-    while True:
+    while response.tool_calls:
+        for call in response.tool_calls:
+            messages.append(await tool(call))
+
         response = await llm(messages)
         messages.append(response)
 
-        if not response.tool_calls:
-            return response.content
-
-        for call in response.tool_calls:
-            messages.append(await tool(call))
+    return response.content
 ```
 
 Same program as the top of this post. The bookkeeping did not move into a
