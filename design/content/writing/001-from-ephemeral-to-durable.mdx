@@ -121,6 +121,8 @@ still make it — an id on its own does not say what to run.
 All three properties show up in one session, which is the whole specification:
 
 ```python name="Store, in one session"
+#                                 Promise(id, params, state, value)
+
 s = Store()
 
 s.create("a", 1)                # Promise("a", 1, PENDING)
