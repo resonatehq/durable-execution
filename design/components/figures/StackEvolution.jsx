@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // Static — no JS, print, reduced motion — every state renders side by side,
 // which is the complete diagram and the correct first paint.
 //
-// With JS and motion allowed the same states become a filmstrip: one stack in
-// place, growing a frame at a time as the track slides right, from nothing up
-// to the deepest stack and back to nothing.
-export default function StackEvolution({ columns, accentFrames = [], interval = 1150 }) {
+// With JS and motion allowed the states become a history: the stack being
+// executed sits in the middle, everything already executed trails off to the
+// left, and what has not happened yet is not shown.
+export default function StackEvolution({ columns, accentFrames = [], interval = 2200 }) {
   const wrapRef = useRef(null);
   const trackRef = useRef(null);
   const [animated, setAnimated] = useState(false);
@@ -22,11 +22,12 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
   const centre = useCallback((index) => {
     const wrap = wrapRef.current;
     const track = trackRef.current;
-    if (!wrap || !track) return;
-    const cell = track.children[index];
-    if (!cell) return;
-    const offset = cell.offsetLeft + cell.offsetWidth / 2 - wrap.clientWidth / 2;
-    track.style.transform = `translateX(${-offset}px)`;
+    const cell = track?.children[index];
+    if (!wrap || !track || !cell) return;
+    // offsetLeft is layout, so it ignores the transform already applied — but it
+    // is measured against a shared offsetParent, hence the subtraction.
+    const x = cell.offsetLeft - track.offsetLeft;
+    track.style.transform = `translateX(${wrap.clientWidth / 2 - (x + cell.offsetWidth / 2)}px)`;
   }, []);
 
   useEffect(() => {
@@ -50,9 +51,8 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
 
     const io = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && !timer) {
-          timer = setInterval(step, interval);
-        } else if (!entry.isIntersecting && timer) {
+        if (entry.isIntersecting && !timer) timer = setInterval(step, interval);
+        else if (!entry.isIntersecting && timer) {
           clearInterval(timer);
           timer = null;
         }
@@ -65,6 +65,8 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
 
     const onResize = () => centre(i);
     window.addEventListener('resize', onResize);
+    // web fonts land after first layout and change the cell metrics
+    document.fonts?.ready.then(() => centre(i));
 
     return () => {
       io.disconnect();
@@ -79,9 +81,12 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
         {cells.map((col, ci) => (
           <div
             key={`${col.label}-${ci}`}
-            className={`stack-col${animated && ci === active ? ' is-active' : ''}${
-              col.frames.length === 0 ? ' is-empty' : ''
-            }`}
+            className={
+              'stack-col' +
+              (col.frames.length === 0 ? ' is-empty' : '') +
+              (animated && ci === active ? ' is-active' : '') +
+              (animated && ci > active ? ' is-future' : '')
+            }
           >
             <div className="stack-num">{col.label}</div>
             <div className="stack-frames">

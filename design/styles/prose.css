@@ -419,23 +419,24 @@ body {
 .stack:not(.is-animated) .stack-col { flex: 1 1 0; min-width: 118px; }
 .stack:not(.is-animated) .stack-col.is-empty { display: none; }
 
-/* animated: one stack, sliding right */
-.stack.is-animated { overflow: hidden; }
+/* animated: the executing stack centred, history trailing left, no preview */
+.stack.is-animated { overflow: hidden; justify-content: flex-start; }
 
 .stack.is-animated .stack-track {
   flex-wrap: nowrap;
   justify-content: flex-start;
-  transition: transform 560ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition: transform 620ms cubic-bezier(0.2, 0.7, 0.2, 1);
   will-change: transform;
 }
 
 .stack.is-animated .stack-col {
   flex: 0 0 186px;
-  opacity: 0.28;
-  transition: opacity 400ms ease;
+  opacity: 0.26;
+  transition: opacity 500ms ease;
 }
 
 .stack.is-animated .stack-col.is-active { opacity: 1; }
+.stack.is-animated .stack-col.is-future { opacity: 0; }
 .stack.is-animated .stack-col.is-active .stack-frames { border-color: var(--accent); }
 .stack.is-animated .stack-col.is-empty .stack-frames { border: 0; background: none; }
 

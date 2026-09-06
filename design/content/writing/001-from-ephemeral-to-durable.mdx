@@ -39,6 +39,11 @@ victim. When that happens you start over from the first token: every model call
 paid for twice, every tool call run twice. Nineteen successful steps are not
 recoverable, because nothing wrote them down.
 
+Notice what that program is, though: nothing in it mentions crashing. It is
+interruption-agnostic code, and it buys interruption-intolerant execution. Hold
+on to both halves of that — the rest of this post is an argument about which of
+them you are allowed to keep.
+
 ## Where this sits
 
 Running a durable function splits in two, and it is worth naming both halves
@@ -74,7 +79,7 @@ the end. Blocking shows up when a call is settled by someone else — a remote
 call, a timer, a human — and that is a later post. The machinery below is what
 makes it possible.
 
-## Manual durability
+## Interruption-aware code
 
 So you write them down. Before touching the agent, decide what you are writing.
 
@@ -215,6 +220,8 @@ way, then return or raise based on what the store says.
 ```python name="agent, wrapped by hand"
 async def agent(prompt: str, store: Store, run_id: str):
     messages = [{"role": "user", "content": prompt}]
+
+    # ---- bookkeeping -------------------------------------------------
     step = 1
     id = f"{run_id}.{step}"
 
@@ -229,10 +236,14 @@ async def agent(prompt: str, store: Store, run_id: str):
     if p.state == REJECTED:
         raise p.value
     response = p.value
+    # ------------------------------------------------------------------
+
     messages.append(response)
 
     while "tool" in response:
         name, args = response["tool"]
+
+        # ---- bookkeeping ---------------------------------------------
         step += 1
         id = f"{run_id}.{step}"
 
@@ -246,8 +257,12 @@ async def agent(prompt: str, store: Store, run_id: str):
 
         if p.state == REJECTED:
             raise p.value
-        messages.append({"role": "tool", "content": p.value})
+        result = p.value
+        # --------------------------------------------------------------
 
+        messages.append({"role": "tool", "content": result})
+
+        # ---- bookkeeping ---------------------------------------------
         step += 1
         id = f"{run_id}.{step}"
 
@@ -262,6 +277,8 @@ async def agent(prompt: str, store: Store, run_id: str):
         if p.state == REJECTED:
             raise p.value
         response = p.value
+        # --------------------------------------------------------------
+
         messages.append(response)
 
     return response["content"]
@@ -298,9 +315,17 @@ still passes tests, and quietly returns local outcomes that the store disagrees
 with. It fails only when two workers overlap, which is exactly the case the
 store exists for.
 
-The obvious cost is that fourteen lines of agent became fifty-two. Three call
-sites, three copies of the same twelve lines. That part is easy to fix — factor it
-out:
+The obvious cost is that fourteen lines of agent became sixty-four. Everything
+between the rules is bookkeeping; what is left outside them is the program you
+meant to write — eight lines of it, with its three calls swallowed by the
+blocks. Three call sites, three copies of the same block.
+
+This is interruption-aware code: the program is now written in terms of the
+interruptions it has to survive. It does buy interruption-tolerant execution,
+which is what you wanted. The awareness is the price, and it is charged at every
+call site.
+
+The duplication part is easy to fix — factor it out:
 
 ```python name="durable"
 async def durable(store, id, func, *args):
@@ -362,7 +387,7 @@ change in the next section. The first two do.
 
 <Ornament />
 
-## Automatic durability
+## Interruption-agnostic code
 
 Look at what `durable` actually does. It takes an identity, checks whether an
 outcome is known, produces one if it is not, records it, and reports whatever
@@ -398,6 +423,10 @@ creates the promise, runs the call if it is pending, settles it, reads it back,
 and returns or raises from the stored outcome. A crash and restart replays the
 function, finds the promises that survived, and skips past the work they
 represent.
+
+Interruption-agnostic code, interruption-tolerant execution. Nothing about the
+guarantee changed between this section and the last one — what moved is where
+the awareness lives. It went out of your program and into the runtime.
 
 Here is what that does to the stack for the same call.
 
