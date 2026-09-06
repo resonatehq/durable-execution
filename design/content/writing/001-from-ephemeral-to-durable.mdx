@@ -292,14 +292,17 @@ Here is what it does to the stack for one call, while `agent` is working through
 
 <Figure
   number="Fig. 1"
-  caption="Create, call, settle — three frames, all of them pushed by agent itself."
+  caption="Create, call, settle — pushed and popped one at a time, all of them by agent itself."
 >
   <StackEvolution
     columns={[
       { label: '1', frames: ['agent'] },
       { label: '2', frames: ['agent', 'store.create'] },
-      { label: '3', frames: ['agent', 'llm(messages)'] },
-      { label: '4', frames: ['agent', 'store.settle'] },
+      { label: '3', frames: ['agent'] },
+      { label: '4', frames: ['agent', 'llm(messages)'] },
+      { label: '5', frames: ['agent'] },
+      { label: '6', frames: ['agent', 'store.settle'] },
+      { label: '7', frames: ['agent'] },
     ]}
   />
 </Figure>
@@ -432,7 +435,7 @@ Here is what that does to the stack for the same call.
 
 <Figure
   number="Fig. 2"
-  caption="The same three frames, with one slid underneath them. That frame is the entire difference."
+  caption="The same three frames, over one that stays. invoke is pushed once and outlives all three."
 >
   <StackEvolution
     accentFrames={['invoke']}
@@ -440,8 +443,12 @@ Here is what that does to the stack for the same call.
       { label: '1', frames: ['agent'] },
       { label: '2', frames: ['agent', 'invoke'] },
       { label: '3', frames: ['agent', 'invoke', 'create promise'] },
-      { label: '4', frames: ['agent', 'invoke', 'llm(messages)'] },
-      { label: '5', frames: ['agent', 'invoke', 'settle promise'] },
+      { label: '4', frames: ['agent', 'invoke'] },
+      { label: '5', frames: ['agent', 'invoke', 'llm(messages)'] },
+      { label: '6', frames: ['agent', 'invoke'] },
+      { label: '7', frames: ['agent', 'invoke', 'settle promise'] },
+      { label: '8', frames: ['agent', 'invoke'] },
+      { label: '9', frames: ['agent'] },
     ]}
   />
 </Figure>
@@ -456,7 +463,7 @@ and you no longer have to remember to call it.
 
 Step 2 is the interesting one on a restart. `invoke` derives the same id, finds
 the promise already settled from a previous life of this program, and returns
-its value without ever reaching step 4. The model is not called again.
+its value without ever reaching step 5. The model is not called again.
 
 Every frame in that picture disappears when the process dies. The promise
 created in step 3 does not. That is the entire trick: the stack is ephemeral, so
