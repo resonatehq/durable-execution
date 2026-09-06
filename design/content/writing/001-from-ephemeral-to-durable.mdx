@@ -78,14 +78,18 @@ So you write them down. Before touching the agent, decide what you are writing.
 
 ### The store
 
-A step has an identity, and it has either succeeded, failed, or neither yet.
-That is a promise:
+A step has an identity, the arguments it was called with, and either an outcome
+or not one yet. That is a promise:
 
 ```python name="Promise"
+PENDING, RESOLVED, REJECTED = "pending", "resolved", "rejected"
+
+
 @dataclass(frozen=True)
 class Promise:
     id: str
-    state: str          # "pending" | "resolved" | "rejected"
+    params: Any = None
+    state: str = PENDING
     value: Any = None
 ```
 
@@ -96,56 +100,54 @@ class Store:
     def __init__(self):
         self._db: dict[str, Promise] = {}
 
-    def create(self, id: str) -> Promise:
-        return self._db.setdefault(id, Promise(id, "pending"))
+    def create(self, id: str, params: Any) -> Promise:
+        return self._db.setdefault(id, Promise(id, params))
 
-    def resolve(self, id: str, value: Any) -> Promise:
-        return self._settle(id, "resolved", value)
-
-    def reject(self, id: str, error: Exception) -> Promise:
-        return self._settle(id, "rejected", error)
-
-    def _settle(self, id: str, state: str, value: Any) -> Promise:
+    def settle(self, id: str, state: str, value: Any) -> Promise:
         p = self._db[id]
-        if p.state == "pending":
+        if p.state == PENDING:
             self._db[id] = Promise(id, state, value)
         return self._db[id]
 ```
 
 This one is a dict, so it dies with the process and is useless for the actual
 job. Ignore that for now — a real one is a database, and swapping it changes
-nothing above this line. What matters is the interface, and three properties of
-it.
+nothing above this line. What matters is the interface — two operations — and
+three properties of it.
 
-All three show up in one session, which is the whole specification:
+The params are on the promise so that a process which did not make the call can
+still make it — an id on its own does not say what to run.
+
+All three properties show up in one session, which is the whole specification:
 
 ```python name="Store, in one session"
 s = Store()
 
-s.create("a")           # Promise("a", "pending")
-s.create("a")           # Promise("a", "pending")      <- the same promise
+s.create("a", 1)                # Promise("a", 1, PENDING)
+s.create("a", 2)                # Promise("a", 1, PENDING)      <- 2 discarded
 
-s.resolve("a", 1)       # Promise("a", "resolved", 1)
-s.resolve("a", 2)       # Promise("a", "resolved", 1)  <- 2 is discarded
-s.reject("a", Err())    # Promise("a", "resolved", 1)  <- so is Err
+s.settle("a", RESOLVED, 9)      # Promise("a", 1, RESOLVED, 9)
+s.settle("a", RESOLVED, 8)      # Promise("a", 1, RESOLVED, 9)  <- 8 discarded
+s.settle("a", REJECTED, Err())  # Promise("a", 1, RESOLVED, 9)  <- so is Err
 
-s.create("a")           # Promise("a", "resolved", 1)  <- and a replay sees it
+s.create("a", 3)                # Promise("a", 1, RESOLVED, 9)  <- replay sees
 ```
 
-Nothing after the first settle can change what that id means. Read down the
-right-hand column and the three properties name themselves.
+Nothing after the first create changes the params, and nothing after the first
+settle changes the outcome. Read down the right-hand column and the three
+properties name themselves.
 
 **`create` is idempotent.** Call it once or a thousand times with the same id
-and you get the same promise. This is what makes replay work: a restarted
-program calls `create` on ids that already exist and gets back what happened
-last time.
+and you get the same promise, whatever params you pass after the first — those
+are of record too. This is what makes replay work: a restarted program calls
+`create` on ids that already exist and gets back what happened last time.
 
-**Settling is first-writer-wins.** `resolve` and `reject` settle a pending
-promise and refuse to re-settle a settled one. A step that runs twice cannot
+**Settling is first-writer-wins.** `settle` moves a pending promise to
+`RESOLVED` or `REJECTED`, and refuses to move a settled one anywhere. A step that runs twice cannot
 produce two different outcomes of record.
 
 **Settling returns the promise, and it is not necessarily yours.** This is the
-one that is easy to skip. `_settle` returns whatever is in the store *after* the
+one that is easy to skip. `settle` returns whatever is in the store *after* the
 write — which, if someone beat you to it, is their outcome and not the one you
 just passed in. So the rule at every call site is: settle, then read what came
 back, then return or raise from that. Never from your local result.
@@ -166,20 +168,20 @@ model again to find out.
 As properties, which is how they are actually checked:
 
 ```python name="properties"
-@given(ids)
-def test_create_is_idempotent(id):
+@given(ids, values, values)
+def test_create_is_idempotent(id, a, b):
     s = Store()
-    assert s.create(id) == s.create(id)
+    assert s.create(id, a) == s.create(id, b)
 
 @given(ids, values, values)
 def test_first_settle_wins(id, a, b):
-    s = Store(); s.create(id)
-    assert s.resolve(id, a) == s.resolve(id, b)
+    s = Store(); s.create(id, a)
+    assert s.settle(id, RESOLVED, a) == s.settle(id, RESOLVED, b)
 
 @given(ids, values, values)
 def test_settled_stays_settled(id, a, b):
-    s = Store(); s.create(id); s.resolve(id, a)
-    assert s.create(id).value == a == s.reject(id, b).value
+    s = Store(); s.create(id, a); s.settle(id, RESOLVED, a)
+    assert s.create(id).value == a == s.settle(id, REJECTED, b).value
 ```
 
 Everything else in a durable execution engine is a policy on top of these three
@@ -201,14 +203,14 @@ async def agent(prompt: str, store: Store, run_id: str):
         step += 1
         id = f"{run_id}.{step}"
 
-        p = store.create(id)
-        if p.state == "pending":
+        p = store.create(id, messages)
+        if p.state == PENDING:
             try:
-                p = store.resolve(id, await llm(messages))
+                p = store.settle(id, RESOLVED, await llm(messages))
             except Exception as e:
-                p = store.reject(id, e)
+                p = store.settle(id, REJECTED, e)
 
-        if p.state == "rejected":
+        if p.state == REJECTED:
             raise p.value
         response = p.value
 
@@ -221,14 +223,14 @@ async def agent(prompt: str, store: Store, run_id: str):
             step += 1
             id = f"{run_id}.{step}"
 
-            p = store.create(id)
-            if p.state == "pending":
+            p = store.create(id, call)
+            if p.state == PENDING:
                 try:
-                    p = store.resolve(id, await tool(call))
+                    p = store.settle(id, RESOLVED, await tool(call))
                 except Exception as e:
-                    p = store.reject(id, e)
+                    p = store.settle(id, REJECTED, e)
 
-            if p.state == "rejected":
+            if p.state == REJECTED:
                 raise p.value
 
             messages.append(p.value)
@@ -248,7 +250,7 @@ Here is what it does to the stack for one call, while `agent` is working through
     columns={[
       { label: '1', frames: ['agent', 'store.create'] },
       { label: '2', frames: ['agent', 'llm(messages)'] },
-      { label: '3', frames: ['agent', 'store.resolve'] },
+      { label: '3', frames: ['agent', 'store.settle'] },
     ]}
   />
 </Figure>
@@ -259,7 +261,7 @@ That is not a metaphor for the maintenance problem, it is the maintenance
 problem: there is no layer to fix, only call sites.
 
 Note the `p =` on both settle branches. That assignment is the whole third
-property. Write `store.resolve(id, value)` without it and the code still runs,
+property. Write `store.settle(id, RESOLVED, value)` without it and the code still runs,
 still passes tests, and quietly returns local outcomes that the store disagrees
 with. It fails only when two workers overlap, which is exactly the case the
 store exists for.
@@ -270,14 +272,14 @@ out:
 
 ```python name="durable"
 async def durable(store, id, func, *args):
-    p = store.create(id)
-    if p.state == "pending":
+    p = store.create(id, args)
+    if p.state == PENDING:
         try:
-            p = store.resolve(id, await func(*args))
+            p = store.settle(id, RESOLVED, await func(*args))
         except Exception as e:
-            p = store.reject(id, e)
+            p = store.settle(id, REJECTED, e)
 
-    if p.state == "rejected":
+    if p.state == REJECTED:
         raise p.value
     return p.value
 ```
@@ -428,7 +430,7 @@ your control flow. The control flow is the Python. The durability is the store.
 The idea is small. The engineering is not, and that is where the rest of this
 project goes:
 
-- **A real store.** `create` and `_settle` have to keep those three properties
+- **A real store.** `create` and `settle` have to keep those three properties
   under concurrent writers, across processes, across regions — which a dict does
   not. In particular, settle-and-return-the-winner has to be one atomic
   operation, not a read followed by a write.
