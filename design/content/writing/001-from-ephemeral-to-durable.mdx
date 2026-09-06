@@ -221,7 +221,8 @@ async def agent(prompt: str, store: Store, run_id: str):
     p = store.create(id, messages)
     if p.state == PENDING:
         try:
-            p = store.settle(id, RESOLVED, await llm(messages))
+            result = await llm(store, id, messages)
+            p = store.settle(id, RESOLVED, result)
         except Exception as e:
             p = store.settle(id, REJECTED, e)
 
@@ -238,7 +239,8 @@ async def agent(prompt: str, store: Store, run_id: str):
         p = store.create(id, response["tool"])
         if p.state == PENDING:
             try:
-                p = store.settle(id, RESOLVED, await tools[name](**args))
+                result = await tools[name](store, id, **args)
+                p = store.settle(id, RESOLVED, result)
             except Exception as e:
                 p = store.settle(id, REJECTED, e)
 
@@ -252,7 +254,8 @@ async def agent(prompt: str, store: Store, run_id: str):
         p = store.create(id, messages)
         if p.state == PENDING:
             try:
-                p = store.settle(id, RESOLVED, await llm(messages))
+                result = await llm(store, id, messages)
+                p = store.settle(id, RESOLVED, result)
             except Exception as e:
                 p = store.settle(id, REJECTED, e)
 
@@ -295,7 +298,7 @@ still passes tests, and quietly returns local outcomes that the store disagrees
 with. It fails only when two workers overlap, which is exactly the case the
 store exists for.
 
-The obvious cost is that fourteen lines of agent became forty-nine. Three call
+The obvious cost is that fourteen lines of agent became fifty-two. Three call
 sites, three copies of the same twelve lines. That part is easy to fix — factor it
 out:
 
@@ -304,7 +307,8 @@ async def durable(store, id, func, *args):
     p = store.create(id, args)
     if p.state == PENDING:
         try:
-            p = store.settle(id, RESOLVED, await func(*args))
+            result = await func(store, id, *args)
+            p = store.settle(id, RESOLVED, result)
         except Exception as e:
             p = store.settle(id, REJECTED, e)
 
@@ -326,10 +330,13 @@ where this is going.
 
 Three things are not gone.
 
-**The store and the run id are part of the signature.** `agent` needs a `store`
-and a `run_id` to be durable, so every caller needs them, and so does every
-function `agent` calls, all the way down. Durability leaks upward through the
-type of every function that participates in it.
+**The store and the id are part of the signature.** `agent` needs a `store` and
+a `run_id` to be durable, so every caller needs them — and so does everything
+`agent` calls, which is why `llm` and the tools now take them too, and why they
+must pass them on again to anything they call. The id handed down is the parent
+of the ids that come back: step `run1.2` creates `run1.2.1` beneath it. That is
+how durability composes, and it is also how it leaks: upward through the type of
+every function that participates in it.
 
 **The id is a counter, and the counter has to be right.** In a straight line of
 code you can name your steps `"plan"`, `"search"`, `"report"`. In a loop there
