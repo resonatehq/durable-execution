@@ -198,6 +198,24 @@ still passes tests, and quietly returns local outcomes that the store disagrees
 with. It fails only when two workers overlap, which is exactly the case the
 store exists for.
 
+Here is what that does to the stack for one call, while `agent` is working
+through `await llm(messages)`:
+
+```
+        1                   2                   3
+
+┌────────────────┐  ┌────────────────┐  ┌────────────────┐
+│ store.create   │  │ llm(messages)  │  │ store.resolve  │
+├────────────────┤  ├────────────────┤  ├────────────────┤
+│ agent          │  │ agent          │  │ agent          │
+└────────────────┘  └────────────────┘  └────────────────┘
+```
+
+Three things happen, in that order, and all three happen in `agent`'s own frame.
+The bookkeeping is not underneath the business logic, it is interleaved with it.
+That is not a metaphor for the maintenance problem, it is the maintenance
+problem: there is no layer to fix, only call sites.
+
 The obvious cost is that eight lines of agent became thirty-five, and the
 twenty-seven are all the same twenty-seven. That part is easy to fix — factor it
 out:
@@ -221,7 +239,11 @@ response = await durable(store, f"{run_id}.{step}", llm, messages)
 ```
 
 Good. The duplication is gone, and the read-back is now written once instead of
-at every call site. Three things are not gone.
+at every call site. It also changes the picture above: create, call, and settle
+now happen in `durable`'s frame, one level below `agent`. Hold onto that, it is
+where this is going.
+
+Three things are not gone.
 
 **The store and the run id are part of the signature.** `agent` needs a `store`
 and a `run_id` to be durable, so every caller needs them, and so does every
@@ -304,8 +326,9 @@ The call site no longer calls `llm`. It calls `invoke`, and `invoke` is the
 runtime's frame — it derives the id, creates the promise, calls the real
 function, and settles the promise with whatever came back. The frames above
 `invoke` are always these three, in this order, whatever the call underneath
-happens to be. That is the same shape the `durable` helper had; it has only
-stopped being something you type.
+happens to be. That is the manual diagram with one frame slid underneath it — the
+same frame `durable` pushed, except you no longer pass it a store or an id, and
+you no longer have to remember to call it.
 
 Step 1 is the interesting one on a restart. `invoke` derives the same id, finds
 the promise already settled from a previous life of this program, and returns
