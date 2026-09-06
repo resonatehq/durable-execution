@@ -30,6 +30,41 @@ victim. When that happens you start over from the first token: every model call
 paid for twice, every tool call run twice. Nineteen successful steps are not
 recoverable, because nothing wrote them down.
 
+## Where this sits
+
+Running a durable function splits in two, and it is worth naming both halves
+before starting, because only one of them is the subject here.
+
+`execute_until_blocked_outer` deals with the world outside the function. It
+takes a task off a queue, claims it so that no one else picks up the same work,
+runs the function, and then completes or reschedules the task depending on how
+that went:
+
+```python
+async def execute_until_blocked_outer(queue, store):
+    task = await queue.claim()
+    if task is None:
+        return
+
+    await execute_until_blocked_inner(store, task)
+    await queue.complete(task)
+```
+
+That is close to all of it. The outer half is short, and the parts of it that
+are hard — what a claim means when the claimant dies, how long a claim lasts —
+are properties of the queue, not of this function.
+
+`execute_until_blocked_inner` is the part that runs your code: start the
+function, or restart it, and carry it forward until it finishes or reaches
+something it cannot make progress on by itself. Everything from here on is
+inside that call.
+
+The name promises blocking, and nothing in this post blocks. The agent's calls
+all complete in the same process, so the inner half always runs the function to
+the end. Blocking shows up when a call is settled by someone else — a remote
+call, a timer, a human — and that is a later post. The machinery below is what
+makes it possible.
+
 ## Manual durability
 
 So you write them down. Before touching the agent, decide what you are writing.
@@ -250,6 +285,36 @@ and returns or raises from the stored outcome. A crash and restart replays the
 function, finds the promises that survived, and skips past the work they
 represent.
 
+Here is what that does to the stack for one call. `agent` is running; it reaches
+`await llm(messages)`:
+
+```
+        1                   2                   3                   4
+
+                    ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
+                    │ create promise │  │ llm(messages)  │  │ settle promise │
+┌────────────────┐  ├────────────────┤  ├────────────────┤  ├────────────────┤
+│ invoke         │  │ invoke         │  │ invoke         │  │ invoke         │
+├────────────────┤  ├────────────────┤  ├────────────────┤  ├────────────────┤
+│ agent          │  │ agent          │  │ agent          │  │ agent          │
+└────────────────┘  └────────────────┘  └────────────────┘  └────────────────┘
+```
+
+The call site no longer calls `llm`. It calls `invoke`, and `invoke` is the
+runtime's frame — it derives the id, creates the promise, calls the real
+function, and settles the promise with whatever came back. The frames above
+`invoke` are always these three, in this order, whatever the call underneath
+happens to be. That is the same shape the `durable` helper had; it has only
+stopped being something you type.
+
+Step 1 is the interesting one on a restart. `invoke` derives the same id, finds
+the promise already settled from a previous life of this program, and returns
+its value without ever reaching step 3. The model is not called again.
+
+Every frame in that picture disappears when the process dies. The promise
+created in step 2 does not. That is the entire trick: the stack is ephemeral, so
+put the record somewhere the stack is not.
+
 The store is gone from the signature — the decorator supplies it. The counter is
 gone too. It still exists, but it is maintained by code whose only job is to
 maintain it, so it is computed the same way on every replay rather than
@@ -290,8 +355,8 @@ project goes:
   under concurrent writers, across processes, across regions — which a dict does
   not. In particular, settle-and-return-the-winner has to be one atomic
   operation, not a read followed by a write.
-- **The scheduler.** Something must decide which pending promises are being
-  worked on, and by whom.
+- **The scheduler and the queue.** Something must decide which pending promises
+  are being worked on and by whom, and hand them to the outer half as tasks.
 - **Leases and failure detection.** A worker that dies mid-call has to be
   noticed and its work reassigned, without two workers running the same step in
   parallel more often than necessary.
