@@ -1,11 +1,5 @@
----
-title: From Blocking to Suspended
-dek: An RPC is a promise someone else settles — and once you see it that way, waiting stops costing a process.
-standfirst: The last post recorded work this process did. This one is about the work it does not do.
-kind: Note
-date: 2026-09-07
-readTime: 11 min read
----
+standfirst: The last post recorded the work this process did. This one is
+about the work the process does not do.
 
 The agent from the [last post](/writing/001-from-ephemeral-to-durable/) calls
 its tools in the same process it runs in. That holds until one of them does not
@@ -246,5 +240,5 @@ is what makes suspension safe under load:
   under concurrent writers.
 
 And one thing the programming model gets for free, which the next post starts
-from: if a caller can suspend on one promise, it can suspend on several. Fan-out
-is not a new mechanism. It is this one, with more ids.
+from: if a caller can suspend on one promise, a caller can suspend on several.
+Fan-out is not a new mechanism, just this one with more ids.

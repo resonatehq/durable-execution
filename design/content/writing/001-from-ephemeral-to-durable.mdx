@@ -7,8 +7,8 @@ date: 2026-09-06
 readTime: 12 min read
 ---
 
-Here is an agent. It calls a model, runs whatever tools the model asks for,
-feeds the results back, and repeats until the model stops asking.
+An agent is a loop. Call a model, run whatever tool the model asks for, feed
+the result back, and repeat until the model stops asking.
 
 ```python name="agent"
 async def agent(prompt: str):
@@ -27,10 +27,9 @@ async def agent(prompt: str):
     return response["content"]
 ```
 
-That is the whole program, and a good one. The program is also ephemeral,
-alive only as long as the process running it. `messages`, the loop position,
-the half-finished tool call — all of that lives in one process's memory. Kill
-the process and the whole lot is gone.
+The whole program is ephemeral — alive only as long as the process running it.
+`messages`, the loop position, the half-finished tool call: all of that lives
+in one process's memory. Kill the process and the whole lot is gone.
 
 Here is that program on the stack. Two calls, one frame each, pushed and
 popped by `agent` and nothing underneath them:
@@ -50,11 +49,11 @@ popped by `agent` and nothing underneath them:
   />
 </Figure>
 
-For a function that runs in ten milliseconds, nobody cares. This one runs for
-minutes. It makes twenty model calls and a dozen tool calls, and over those
-minutes a deploy happens, a spot instance is reclaimed, an OOM killer picks a
-victim. When that happens you start over from the first token: every model call
-paid for twice, every tool call run twice. Nineteen successful steps are not
+For a function that runs in ten milliseconds, nobody cares. The agent runs for
+minutes — twenty model calls, a dozen tool calls — and over those minutes a
+deploy happens, a spot instance is reclaimed, an OOM killer picks a victim.
+When that happens you start over from the first token: every model call paid
+for twice, every tool call run twice. Nineteen successful steps are not
 recoverable, because nothing wrote them down.
 
 Notice what that program already is, though: nothing in the code mentions
@@ -166,9 +165,9 @@ properties name themselves.
 
 **`create` is idempotent.** Call `create` once or a thousand times with the
 same id and you get the same promise, whatever param you pass after the first
-— the first one is of record too. This is what makes replay work: a restarted
-program calls `create` on ids that already exist and gets back what happened
-last time.
+— the first one is of record too. Idempotence is what makes replay work: a
+restarted program calls `create` on ids that already exist and gets back what
+happened last time.
 
 **Settling is first-writer-wins.** `settle` moves a pending promise to
 `RESOLVED` or `REJECTED`, and refuses to move a settled one anywhere. A step
@@ -448,8 +447,8 @@ from that. A crash and restart replays the function, finds the promises that
 survived, and skips past the work they represent.
 
 Interruption-agnostic code, interruption-tolerant execution. Nothing about the
-guarantee changed between this section and the last one — what moved is where
-the awareness lives. It went out of your program and into the runtime.
+guarantee changed between this section and the last one. What changed is where
+the awareness lives: out of your program, into the runtime.
 
 Here is what that does to the stack for the same call.
 
@@ -508,9 +507,9 @@ and the same syntax means block until this value is known, wherever and whenever
 it becomes known. `raise` comes along for free — a rejected promise is an
 exception that survived a restart.
 
-The network agrees: a remote call is a promise held by someone else. The caller
-does not need to know which process settles it, or whether that process is the
-one that started the work. It waits on an id.
+The network agrees: a remote call is a promise held by someone else. The
+caller does not need to know which process settles the promise, or whether
+that process is the one that started the work. The caller waits on an id.
 
 From there the rest falls out. Recovery is reading ids you already have. Fan-out
 is many ids. A timeout is a promise settled by a clock instead of a function. A
@@ -525,17 +524,8 @@ your control flow. The control flow is the Python. The durability is the store.
 The idea is small. The engineering is not, and that is where the rest of this
 project goes:
 
-- **A real store.** `create` and `settle` have to keep those three properties
-  under concurrent writers, across processes, across regions — which a dict does
-  not. In particular, settle-and-return-the-winner has to be one atomic
-  operation, not a read followed by a write.
-- **The scheduler and the queue.** Something must decide which pending promises
-  are being worked on and by whom, and hand them to the outer half as tasks.
-- **Leases and failure detection.** A worker that dies mid-call has to be
-  noticed and its work reassigned, without two workers running the same step in
-  parallel more often than necessary.
-- **At-least-once, and living with it.** The window is still there. It gets
-  handled once, in one place, instead of at every call site.
+- **At-least-once, and living with it.** The window is still there, handled
+once, in one place, instead of at every call site.
 
 That is roughly five thousand lines. The next post is about the calls this
 process does not make itself.
