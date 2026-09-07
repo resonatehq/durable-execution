@@ -164,7 +164,14 @@ body {
   line-height: 1.74;
   color: var(--ink);
   margin: 26px 0 0;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
 }
+
+/* the last line of a paragraph should never be stretched */
+.body p:last-of-type { text-align-last: left; }
+.body li { text-align: justify; hyphens: auto; }
 
 .body h2 {
   font-weight: 400;
