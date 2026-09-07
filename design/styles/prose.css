@@ -432,6 +432,32 @@ body {
 }
 
 .stack-frame:last-child { border-bottom: 0; }
+
+/* the store, beneath the stack: the record that outlives the frames above it */
+.stack-store {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rule-strong);
+}
+
+.stack-store-label {
+  font-family: var(--font-sans), Helvetica, Arial, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--grey-2);
+  margin-bottom: 4px;
+}
+
+.stack-store-row {
+  font-family: var(--font-mono), monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre;
+}
+
+.stack-store-row.is-empty { color: var(--grey-2); }
 .stack-frame.is-accent { color: var(--accent); }
 
 /* static: every state side by side */

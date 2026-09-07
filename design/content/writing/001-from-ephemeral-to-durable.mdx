@@ -235,17 +235,17 @@ working through `prompt(messages)`.
 
 <Figure
   number="Fig. 2"
-  caption="Create, call, settle — pushed and popped one at a time, all of them by agent itself."
+  caption="Create, call, settle — pushed and popped one at a time, all of them by agent itself. The store changes twice: at create and at settle."
 >
   <StackEvolution
     columns={[
-      { label: '1', frames: ['agent'] },
-      { label: '2', frames: ['agent', 'store.create'] },
-      { label: '3', frames: ['agent'] },
-      { label: '4', frames: ['agent', 'prompt(messages)'] },
-      { label: '5', frames: ['agent'] },
-      { label: '6', frames: ['agent', 'store.settle'] },
-      { label: '7', frames: ['agent'] },
+      { label: '1', frames: ['agent'],                     store: [] },
+      { label: '2', frames: ['agent', 'store.create'],     store: [':1  PENDING'] },
+      { label: '3', frames: ['agent'],                     store: [':1  PENDING'] },
+      { label: '4', frames: ['agent', 'prompt(messages)'], store: [':1  PENDING'] },
+      { label: '5', frames: ['agent'],                     store: [':1  PENDING'] },
+      { label: '6', frames: ['agent', 'store.settle'],     store: [':1  RESOLVED'] },
+      { label: '7', frames: ['agent'],                     store: [':1  RESOLVED'] },
     ]}
   />
 </Figure>
@@ -406,20 +406,20 @@ Here's what that does to the stack for the same call.
 
 <Figure
   number="Fig. 3"
-  caption="The same three frames, over one that stays. durable is pushed once and outlives all three."
+  caption="The same three frames, over one that stays. The store changes at exactly the same two moments; only the stack is different."
 >
   <StackEvolution
     accentFrames={['durable']}
     columns={[
-      { label: '1', frames: ['agent'] },
-      { label: '2', frames: ['agent', 'durable'] },
-      { label: '3', frames: ['agent', 'durable', 'create promise'] },
-      { label: '4', frames: ['agent', 'durable'] },
-      { label: '5', frames: ['agent', 'durable', 'prompt(messages)'] },
-      { label: '6', frames: ['agent', 'durable'] },
-      { label: '7', frames: ['agent', 'durable', 'settle promise'] },
-      { label: '8', frames: ['agent', 'durable'] },
-      { label: '9', frames: ['agent'] },
+      { label: '1', frames: ['agent'],                                store: [] },
+      { label: '2', frames: ['agent', 'durable'],                     store: [] },
+      { label: '3', frames: ['agent', 'durable', 'create promise'],   store: [':1  PENDING'] },
+      { label: '4', frames: ['agent', 'durable'],                     store: [':1  PENDING'] },
+      { label: '5', frames: ['agent', 'durable', 'prompt(messages)'], store: [':1  PENDING'] },
+      { label: '6', frames: ['agent', 'durable'],                     store: [':1  PENDING'] },
+      { label: '7', frames: ['agent', 'durable', 'settle promise'],   store: [':1  RESOLVED'] },
+      { label: '8', frames: ['agent', 'durable'],                     store: [':1  RESOLVED'] },
+      { label: '9', frames: ['agent'],                                store: [':1  RESOLVED'] },
     ]}
   />
 </Figure>

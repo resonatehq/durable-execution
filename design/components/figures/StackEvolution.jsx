@@ -99,6 +99,20 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
                 </div>
               ))}
             </div>
+            {col.store && (
+              <div className="stack-store">
+                <div className="stack-store-label">store</div>
+                {col.store.length === 0 ? (
+                  <div className="stack-store-row is-empty">—</div>
+                ) : (
+                  col.store.map((row) => (
+                    <div key={row} className="stack-store-row">
+                      {row}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
