@@ -11,20 +11,22 @@ An agent is a loop. Call a model, run whatever tool the model asks for, feed
 the result back, and repeat until the model stops asking.
 
 ```python name="agent"
-async def agent(prompt: str):
-    messages = [{"role": "user", "content": prompt}]
-    response = await llm(messages)
-    messages.append(response)
+def agent(question):
+    messages = [{"role": "user", "content": question}]
+
+    response = prompt(messages)
 
     while "tool" in response:
-        name, args = response["tool"]
-        result = await tools[name](**args)
-        messages.append({"role": "tool", "content": result})
+        result = invoke(response["tool"], response["args"])
 
-        response = await llm(messages)
-        messages.append(response)
+        messages += [
+            {"role": "assistant", "content": response},
+            {"role": "tool", "content": result},
+        ]
 
-    return response["content"]
+        response = prompt(messages)
+
+    return response["answer"]
 ```
 
 The whole program is ephemeral — alive only as long as the process running it.
@@ -41,9 +43,9 @@ popped by `agent` and nothing underneath them:
   <StackEvolution
     columns={[
       { label: '1', frames: ['agent'] },
-      { label: '2', frames: ['agent', 'llm(messages)'] },
+      { label: '2', frames: ['agent', 'prompt(messages)'] },
       { label: '3', frames: ['agent'] },
-      { label: '4', frames: ['agent', 'tools[name]'] },
+      { label: '4', frames: ['agent', 'invoke'] },
       { label: '5', frames: ['agent'] },
     ]}
   />
@@ -73,13 +75,13 @@ up the same work, runs the function, and then completes or reschedules the
 task depending on how that went:
 
 ```python name="execute_until_blocked_outer"
-async def execute_until_blocked_outer(queue, store):
-    task = await queue.claim()
+def execute_until_blocked_outer(queue, store):
+    task = queue.claim()
     if task is None:
         return
 
-    await execute_until_blocked_inner(store, task)
-    await queue.complete(task)
+    execute_until_blocked_inner(store, task)
+    queue.complete(task)
 ```
 
 That is nearly the whole of the outer half. The half is short, and the parts
@@ -239,8 +241,8 @@ an id, create the promise, do the work if it is still pending, settle it either
 way, then return or raise based on what the store says.
 
 ```python name="agent, wrapped by hand"
-async def agent(prompt: str, store: Store, run_id: str):
-    messages = [{"role": "user", "content": prompt}]
+def agent(question, store, run_id):
+    messages = [{"role": "user", "content": question}]
 
     # ---- bookkeeping -------------------------------------------------
     step = 1
@@ -249,7 +251,7 @@ async def agent(prompt: str, store: Store, run_id: str):
     p = store.create(id, messages)
     if p.state == PENDING:
         try:
-            result = await llm(store, id, messages)
+            result = prompt(store, id, messages)
             p = store.settle(id, RESOLVED, result)
         except Exception as e:
             p = store.settle(id, REJECTED, e)
@@ -259,19 +261,15 @@ async def agent(prompt: str, store: Store, run_id: str):
     response = p.value
     # ------------------------------------------------------------------
 
-    messages.append(response)
-
     while "tool" in response:
-        name, args = response["tool"]
-
         # ---- bookkeeping ---------------------------------------------
         step += 1
         id = f"{run_id}.{step}"
 
-        p = store.create(id, response["tool"])
+        p = store.create(id, (response["tool"], response["args"]))
         if p.state == PENDING:
             try:
-                result = await tools[name](store, id, **args)
+                result = invoke(store, id, response["tool"], response["args"])
                 p = store.settle(id, RESOLVED, result)
             except Exception as e:
                 p = store.settle(id, REJECTED, e)
@@ -281,7 +279,10 @@ async def agent(prompt: str, store: Store, run_id: str):
         result = p.value
         # --------------------------------------------------------------
 
-        messages.append({"role": "tool", "content": result})
+        messages += [
+            {"role": "assistant", "content": response},
+            {"role": "tool", "content": result},
+        ]
 
         # ---- bookkeeping ---------------------------------------------
         step += 1
@@ -290,7 +291,7 @@ async def agent(prompt: str, store: Store, run_id: str):
         p = store.create(id, messages)
         if p.state == PENDING:
             try:
-                result = await llm(store, id, messages)
+                result = prompt(store, id, messages)
                 p = store.settle(id, RESOLVED, result)
             except Exception as e:
                 p = store.settle(id, REJECTED, e)
@@ -300,9 +301,7 @@ async def agent(prompt: str, store: Store, run_id: str):
         response = p.value
         # --------------------------------------------------------------
 
-        messages.append(response)
-
-    return response["content"]
+    return response["answer"]
 ```
 
 This works, and a crash shows how. Call the run `r7`. Steps `r7.1` through
@@ -318,7 +317,7 @@ Most teams end up here, and the code is correct as written. Nothing is wrong
 with the approach except the cost.
 
 Here is what the bookkeeping does to the stack for one call, while `agent` is
-working through `await llm(messages)`.
+working through `prompt(messages)`.
 
 <Figure
   number="Fig. 2"
@@ -329,7 +328,7 @@ working through `await llm(messages)`.
       { label: '1', frames: ['agent'] },
       { label: '2', frames: ['agent', 'store.create'] },
       { label: '3', frames: ['agent'] },
-      { label: '4', frames: ['agent', 'llm(messages)'] },
+      { label: '4', frames: ['agent', 'prompt(messages)'] },
       { label: '5', frames: ['agent'] },
       { label: '6', frames: ['agent', 'store.settle'] },
       { label: '7', frames: ['agent'] },
@@ -348,7 +347,7 @@ the code still runs, still passes tests, and quietly returns local outcomes
 the store disagrees with. The failure comes only when two workers overlap,
 which is exactly the case the store exists for.
 
-The obvious cost is that fourteen lines of agent became sixty-four. Everything
+The obvious cost is that sixteen lines of agent became sixty-one. Everything
 between the rules is bookkeeping; what is left outside them is the program you
 meant to write — eight lines of it, with its three calls swallowed by the
 blocks. Three call sites, three copies of the same block.
@@ -361,11 +360,11 @@ the price, and the price is charged at every call site.
 The duplication part is easy to fix — factor it out:
 
 ```python name="durable"
-async def durable(store, id, func, *args):
+def durable(store, id, func, *args):
     p = store.create(id, args)
     if p.state == PENDING:
         try:
-            result = await func(store, id, *args)
+            result = func(store, id, *args)
             p = store.settle(id, RESOLVED, result)
         except Exception as e:
             p = store.settle(id, REJECTED, e)
@@ -378,7 +377,7 @@ async def durable(store, id, func, *args):
 Which turns every call site into one line:
 
 ```python name="call site"
-response = await durable(store, f"{run_id}.{step}", llm, messages)
+response = durable(store, f"{run_id}.{step}", prompt, messages)
 ```
 
 Good. The duplication is gone, and the read-back is now written once instead
@@ -393,7 +392,7 @@ Three things are not gone.
 
 **The store and the id are part of the signature.** `agent` needs a `store`
 and a `run_id` to be durable, so every caller needs them — and so does
-everything `agent` calls, which is why `llm` and the tools now take them too,
+everything `agent` calls, which is why `prompt` and `invoke` now take them too,
 and why they must pass them on again to anything they call. The id handed down
 is the parent of the ids that come back: step `run1.2` creates `run1.2.1`
 beneath. That is how durability composes, and also how durability leaks:
@@ -443,25 +442,27 @@ Persist promises, and let the call sites use them.
 
 ```python name="agent"
 @resonate
-async def agent(prompt: str):
-    messages = [{"role": "user", "content": prompt}]
-    response = await llm(messages)
-    messages.append(response)
+def agent(question):
+    messages = [{"role": "user", "content": question}]
+
+    response = prompt(messages)
 
     while "tool" in response:
-        name, args = response["tool"]
-        result = await tools[name](**args)
-        messages.append({"role": "tool", "content": result})
+        result = invoke(response["tool"], response["args"])
 
-        response = await llm(messages)
-        messages.append(response)
+        messages += [
+            {"role": "assistant", "content": response},
+            {"role": "tool", "content": result},
+        ]
 
-    return response["content"]
+        response = prompt(messages)
+
+    return response["answer"]
 ```
 
 That is the agent from the top of this post, character for character, plus one
 line. The bookkeeping did not move into a helper; the bookkeeping moved under
-the language. `await llm(messages)` derives an id, creates the promise, runs
+the language. `prompt(messages)` derives an id, creates the promise, runs
 the call if the promise is pending, settles the promise, reads back what the
 store holds, and returns or raises from that. A crash and restart replays the
 function, finds the promises that survived, and skips past the work they
@@ -478,34 +479,34 @@ Here is what that does to the stack for the same call.
 
 <Figure
   number="Fig. 3"
-  caption="The same three frames, over one that stays. invoke is pushed once and outlives all three."
+  caption="The same three frames, over one that stays. durable is pushed once and outlives all three."
 >
   <StackEvolution
-    accentFrames={['invoke']}
+    accentFrames={['durable']}
     columns={[
       { label: '1', frames: ['agent'] },
-      { label: '2', frames: ['agent', 'invoke'] },
-      { label: '3', frames: ['agent', 'invoke', 'create promise'] },
-      { label: '4', frames: ['agent', 'invoke'] },
-      { label: '5', frames: ['agent', 'invoke', 'llm(messages)'] },
-      { label: '6', frames: ['agent', 'invoke'] },
-      { label: '7', frames: ['agent', 'invoke', 'settle promise'] },
-      { label: '8', frames: ['agent', 'invoke'] },
+      { label: '2', frames: ['agent', 'durable'] },
+      { label: '3', frames: ['agent', 'durable', 'create promise'] },
+      { label: '4', frames: ['agent', 'durable'] },
+      { label: '5', frames: ['agent', 'durable', 'prompt(messages)'] },
+      { label: '6', frames: ['agent', 'durable'] },
+      { label: '7', frames: ['agent', 'durable', 'settle promise'] },
+      { label: '8', frames: ['agent', 'durable'] },
       { label: '9', frames: ['agent'] },
     ]}
   />
 </Figure>
 
-The call site no longer calls `llm` but `invoke`, and `invoke` is the
+The call site no longer calls `prompt` but `durable`, and `durable` is the
 runtime's frame — deriving the id, creating the promise, calling the real
 function, and settling the promise with whatever came back. The frames above
-`invoke` are always these three, in this order, whatever the call underneath
-happens to be. From where the agent stands, `await llm(messages)` returned a
+`durable` are always these three, in this order, whatever the call underneath
+happens to be. From where the agent stands, `prompt(messages)` returned a
 response, same as always. That is the manual diagram with one frame slid
-underneath, the same frame `durable` pushed, except you no longer pass a store
-or an id and no longer have to remember to call the thing at all.
+underneath, the same frame the `durable` helper pushed, except you no longer
+pass a store or an id and no longer have to remember to call the thing at all.
 
-Step 2 is the interesting one on a restart. `invoke` derives the same id, finds
+Step 2 is the interesting one on a restart. `durable` derives the same id, finds
 the promise already settled from a previous life of this program, and returns
 its value without ever reaching step 5. The model is not called again.
 
@@ -525,11 +526,11 @@ forgetting is a bug someone else already found.
 A promise is the right primitive because it is already the unit that both the
 language and the network agree on.
 
-The language agrees: `await` is how a Python program says *block until this
-value is known*. Nothing about that requires the value to be produced in this
-process, or within this process's lifetime. Point `await` at a persisted promise
-and the same syntax means block until this value is known, wherever and whenever
-it becomes known. `raise` comes along for free — a rejected promise is an
+The language agrees: a call is how a program says *block until this value is
+known*. Nothing about that requires the value to be produced in this process,
+or within this process's lifetime. Point a call at a persisted promise and the
+same syntax means block until this value is known, wherever and whenever the
+value becomes known. `raise` comes along for free — a rejected promise is an
 exception that survived a restart.
 
 The network agrees: a remote call is a promise held by someone else. The
@@ -550,7 +551,7 @@ None of this is free, and the asks are worth stating plainly, because they are
 the same asks the hand-wrapped version made — they have only stopped being
 visible.
 
-**Your code between awaits must be deterministic.** Replay re-runs that code,
+**Your code between calls must be deterministic.** Replay re-runs that code,
 and the re-run has to arrive at the same calls in the same order. Read the
 clock or roll dice inside an awaited call, where the result gets recorded;
 never in between.

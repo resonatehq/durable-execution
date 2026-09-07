@@ -13,16 +13,37 @@ belong there — a search index behind someone else's credentials, a model that
 needs a GPU this box does not have, a tool that is itself an agent and runs for
 an hour.
 
-So the call has to go somewhere else. The obvious version sends the call and
-waits:
+In the code, that is one token. The agent from the last post, with `invoke`
+become `invoke.rpc`:
+
+```python name="agent, one token different"
+def agent(question):
+    messages = [{"role": "user", "content": question}]
+
+    response = prompt(messages)
+
+    while "tool" in response:
+        result = invoke.rpc(response["tool"], response["args"])
+
+        messages += [
+            {"role": "assistant", "content": response},
+            {"role": "tool", "content": result},
+        ]
+
+        response = prompt(messages)
+
+    return response["answer"]
+```
+
+So `.rpc` has to mean something. The obvious meaning sends the call and waits:
 
 ```python name="rpc, the obvious way"
-async def rpc(store, id, target, param):
+def rpc(store, id, target, param):
     p = store.create(id, param)
-    await send(target, id, param)
+    send(target, id, param)
 
     while p.state == PENDING:
-        await sleep(0.5)
+        sleep(0.5)
         p = store.create(id, param)
 
     if p.state == REJECTED:
@@ -86,20 +107,21 @@ not going to settle the promise, why is this process still here?
 
 ## Unwinding
 
-This process does not have to be. Give `invoke` a second branch — dispatch the
-call, then stop:
+This process does not have to be. Give `durable` — the runtime frame from the
+last post, the one that wraps every call — a second branch: dispatch the call,
+then stop:
 
-```python name="invoke"
-async def invoke(store, id, func, *args):
+```python name="durable"
+def durable(store, id, func, *args):
     p = store.create(id, args)
 
     if p.state == PENDING:
         if func.remote:
-            await send(func.target, id, args)
+            send(func.target, id, args)
             raise Blocked(id)
 
         try:
-            result = await func(store, id, *args)
+            result = func(store, id, *args)
             p = store.settle(id, RESOLVED, result)
         except Exception as e:
             p = store.settle(id, REJECTED, e)
@@ -118,19 +140,19 @@ Which is where the outer half finally gets the branch missing since the last
 post:
 
 ```python name="execute_until_blocked_outer"
-async def execute_until_blocked_outer(queue, store):
-    task = await queue.claim()
+def execute_until_blocked_outer(queue, store):
+    task = queue.claim()
     if task is None:
         return
 
     try:
-        await execute_until_blocked_inner(store, task)
+        execute_until_blocked_inner(store, task)
     except Blocked as b:
-        await store.subscribe(b.id, task)
-        await queue.release(task)
+        store.subscribe(b.id, task)
+        queue.release(task)
         return
 
-    await queue.complete(task)
+    queue.complete(task)
 ```
 
 Nine lines instead of six. The task goes back, unclaimed, and the process
@@ -144,12 +166,12 @@ pending promise and a note to wake this task when that promise settles.
   caption="Blocked unwinds every frame. What is left is a pending promise with the task's name against it."
 >
   <StackEvolution
-    accentFrames={['invoke']}
+    accentFrames={['durable']}
     columns={[
       { label: '1', frames: ['agent'] },
-      { label: '2', frames: ['agent', 'invoke'] },
-      { label: '3', frames: ['agent', 'invoke', 'send'] },
-      { label: '4', frames: ['agent', 'invoke'] },
+      { label: '2', frames: ['agent', 'durable'] },
+      { label: '3', frames: ['agent', 'durable', 'send'] },
+      { label: '4', frames: ['agent', 'durable'] },
       { label: '5', frames: ['agent'] },
     ]}
   />
@@ -164,8 +186,8 @@ worker, not necessarily the one that started the run, claims the task.
 That worker does the only thing any worker knows how to do: runs the function
 from the top.
 
-`agent` starts again with the same prompt. `invoke` derives the same id for
-the first call, finds the promise settled, and returns the recorded value
+`agent` starts again with the same question. `durable` derives the same id for
+the first call, finds the promise settled, and returns the recorded response
 without touching the model. Same for the second. Same for the remote call that
 suspended us, settled now because that settle is what woke us. The fourth call
 is pending and local, so this time the work actually happens.
@@ -175,16 +197,16 @@ is pending and local, so this time the work actually happens.
   caption="Replay rebuilds the stack by re-running it. The first three invokes return from the store; only the fourth does any work."
 >
   <StackEvolution
-    accentFrames={['invoke']}
+    accentFrames={['durable']}
     columns={[
       { label: '1', frames: ['agent'] },
-      { label: '2', frames: ['agent', 'invoke'] },
+      { label: '2', frames: ['agent', 'durable'] },
       { label: '3', frames: ['agent'] },
-      { label: '4', frames: ['agent', 'invoke'] },
+      { label: '4', frames: ['agent', 'durable'] },
       { label: '5', frames: ['agent'] },
-      { label: '6', frames: ['agent', 'invoke'] },
+      { label: '6', frames: ['agent', 'durable'] },
       { label: '7', frames: ['agent'] },
-      { label: '8', frames: ['agent', 'invoke', 'llm'] },
+      { label: '8', frames: ['agent', 'durable', 'prompt'] },
     ]}
   />
 </Figure>
