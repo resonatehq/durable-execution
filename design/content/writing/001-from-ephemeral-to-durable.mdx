@@ -7,7 +7,7 @@ date: 2026-09-06
 readTime: 13 min read
 ---
 
-An agent is a loop.
+Listing 1 shows a simple tool-calling agent: First the function prompts a model. If the model returns a tool call, the function invokes the tool, and prompts the model again. When the model returns an answer instead of a tool call, the function returns the answer.
 
 ```python name="agent" listing="1"
 def agent(question):
@@ -28,19 +28,6 @@ def agent(question):
     return response["answer"]
 ```
 
-Listing 1 shows a simple tool-calling agent. First the function calls a model.
-If the model returns a tool call, the function invokes the tool, adds the
-model's response and the tool's result to the conversation, and calls the
-model again. When the model returns an answer instead of a tool call, the
-function returns the answer.
-
-The whole program is ephemeral — alive only as long as the process running it.
-`messages`, the loop position, the half-finished tool call: all of that lives
-in one process's memory. Kill the process and the whole lot is gone.
-
-Here is that program on the stack. Two calls, one frame each, pushed and
-popped by `agent` and nothing underneath them:
-
 <Figure
   number="Fig. 1"
   caption="The whole of it. Every frame here lives in one process's memory, and none of it outlives that process."
@@ -56,67 +43,19 @@ popped by `agent` and nothing underneath them:
   />
 </Figure>
 
-For a function that runs in ten milliseconds, nobody cares. The agent runs for
-minutes — twenty model calls, a dozen tool calls — and over those minutes a
-deploy happens, a spot instance is reclaimed, an OOM killer picks a victim.
-When that happens you start over from the first token: every model call paid
-for twice, every tool call run twice — and if one of those tools was
-`send_email` or `charge_card`, that runs twice too. Nineteen successful steps
-are not recoverable, because nothing wrote them down.
+The agent works on the happy path but has several problems in case of a failure. The program is ephemeral, if the process crashes the program loses progress. That's okay for a function that runs in ten milliseconds, is free, deterministic, has no or only well-behaved side effects. That's not okay for an agent that runs for minutes, burns tokens, is non-deterministic, and calls a variety of tools.
 
-Notice that nothing in this code mentions crashing. The agent has no idea
-interruptions exist, and if one happens the run is gone. Interruption-agnostic
-code, interruption-intolerant execution. The rest of this post fixes the
-second half and tries hard not to give up the first.
+Imagine an agent that decides to perform a service. The agent charges a user's credit card and then performs the service. If the process crashes after charging the card then we retry the agent call and burn additional tokens, the agent may decide on a different service and charge the credit card again, performing the different service. Not only was this failure costly to us, spending more tokens, the failure was costly to the user, getting charged for two different services receiveing only one.
 
-To do that, the post writes the same agent three times. First as is. Then made
-durable by hand, which works and is ugly. Then made durable with a decorator,
-which looks exactly like the first version and does not die.
+Nothing in this code acknoledges the possibility of failures. We call this interruption-agnostic code. crashing. Unfortunately, when the process crashes, progress is lost. We call that interruption-intollerant execution. 
 
-## Where this sits
+# A solution.
 
-Running a durable function splits in two, and both halves are worth naming
-before starting, because only one of them is the subject here.
-
-`execute_until_blocked_outer` deals with the world outside the function. The
-outer half takes a task off a queue, claims the task so that no one else picks
-up the same work, runs the function, and then completes or reschedules the
-task depending on how that went:
-
-```python name="execute_until_blocked_outer" listing="2"
-def execute_until_blocked_outer(queue, store):
-    task = queue.claim()
-    if task is None:
-        return
-
-    execute_until_blocked_inner(store, task)
-    queue.complete(task)
-```
-
-That is nearly the whole of the outer half. The half is short, and the parts
-that are hard — what a claim means when the claimant dies, how long a claim
-lasts — are properties of the queue, not of this function.
-
-`execute_until_blocked_inner` is the part that runs your code: start the
-function, or restart it, and carry it forward until it finishes or reaches
-something it cannot make progress on by itself. Everything from here on is
-inside that call.
-
-The name promises blocking, and nothing in this post blocks. The agent's calls
-all complete in the same process, so the inner half always runs the function to
-the end. Blocking shows up when a call is settled by someone else — a remote
-call, a timer, a human — and that is a later post. The machinery below is what
-makes it possible.
-
-## Interruption-aware code
-
-So you write them down. Before touching the agent, decide what you are writing.
+Obviously we need a solution for this problem. The easiest solution is to memoize the function call: We simply store the return value of the function. That's it. We just have to ensure the function invocation gets a stable id. We define a durable promise
 
 ### The store
 
-A step has an identity, the arguments the step was called with, and either an
-outcome or not one yet. That is a promise — not the JavaScript kind; a
-smaller, stricter thing:
+A function call has an identity, the arguments the step was called with, and either an outcome or not one yet. That is a promise — not the JavaScript kind; a smaller, stricter thing:. Similar to an emphemeral promise but with an identifier and we store the value in the database
 
 ```python name="Promise" listing="3"
 PENDING, RESOLVED, REJECTED = "pending", "resolved", "rejected"
@@ -147,16 +86,9 @@ class Store:
         return self._db[id]
 ```
 
-This one is a dict, so the store dies with the process and is useless for the
-actual job. Ignore that for now — a real store is a database, and swapping one
-for the other changes nothing above this line. What matters is the interface:
-two operations, and the interesting part is what they refuse to do. Three
-properties, in all.
+This store is a dict, so the store dies with the process. Useless for the actual job, but what matters is the interface:
+two operations, to create a promise and to settle a promise. Create and settle are idempotent.
 
-The param is on the promise so that a process which did not make the call can
-still make it — an id on its own does not say what to run.
-
-All three properties show up in one session, which is the whole specification:
 
 ```python name="Store, in one session" listing="5"
 #                                 Promise(id, state, param, value)
@@ -174,12 +106,9 @@ s.create("a", 3)                # Promise("a", RESOLVED, 1, 9)  <- replay sees
 ```
 
 Nothing after the first create changes the param, and nothing after the first
-settle changes the outcome. Read down the right-hand column and the three
-properties name themselves.
+settle changes the value.
 
-**`create` is idempotent.** Call `create` once or a thousand times with the
-same id and you get the same promise, whatever param you pass after the first
-— the first one is of record too. Idempotence is what makes replay work: a
+**`create` is idempotent.** Idempotence is what makes replay work: a
 restarted program calls `create` on ids that already exist and gets back what
 happened last time.
 
@@ -192,6 +121,8 @@ one that is easy to skip. `settle` returns whatever is in the store *after* the
 write — which, if someone beat you to it, is their outcome and not the one you
 just passed in. So the rule at every call site is: settle, then read what came
 back, then return or raise from that. Never from your local result.
+<--- to claude: this should go to the section further down, not mixed in here
+
 
 Skipping the read-back looks harmless until two workers run the same step.
 Worker A calls the model and gets a response. Worker B calls the model and the
@@ -199,51 +130,15 @@ request times out. Both settle the promise; the store keeps whichever landed
 first, say A's value. If B raises its own timeout instead of reading back, the
 two workers now disagree about what that step did, and carry that disagreement
 forward into two different message histories for the same run.
-
-<PullQuote>The promise is the record. If you do not read it, you are not using it.</PullQuote>
+<--- to claude: this should go to the section further down, not mixed in here
 
 The same rule covers restarts, not just races. On replay the promise may already
 be rejected from the first run. You raise the stored error. You do not call the
 model again to find out.
+<--- to claude: this should go to the section further down, not mixed in here
 
-<Details summary="The three properties, as tests">
 
-`ids` and `values` are Hypothesis strategies — any identifier, any outcome. Each
-property runs over a few hundred generated triples, so these are claims about
-every id and every pair of outcomes, not about the one session above.
-
-```python name="properties" listing="6"
-@given(ids, values, values)
-def test_create_is_idempotent(id, a, b):
-    s = Store()
-    assert s.create(id, a) == s.create(id, b)
-
-@given(ids, values, values)
-def test_first_settle_wins(id, a, b):
-    s = Store(); s.create(id, a)
-    assert s.settle(id, RESOLVED, a) == s.settle(id, RESOLVED, b)
-
-@given(ids, values, values)
-def test_settled_stays_settled(id, a, b):
-    s = Store(); s.create(id, a); s.settle(id, RESOLVED, a)
-    assert s.create(id, b).value == a == s.settle(id, REJECTED, b).value
-```
-
-The third chains a `create` and a `settle` through one assert, so both halves of
-*settled stays settled* land in a single line: a later create sees the settled
-value, and a later settle cannot move it.
-
-What the card leaves out is the import and the two strategy definitions. They
-are three more lines of setup on a block that is here to be read rather than
-run.
-
-</Details>
-
-Everything else in a durable execution engine is a policy on top of these
-three properties. That is the claim of this post, and worth being suspicious
-of, so watch how far the claim goes.
-
-### Wrapping by hand
+### A first solution, wrapping by hand
 
 Now put the store in the agent. Every call site gets the same treatment: build
 an id, create the promise, do the work if it is still pending, settle it either
@@ -313,11 +208,11 @@ def agent(question, store, run_id):
     return response["answer"]
 ```
 
-This works, and a crash shows how. Call the run `r7`. Steps `r7.1` through
-`r7.5` are settled in the store; `r7.6` is pending — the tool was mid-flight
-when the process died. Restart with the same run id. `create("r7.1", ...)`
+This works, and a crash shows how. Call the run `agent.012d7`. Steps `agent.012d7:1` through
+`agent.012d7:5` are settled in the store; `agent.012d7:6` is pending — the tool was mid-flight
+when the process died. Restart with the same run id. `create("agent.012d7", ...)`
 returns the settled promise, so the code skips the pending block and takes the
-recorded response. Same for two through five. At `r7.6` the promise is
+recorded response. Same for two through five. At `agent.012d7:6` the promise is
 pending, so the tool runs, settles, and the loop carries on. Five steps
 replayed from the store in milliseconds, one step resumed, the rest executed
 fresh.
