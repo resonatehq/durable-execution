@@ -9,10 +9,12 @@ export default function remarkCodeMeta() {
     const walk = (node) => {
       if (node.type === 'code') {
         const name = /name="([^"]*)"/.exec(node.meta || '')?.[1] ?? '';
+        const listing = /listing="([^"]*)"/.exec(node.meta || '')?.[1] ?? '';
         node.data = node.data || {};
         node.data.hProperties = {
           ...(node.data.hProperties || {}),
           'data-name': name,
+          'data-listing': listing,
           'data-lang': node.lang || '',
         };
       }

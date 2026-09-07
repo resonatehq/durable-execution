@@ -224,6 +224,7 @@ body {
 }
 
 .card-lang { color: var(--accent); }
+.card-num { color: var(--accent); margin-right: 10px; }
 
 .card pre .kw { color: var(--code-kw); }
 

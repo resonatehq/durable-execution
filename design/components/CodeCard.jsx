@@ -38,12 +38,15 @@ function highlight(code) {
   return out;
 }
 
-export default function CodeCard({ name, lang = 'Python', code }) {
+export default function CodeCard({ name, lang = 'Python', code, listing = '' }) {
   const body = code.replace(/\n+$/, '');
   return (
     <div className="card" data-reveal>
       <div className="card-head">
-        <span>{name}</span>
+        <span>
+          {listing && <span className="card-num">Listing {listing}</span>}
+          {name}
+        </span>
         <span className="card-lang">{lang}</span>
       </div>
       <pre>{lang === 'Python' ? highlight(body) : body}</pre>
@@ -59,6 +62,7 @@ export function Pre({ children }) {
   return (
     <CodeCard
       name={props['data-name'] || ''}
+      listing={props['data-listing'] || ''}
       lang={LABELS[lang] || lang || 'Text'}
       code={code}
     />

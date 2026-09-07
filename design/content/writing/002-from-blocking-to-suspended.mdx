@@ -16,7 +16,7 @@ an hour.
 In the code, that is one token. The agent from the last post, with `invoke`
 become `invoke.rpc`:
 
-```python name="agent, one token different"
+```python name="agent, one token different" listing="1"
 def agent(question):
     messages = [{"role": "user", "content": question}]
 
@@ -37,7 +37,7 @@ def agent(question):
 
 So `.rpc` has to mean something. The obvious meaning sends the call and waits:
 
-```python name="rpc, the obvious way"
+```python name="rpc, the obvious way" listing="2"
 def rpc(store, id, target, param):
     p = store.create(id, param)
     send(target, id, param)
@@ -87,7 +87,7 @@ The other answer is to stop waiting.
 Look at what the remote call actually consists of, in the vocabulary we already
 have:
 
-```python name="the whole difference"
+```python name="the whole difference" listing="3"
 p = store.create(id, param)          # here
                                      #
 store.settle(id, RESOLVED, value)    # over there, later
@@ -111,7 +111,7 @@ This process does not have to be. Give `durable` — the runtime frame from the
 last post, the one that wraps every call — a second branch: dispatch the call,
 then stop:
 
-```python name="durable"
+```python name="durable" listing="4"
 def durable(store, id, func, *args):
     p = store.create(id, args)
 
@@ -139,7 +139,7 @@ stack — past `agent`, past every frame between, out of
 Which is where the outer half finally gets the branch missing since the last
 post:
 
-```python name="execute_until_blocked_outer"
+```python name="execute_until_blocked_outer" listing="5"
 def execute_until_blocked_outer(queue, store):
     task = queue.claim()
     if task is None:

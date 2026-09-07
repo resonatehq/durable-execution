@@ -7,10 +7,9 @@ date: 2026-09-06
 readTime: 13 min read
 ---
 
-An agent is a loop. Call a model, run whatever tool the model asks for, feed
-the result back, and repeat until the model stops asking.
+An agent is a loop.
 
-```python name="agent"
+```python name="agent" listing="1"
 def agent(question):
     messages = [{"role": "user", "content": question}]
 
@@ -28,6 +27,12 @@ def agent(question):
 
     return response["answer"]
 ```
+
+Listing 1 shows a simple tool-calling agent. First the function calls a model.
+If the model returns a tool call, the function invokes the tool, adds the
+model's response and the tool's result to the conversation, and calls the
+model again. When the model returns an answer instead of a tool call, the
+function returns the answer.
 
 The whole program is ephemeral — alive only as long as the process running it.
 `messages`, the loop position, the half-finished tool call: all of that lives
@@ -78,7 +83,7 @@ outer half takes a task off a queue, claims the task so that no one else picks
 up the same work, runs the function, and then completes or reschedules the
 task depending on how that went:
 
-```python name="execute_until_blocked_outer"
+```python name="execute_until_blocked_outer" listing="2"
 def execute_until_blocked_outer(queue, store):
     task = queue.claim()
     if task is None:
@@ -113,7 +118,7 @@ A step has an identity, the arguments the step was called with, and either an
 outcome or not one yet. That is a promise — not the JavaScript kind; a
 smaller, stricter thing:
 
-```python name="Promise"
+```python name="Promise" listing="3"
 PENDING, RESOLVED, REJECTED = "pending", "resolved", "rejected"
 
 
@@ -127,7 +132,7 @@ class Promise:
 
 And a store holds them:
 
-```python name="Store"
+```python name="Store" listing="4"
 class Store:
     def __init__(self):
         self._db: dict[str, Promise] = {}
@@ -153,7 +158,7 @@ still make it — an id on its own does not say what to run.
 
 All three properties show up in one session, which is the whole specification:
 
-```python name="Store, in one session"
+```python name="Store, in one session" listing="5"
 #                                 Promise(id, state, param, value)
 
 s = Store()
@@ -207,7 +212,7 @@ model again to find out.
 property runs over a few hundred generated triples, so these are claims about
 every id and every pair of outcomes, not about the one session above.
 
-```python name="properties"
+```python name="properties" listing="6"
 @given(ids, values, values)
 def test_create_is_idempotent(id, a, b):
     s = Store()
@@ -244,7 +249,7 @@ Now put the store in the agent. Every call site gets the same treatment: build
 an id, create the promise, do the work if it is still pending, settle it either
 way, then return or raise based on what the store says.
 
-```python name="agent, wrapped by hand"
+```python name="agent, wrapped by hand" listing="7"
 def agent(question, store, run_id):
     messages = [{"role": "user", "content": question}]
 
@@ -363,7 +368,7 @@ the price, and the price is charged at every call site.
 
 The duplication part is easy to fix — factor it out:
 
-```python name="durable"
+```python name="durable" listing="8"
 def durable(store, id, func, *args):
     p = store.create(id, args)
     if p.state == PENDING:
@@ -380,7 +385,7 @@ def durable(store, id, func, *args):
 
 Which turns every call site into one line:
 
-```python name="call site"
+```python name="call site" listing="9"
 response = durable(store, f"{run_id}.{step}", prompt, messages)
 ```
 
@@ -444,7 +449,7 @@ ever write.
 The best solution is to stop threading that by hand and make it the primitive.
 Persist promises, and let the call sites use them.
 
-```python name="agent"
+```python name="agent" listing="10"
 @resonate
 def agent(question):
     messages = [{"role": "user", "content": question}]
