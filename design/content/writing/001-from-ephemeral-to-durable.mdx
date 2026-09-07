@@ -45,19 +45,19 @@ def agent(question):
 
 The agent works on the happy path but has several problems in case of a failure. The program is ephemeral, if the process crashes the program loses progress. That's okay for a function that runs in ten milliseconds, is free, deterministic, has no or only well-behaved side effects. That's not okay for an agent that runs for minutes, burns tokens, is non-deterministic, and calls a variety of tools.
 
-Imagine an agent that decides to perform a service. The agent charges a user's credit card and then performs the service. If the process crashes after charging the card then we retry the agent call and burn additional tokens, the agent may decide on a different service and charge the credit card again, performing the different service. Not only was this failure costly to us, spending more tokens, the failure was costly to the user, getting charged for two different services receiveing only one.
+Imagine an agent that decides to perform a service. The agent charges a user's credit card and then performs the service. If the process crashes after charging the card then we retry the agent call and burn additional tokens, the agent may decide on a different service and charge the credit card again, performing the different service. Not only was this failure costly to us, spending more tokens, the failure was costly to the user, getting charged for two different services receiving only one.
 
-Nothing in this code acknoledges the possibility of failures. We call this interruption-agnostic code. crashing. Unfortunately, when the process crashes, progress is lost. We call that interruption-intollerant execution. 
+Nothing in this code acknowledges the possibility of failures. We call this interruption-agnostic code. Unfortunately, when the process crashes, progress is lost. We call that interruption-intolerant execution. 
 
-# A solution.
+## A solution
 
 Obviously we need a solution for this problem. The easiest solution is to memoize the function call: We simply store the return value of the function. That's it. We just have to ensure the function invocation gets a stable id. We define a durable promise
 
 ### The store
 
-A function call has an identity, the arguments the step was called with, and either an outcome or not one yet. That is a promise — not the JavaScript kind; a smaller, stricter thing:. Similar to an emphemeral promise but with an identifier and we store the value in the database
+A function call has an identity, the arguments the step was called with, and either an outcome or not one yet. That is a promise — not the JavaScript kind; a smaller, stricter thing. Similar to an ephemeral promise but with an identifier and we store the value in the database
 
-```python name="Promise" listing="3"
+```python name="Promise" listing="2"
 PENDING, RESOLVED, REJECTED = "pending", "resolved", "rejected"
 
 
@@ -71,7 +71,7 @@ class Promise:
 
 And a store holds them:
 
-```python name="Store" listing="4"
+```python name="Store" listing="3"
 class Store:
     def __init__(self):
         self._db: dict[str, Promise] = {}
@@ -90,7 +90,7 @@ This store is a dict, so the store dies with the process. Useless for the actual
 two operations, to create a promise and to settle a promise. Create and settle are idempotent.
 
 
-```python name="Store, in one session" listing="5"
+```python name="Store, in one session" listing="4"
 #                                 Promise(id, state, param, value)
 
 s = Store()
@@ -116,27 +116,6 @@ happened last time.
 `RESOLVED` or `REJECTED`, and refuses to move a settled one anywhere. A step
 that runs twice cannot produce two different outcomes of record.
 
-**Settling returns the promise, and it is not necessarily yours.** This is the
-one that is easy to skip. `settle` returns whatever is in the store *after* the
-write — which, if someone beat you to it, is their outcome and not the one you
-just passed in. So the rule at every call site is: settle, then read what came
-back, then return or raise from that. Never from your local result.
-<--- to claude: this should go to the section further down, not mixed in here
-
-
-Skipping the read-back looks harmless until two workers run the same step.
-Worker A calls the model and gets a response. Worker B calls the model and the
-request times out. Both settle the promise; the store keeps whichever landed
-first, say A's value. If B raises its own timeout instead of reading back, the
-two workers now disagree about what that step did, and carry that disagreement
-forward into two different message histories for the same run.
-<--- to claude: this should go to the section further down, not mixed in here
-
-The same rule covers restarts, not just races. On replay the promise may already
-be rejected from the first run. You raise the stored error. You do not call the
-model again to find out.
-<--- to claude: this should go to the section further down, not mixed in here
-
 
 ### A first solution, wrapping by hand
 
@@ -144,13 +123,13 @@ Now put the store in the agent. Every call site gets the same treatment: build
 an id, create the promise, do the work if it is still pending, settle it either
 way, then return or raise based on what the store says.
 
-```python name="agent, wrapped by hand" listing="7"
+```python name="agent, wrapped by hand" listing="5"
 def agent(question, store, run_id):
     messages = [{"role": "user", "content": question}]
 
     # ---- bookkeeping -------------------------------------------------
     step = 1
-    id = f"{run_id}.{step}"
+    id = f"{run_id}:{step}"
 
     p = store.create(id, messages)
     if p.state == PENDING:
@@ -168,7 +147,7 @@ def agent(question, store, run_id):
     while "tool" in response:
         # ---- bookkeeping ---------------------------------------------
         step += 1
-        id = f"{run_id}.{step}"
+        id = f"{run_id}:{step}"
 
         p = store.create(id, (response["tool"], response["args"]))
         if p.state == PENDING:
@@ -190,7 +169,7 @@ def agent(question, store, run_id):
 
         # ---- bookkeeping ---------------------------------------------
         step += 1
-        id = f"{run_id}.{step}"
+        id = f"{run_id}:{step}"
 
         p = store.create(id, messages)
         if p.state == PENDING:
@@ -210,7 +189,7 @@ def agent(question, store, run_id):
 
 This works, and a crash shows how. Call the run `agent.012d7`. Steps `agent.012d7:1` through
 `agent.012d7:5` are settled in the store; `agent.012d7:6` is pending — the tool was mid-flight
-when the process died. Restart with the same run id. `create("agent.012d7", ...)`
+when the process died. Restart with the same run id. `create("agent.012d7:1", ...)`
 returns the settled promise, so the code skips the pending block and takes the
 recorded response. Same for two through five. At `agent.012d7:6` the promise is
 pending, so the tool runs, settles, and the loop carries on. Five steps
@@ -245,11 +224,26 @@ frame. The bookkeeping is not underneath the business logic but interleaved
 with it. That is not a metaphor for the maintenance problem. That is the
 maintenance problem: there is no layer to fix, only call sites.
 
-Note the `p =` on both settle branches. That assignment is the whole third
-property. Write `store.settle(id, RESOLVED, value)` without the assignment and
-the code still runs, still passes tests, and quietly returns local outcomes
-the store disagrees with. The failure comes only when two workers overlap,
-which is exactly the case the store exists for.
+Note the `p =` on both settle branches. `settle` returns whatever is in the
+store *after* the write — which, if someone beat you to it, is their outcome
+and not the one you just passed in. So the rule at every call site is: settle,
+then read what came back, then return or raise from that. Never from your
+local result. Write `store.settle(id, RESOLVED, value)` without the assignment
+and the code still runs, still passes tests, and quietly returns local
+outcomes the store disagrees with. The failure comes only when two workers
+overlap, which is exactly the case the store exists for.
+
+
+Skipping the read-back looks harmless until two workers run the same step.
+Worker A calls the model and gets a response. Worker B calls the model and the
+request times out. Both settle the promise; the store keeps whichever landed
+first, say A's value. If B raises its own timeout instead of reading back, the
+two workers now disagree about what that step did, and carry that disagreement
+forward into two different message histories for the same run.
+
+The same rule covers restarts, not just races. On replay the promise may already
+be rejected from the first run. You raise the stored error. You do not call the
+model again to find out.
 
 The obvious cost is that sixteen lines of agent became sixty-one. Everything
 between the rules is bookkeeping; what is left outside them is the program you
@@ -263,7 +257,7 @@ the price, and the price is charged at every call site.
 
 The duplication part is easy to fix — factor it out:
 
-```python name="durable" listing="8"
+```python name="durable" listing="6"
 def durable(store, id, func, *args):
     p = store.create(id, args)
     if p.state == PENDING:
@@ -280,8 +274,8 @@ def durable(store, id, func, *args):
 
 Which turns every call site into one line:
 
-```python name="call site" listing="9"
-response = durable(store, f"{run_id}.{step}", prompt, messages)
+```python name="call site" listing="7"
+response = durable(store, f"{run_id}:{step}", prompt, messages)
 ```
 
 Good. The duplication is gone, and the read-back is now written once instead
@@ -298,7 +292,7 @@ Three things are not gone.
 and a `run_id` to be durable, so every caller needs them — and so does
 everything `agent` calls, which is why `prompt` and `invoke` now take them too,
 and why they must pass them on again to anything they call. The id handed down
-is the parent of the ids that come back: step `run1.2` creates `run1.2.1`
+is the parent of the ids that come back: step `agent.012d7:2` creates `agent.012d7:2:1`
 beneath. That is how durability composes, and also how durability leaks:
 upward through the type of every function that participates.
 
@@ -344,7 +338,7 @@ ever write.
 The best solution is to stop threading that by hand and make it the primitive.
 Persist promises, and let the call sites use them.
 
-```python name="agent" listing="10"
+```python name="agent" listing="8"
 @resonate
 def agent(question):
     messages = [{"role": "user", "content": question}]
