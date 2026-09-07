@@ -46,9 +46,10 @@ def rpc(store, id, target, param):
         sleep(0.5)
         p = store.create(id, param)
 
+    if p.state == RESOLVED:
+        return p.value
     if p.state == REJECTED:
         raise p.value
-    return p.value
 ```
 
 Two things in there are worth a second look before the objection.
@@ -126,9 +127,10 @@ def durable(store, id, func, *args):
         except Exception as e:
             p = store.settle(id, REJECTED, e)
 
+    if p.state == RESOLVED:
+        return p.value
     if p.state == REJECTED:
         raise p.value
-    return p.value
 ```
 
 `Blocked` is not an error but how the frame says *I cannot make progress and

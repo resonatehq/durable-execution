@@ -167,9 +167,10 @@ def agent(question, store, run_id):
         except Exception as e:
             p = store.settle(id, REJECTED, e)
 
+    if p.state == RESOLVED:
+        response = p.value
     if p.state == REJECTED:
         raise p.value
-    response = p.value
     # ------------------------------------------------------------------
 
     while "tool" in response:
@@ -185,9 +186,10 @@ def agent(question, store, run_id):
             except Exception as e:
                 p = store.settle(id, REJECTED, e)
 
+        if p.state == RESOLVED:
+            result = p.value
         if p.state == REJECTED:
             raise p.value
-        result = p.value
         # --------------------------------------------------------------
 
         messages += [
@@ -207,9 +209,10 @@ def agent(question, store, run_id):
             except Exception as e:
                 p = store.settle(id, REJECTED, e)
 
+        if p.state == RESOLVED:
+            response = p.value
         if p.state == REJECTED:
             raise p.value
-        response = p.value
         # --------------------------------------------------------------
 
     return response["answer"]
@@ -272,7 +275,7 @@ The same rule covers restarts, not just races. On replay the promise may
 already be rejected from the first run. You raise the stored error. You don't
 call the model again to find out.
 
-The obvious cost: sixteen lines of agent became sixty-one. Everything between
+The obvious cost: sixteen lines of agent became sixty-four. Everything between
 the rules is bookkeeping. What's left outside them is the program we meant to
 write — eight lines, with its three calls swallowed by the blocks. Three call
 sites, three copies of the same block.
@@ -294,9 +297,10 @@ def durable(store, id, func, *args):
         except Exception as e:
             p = store.settle(id, REJECTED, e)
 
+    if p.state == RESOLVED:
+        return p.value
     if p.state == REJECTED:
         raise p.value
-    return p.value
 ```
 
 Which turns every call site into one line:
