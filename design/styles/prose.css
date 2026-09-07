@@ -393,6 +393,8 @@ body {
 
 .stack { display: flex; justify-content: center; }
 
+.stack-strip { min-width: 0; }
+
 .stack-track {
   display: flex;
   align-items: flex-end;
@@ -432,12 +434,21 @@ body {
 }
 
 .stack-frame:last-child { border-bottom: 0; }
+.stack-frame.is-accent { color: var(--accent); }
 
-/* the store, beneath the stack: the record that outlives the frames above it */
+/* the store: the record that outlives the frames. Static, it sits under each
+   state; animated, it moves into a panel beside the strip. */
 .stack-store {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px dashed var(--rule-strong);
+}
+
+.stack-store-panel {
+  display: none;
+  align-self: stretch;
+  padding-left: 18px;
+  border-left: 1px solid var(--rule);
 }
 
 .stack-store-label {
@@ -446,26 +457,38 @@ body {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--grey-2);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .stack-store-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   font-family: var(--font-mono), monospace;
   font-size: 11.5px;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--ink);
-  white-space: pre;
+  white-space: nowrap;
+  transition: color 300ms ease, opacity 300ms ease;
 }
 
 .stack-store-row.is-empty { color: var(--grey-2); }
-.stack-frame.is-accent { color: var(--accent); }
+.stack-store-row.is-absent { opacity: 0; }
+.stack-store-row.is-changed { color: var(--accent); }
+.stack-store-state { color: var(--grey-1); }
+.stack-store-row.is-changed .stack-store-state { color: inherit; }
 
 /* static: every state side by side */
 .stack:not(.is-animated) .stack-col { flex: 1 1 0; min-width: 118px; }
 .stack:not(.is-animated) .stack-col.is-empty { display: none; }
 
-/* animated: the executing stack centred, history trailing left, no preview */
-.stack.is-animated { overflow: hidden; justify-content: flex-start; }
+/* animated: the executing stack centred, history trailing left, no preview;
+   the store, if there is one, takes the right third */
+.stack.is-animated { justify-content: flex-start; }
+.stack.is-animated .stack-strip { flex: 1 1 0; overflow: hidden; }
+.stack.is-animated.has-store { display: grid; grid-template-columns: 2fr 1fr; gap: 22px; }
+.stack.is-animated.has-store .stack-store { display: none; }
+.stack.is-animated.has-store .stack-store-panel { display: block; }
 
 .stack.is-animated .stack-track {
   flex-wrap: nowrap;
@@ -485,8 +508,13 @@ body {
 .stack.is-animated .stack-col.is-active .stack-frames { border-color: var(--accent); }
 .stack.is-animated .stack-col.is-empty .stack-frames { border: 0; background: none; }
 
+@media (max-width: 560px) {
+  .stack.is-animated.has-store { grid-template-columns: 1fr; }
+  .stack-store-panel { padding-left: 0; border-left: 0; padding-top: 12px; border-top: 1px solid var(--rule); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .stack-track, .stack-col, .stack-frames { transition: none; }
+  .stack-track, .stack-col, .stack-frames, .stack-store-row { transition: none; }
 }
 
 /* The sentence that introduces a card or figure gets the wider run-up. */

@@ -32,15 +32,17 @@ def agent(question):
 
 <Figure
   number="Fig. 1"
-  caption="The whole of it. Every frame here lives in one process's memory, and none of it outlives that process."
+  caption="The whole of it, for the first three calls. Every frame here lives in one process's memory, and none of it outlives that process."
 >
   <StackEvolution
     columns={[
       { label: '1', frames: ['agent'] },
       { label: '2', frames: ['agent', 'prompt(messages)'] },
       { label: '3', frames: ['agent'] },
-      { label: '4', frames: ['agent', 'invoke'] },
+      { label: '4', frames: ['agent', 'invoke(tool, args)'] },
       { label: '5', frames: ['agent'] },
+      { label: '6', frames: ['agent', 'prompt(messages)'] },
+      { label: '7', frames: ['agent'] },
     ]}
   />
 </Figure>
@@ -230,22 +232,29 @@ resumed, the rest run fresh.
 Most teams end up here, and the code is correct. There's nothing wrong with
 this approach except the cost.
 
-Here's what the bookkeeping does to the stack for one call, while `agent` is
-working through `prompt(messages)`.
+Here's what the bookkeeping does to the stack for the same three calls, with
+the store beside it. The run has an id, `agent.012d7`, and each step gets one
+beneath it.
 
 <Figure
   number="Fig. 2"
-  caption="Create, call, settle — pushed and popped one at a time, all of them by agent itself. The store changes twice: at create and at settle."
+  caption="Create, call, settle, three times over, all of it pushed by agent itself. The store changes only at create and at settle. Note what the store never holds: a promise for the run. There is a run id, but nothing records the call to agent."
 >
   <StackEvolution
     columns={[
-      { label: '1', frames: ['agent'],                     store: [] },
-      { label: '2', frames: ['agent', 'store.create'],     store: [':1  PENDING'] },
-      { label: '3', frames: ['agent'],                     store: [':1  PENDING'] },
-      { label: '4', frames: ['agent', 'prompt(messages)'], store: [':1  PENDING'] },
-      { label: '5', frames: ['agent'],                     store: [':1  PENDING'] },
-      { label: '6', frames: ['agent', 'store.settle'],     store: [':1  RESOLVED'] },
-      { label: '7', frames: ['agent'],                     store: [':1  RESOLVED'] },
+      { label: '1',  frames: ['agent'],                       store: [] },
+      { label: '2',  frames: ['agent', 'store.create'],       store: ['agent.012d7:1 PENDING'] },
+      { label: '3',  frames: ['agent', 'prompt(messages)'],   store: ['agent.012d7:1 PENDING'] },
+      { label: '4',  frames: ['agent', 'store.settle'],       store: ['agent.012d7:1 RESOLVED'] },
+      { label: '5',  frames: ['agent'],                       store: ['agent.012d7:1 RESOLVED'] },
+      { label: '6',  frames: ['agent', 'store.create'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
+      { label: '7',  frames: ['agent', 'invoke(tool, args)'], store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
+      { label: '8',  frames: ['agent', 'store.settle'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '9',  frames: ['agent'],                       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '10', frames: ['agent', 'store.create'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
+      { label: '11', frames: ['agent', 'prompt(messages)'],   store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
+      { label: '12', frames: ['agent', 'store.settle'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
+      { label: '13', frames: ['agent'],                       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
     ]}
   />
 </Figure>
@@ -402,24 +411,34 @@ that started out fused have been pulled apart, and the seam is the function
 call. Sixteen lines at the top of this post; sixteen lines here. The
 difference is that these sixteen don't die.
 
-Here's what that does to the stack for the same call.
+Here's what that does to the stack and the store for the same three calls.
 
 <Figure
   number="Fig. 3"
-  caption="The same three frames, over one that stays. The store changes at exactly the same two moments; only the stack is different."
+  caption="The same three calls, each over a frame that stays. The store changes at exactly the same moments as before, plus two more: the run itself is a durable call now, so agent.012d7 goes in before agent runs and is settled after agent returns."
 >
   <StackEvolution
     accentFrames={['durable']}
     columns={[
-      { label: '1', frames: ['agent'],                                store: [] },
-      { label: '2', frames: ['agent', 'durable'],                     store: [] },
-      { label: '3', frames: ['agent', 'durable', 'create promise'],   store: [':1  PENDING'] },
-      { label: '4', frames: ['agent', 'durable'],                     store: [':1  PENDING'] },
-      { label: '5', frames: ['agent', 'durable', 'prompt(messages)'], store: [':1  PENDING'] },
-      { label: '6', frames: ['agent', 'durable'],                     store: [':1  PENDING'] },
-      { label: '7', frames: ['agent', 'durable', 'settle promise'],   store: [':1  RESOLVED'] },
-      { label: '8', frames: ['agent', 'durable'],                     store: [':1  RESOLVED'] },
-      { label: '9', frames: ['agent'],                                store: [':1  RESOLVED'] },
+      { label: '1',  frames: ['durable'],                                  store: [] },
+      { label: '2',  frames: ['durable', 'create promise'],                store: ['agent.012d7 PENDING'] },
+      { label: '3',  frames: ['durable', 'agent'],                         store: ['agent.012d7 PENDING'] },
+      { label: '4',  frames: ['durable', 'agent', 'durable'],              store: ['agent.012d7 PENDING'] },
+      { label: '5',  frames: ['durable', 'agent', 'durable', 'create promise'], store: ['agent.012d7 PENDING', 'agent.012d7:1 PENDING'] },
+      { label: '6',  frames: ['durable', 'agent', 'durable', 'prompt(messages)'], store: ['agent.012d7 PENDING', 'agent.012d7:1 PENDING'] },
+      { label: '7',  frames: ['durable', 'agent', 'durable', 'settle promise'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED'] },
+      { label: '8',  frames: ['durable', 'agent'],                         store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED'] },
+      { label: '9',  frames: ['durable', 'agent', 'durable'],              store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED'] },
+      { label: '10', frames: ['durable', 'agent', 'durable', 'create promise'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
+      { label: '11', frames: ['durable', 'agent', 'durable', 'invoke(tool, args)'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
+      { label: '12', frames: ['durable', 'agent', 'durable', 'settle promise'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '13', frames: ['durable', 'agent'],                         store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '14', frames: ['durable', 'agent', 'durable'],              store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '15', frames: ['durable', 'agent', 'durable', 'create promise'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
+      { label: '16', frames: ['durable', 'agent', 'durable', 'prompt(messages)'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
+      { label: '17', frames: ['durable', 'agent', 'durable', 'settle promise'], store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
+      { label: '18', frames: ['durable', 'agent'],                         store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
+      { label: '19', frames: ['durable', 'settle promise'],                store: ['agent.012d7 RESOLVED', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
     ]}
   />
 </Figure>
@@ -430,17 +449,19 @@ function, and settles the promise with whatever came back. The frames above
 `durable` are always these three, in this order, whatever the call underneath
 happens to be. From where the agent stands, `prompt(messages)` returned a
 response, same as always. That's the manual diagram with one frame slid
-underneath — the same frame the `durable` helper pushed — except you no longer
-pass a store or an id, and you no longer have to remember to call the thing at
-all.
+underneath every call — including the call to `agent`. The decorator is that
+bottom frame: the run gets a promise of its own, `agent.012d7`, pending from
+state 2 until `agent` returns at state 19. By hand, nothing recorded the run;
+now the run is just another durable call, and the steps hang off its id.
 
-Step 2 is the interesting one on a restart. `durable` derives the same id,
-finds the promise already settled from a previous life of this program, and
-returns the value without ever reaching step 5. The model isn't called again.
+State 4 is the interesting one on a restart. `durable` derives the same id,
+finds `agent.012d7:1` already resolved from a previous life of this program,
+and returns the value without ever reaching state 6. The model isn't called
+again. Same at 9 and 14, until the first id the store doesn't know.
 
-Every frame in that picture disappears when the process dies. The promise
-created in step 3 doesn't. That's the entire trick: the stack is ephemeral, so
-put the record somewhere the stack isn't.
+Every frame in that picture disappears when the process dies. The column on
+the right doesn't. That's the entire trick: the stack is ephemeral, so put the
+record somewhere the stack isn't.
 
 The store is gone from the signature — the decorator supplies the store. The
 counter is gone too. Well, the counter still exists, but it's maintained by
