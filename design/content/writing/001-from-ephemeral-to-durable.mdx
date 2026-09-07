@@ -109,8 +109,10 @@ class Store:
 
 This store is a dict, so the store dies with the process. Useless for the real
 job, but the interface is what matters, and the interface is two operations:
-create a promise, settle a promise. Create is idempotent. Settle is
-first-writer-wins. Here's what that means in practice:
+create a promise, settle a promise. Both are first-writer-wins, and that makes
+both idempotent: the first call sets the record, and every later call returns
+that record no matter what arguments come with it. Here's what that means in
+practice:
 
 
 ```python name="Store, in one session" listing="4"
@@ -131,13 +133,16 @@ s.create("a", 3)                # Promise("a", RESOLVED, 1, 9)  <- replay sees
 Nothing after the first create changes the param. Nothing after the first
 settle changes the value.
 
-**`create` is idempotent.** That's what makes replay work. A restarted program
-calls `create` on ids that already exist and gets back what happened last
-time.
+**Both are first-writer-wins.** The first `create` fixes the param. The first
+`settle` fixes the outcome. A later call with the same id changes nothing,
+whatever arguments come with it — so a step that runs twice can't end up with
+two different outcomes on record.
 
-**`settle` is first-writer-wins.** `settle` moves a pending promise to
-`RESOLVED` or `REJECTED` and refuses to move a settled one anywhere. A step
-that runs twice can't end up with two different outcomes on record.
+**And so both are idempotent.** Call either one again and you get back exactly
+what the first call produced. That's what makes replay work: a restarted
+program calls `create` on ids that already exist and gets back what happened
+last time, and a retried `settle` can't overwrite an answer that's already
+there.
 
 
 ### A first solution, wrapping by hand
