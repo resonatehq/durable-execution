@@ -59,13 +59,14 @@ for twice, every tool call run twice — and if one of those tools was
 `send_email` or `charge_card`, that runs twice too. Nineteen successful steps
 are not recoverable, because nothing wrote them down.
 
-Notice what that program already is, though: nothing in the code mentions
-crashing. Interruption-agnostic code, buying interruption-intolerant
-execution. Hold on to both halves of that — the rest of this post is an
-argument about which half you are allowed to keep. The same agent appears
-three times: once as written, once made durable by hand, once made durable by
-a decorator. What changes between them is not what the program does. What
-changes is where the knowledge of interruption lives.
+Notice that nothing in this code mentions crashing. The agent has no idea
+interruptions exist, and if one happens the run is gone. Interruption-agnostic
+code, interruption-intolerant execution. The rest of this post fixes the
+second half and tries hard not to give up the first.
+
+To do that, the post writes the same agent three times. First as is. Then made
+durable by hand, which works and is ugly. Then made durable with a decorator,
+which looks exactly like the first version and does not die.
 
 ## Where this sits
 
