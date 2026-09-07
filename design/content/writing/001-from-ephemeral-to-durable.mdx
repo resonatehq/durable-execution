@@ -53,8 +53,9 @@ For a function that runs in ten milliseconds, nobody cares. The agent runs for
 minutes — twenty model calls, a dozen tool calls — and over those minutes a
 deploy happens, a spot instance is reclaimed, an OOM killer picks a victim.
 When that happens you start over from the first token: every model call paid
-for twice, every tool call run twice. Nineteen successful steps are not
-recoverable, because nothing wrote them down.
+for twice, every tool call run twice — and if one of those tools was
+`send_email` or `charge_card`, that runs twice too. Nineteen successful steps
+are not recoverable, because nothing wrote them down.
 
 Notice what that program already is, though: nothing in the code mentions
 crashing. Interruption-agnostic code, buying interruption-intolerant
@@ -102,8 +103,9 @@ So you write them down. Before touching the agent, decide what you are writing.
 
 ### The store
 
-A step has an identity, the arguments it was called with, and either an outcome
-or not one yet. That is a promise:
+A step has an identity, the arguments the step was called with, and either an
+outcome or not one yet. That is a promise — not the JavaScript kind; a
+smaller, stricter thing:
 
 ```python name="Promise"
 PENDING, RESOLVED, REJECTED = "pending", "resolved", "rejected"
@@ -136,8 +138,9 @@ class Store:
 
 This one is a dict, so the store dies with the process and is useless for the
 actual job. Ignore that for now — a real store is a database, and swapping one
-for the other changes nothing above this line. What matters is the interface —
-two operations — and three properties of that interface.
+for the other changes nothing above this line. What matters is the interface:
+two operations, and the interesting part is what they refuse to do. Three
+properties, in all.
 
 The param is on the promise so that a process which did not make the call can
 still make it — an id on its own does not say what to run.
@@ -302,8 +305,17 @@ async def agent(prompt: str, store: Store, run_id: str):
     return response["content"]
 ```
 
-This works. Most teams end up here, and the code is correct as written.
-Nothing is wrong with the approach except the cost.
+This works, and a crash shows how. Call the run `r7`. Steps `r7.1` through
+`r7.5` are settled in the store; `r7.6` is pending — the tool was mid-flight
+when the process died. Restart with the same run id. `create("r7.1", ...)`
+returns the settled promise, so the code skips the pending block and takes the
+recorded response. Same for two through five. At `r7.6` the promise is
+pending, so the tool runs, settles, and the loop carries on. Five steps
+replayed from the store in milliseconds, one step resumed, the rest executed
+fresh.
+
+Most teams end up here, and the code is correct as written. Nothing is wrong
+with the approach except the cost.
 
 Here is what the bookkeeping does to the stack for one call, while `agent` is
 working through `await llm(messages)`.
@@ -372,7 +384,10 @@ response = await durable(store, f"{run_id}.{step}", llm, messages)
 Good. The duplication is gone, and the read-back is now written once instead
 of at every call site. The helper also changes the picture above: create,
 call, and settle now happen in `durable`'s frame, one level below `agent`.
-Hold on to that; that is where this is going.
+Hold on to that; that is where this is going. But every call site still has to
+remember to go through `durable` rather than calling the function directly,
+and forgetting once means that step silently re-executes on every replay. The
+awareness has been compressed, not removed.
 
 Three things are not gone.
 
@@ -384,25 +399,30 @@ is the parent of the ids that come back: step `run1.2` creates `run1.2.1`
 beneath. That is how durability composes, and also how durability leaks:
 upward through the type of every function that participates.
 
-**The id is a counter, and the counter has to be right.** In a straight line of
-code you can name your steps `"plan"`, `"search"`, `"report"`. In a loop there
-is no fixed set of steps, so identity falls back on position — and position has
-to land on the same number for the same call on every replay. That means the
-replayed program has to take the same path through the loop. Recovery is only
-correct if the function is deterministic between recorded steps, and nothing in
-the code says so. Add an `if` on a timestamp, iterate a set, skip a tool call
-when a flag is set, and the counter drifts. Step 7 on the replay is not step 7
-from the first run, and the agent resumes with someone else's answer. No test
-catches this; it shows up as an agent that occasionally continues a conversation
-it never had.
+**The id is a counter, and the counter has to be right.** In a straight line
+of code you can name your steps `"plan"`, `"search"`, `"report"`. In a loop
+there is no fixed set of steps, so identity falls back on position — and
+position has to land on the same number for the same call on every replay.
+That means the replayed program has to take the same path through the loop.
+Recovery is only correct if the function is deterministic between recorded
+steps, and nothing in the code says so. Add an `if` on a timestamp, iterate a
+set, skip a tool call when a flag is set, and the counter drifts. Step 7 on
+the replay is not step 7 from the first run, and the agent resumes with
+someone else's answer. No test catches this; the symptom is an agent that
+occasionally continues a conversation the agent never had. Determinism is not
+a nice-to-have here. Determinism is the thing addressing is built on.
 
-**A step can still run twice.** Between `llm(messages)` returning and the
-settle committing, the process can die. The call happened, the record did not,
-and on restart you make the call again. You can shrink that window but you
-cannot close the window, so the honest position is that steps execute at least
-once, and anything with an external effect has to tolerate that.
-First-writer-wins plus reading back is what keeps at-least-once from turning
-into disagreement.
+**A step can still run twice.** Between the tool finishing and the settle
+committing, the process can die. The call happened, the record did not, and on
+restart you make the call again. You can shrink that window but you cannot
+close the window — nothing can, over a network. What the store can do is give
+the attempt a stable identity. The id already travels downstream, so the tool
+passes the id along as an idempotency key, and the email service or the
+payment processor deduplicates on their side. Exactly-once is not a property
+you get. Exactly-once is a property you assemble, from at-least-once execution
+plus deduplication at every boundary that matters. First-writer-wins plus
+reading back is what keeps the at-least-once half from turning into
+disagreement.
 
 The third one is a property of the problem, not of this approach — it does not
 change in the next section. The first two do.
@@ -439,16 +459,20 @@ async def agent(prompt: str):
     return response["content"]
 ```
 
-Same program as the top of this post. The bookkeeping did not move into a
-helper; the bookkeeping moved under the language. `await llm(messages)`
-derives an id, creates the promise, runs the call if the promise is pending,
-settles the promise, reads back what the store holds, and returns or raises
-from that. A crash and restart replays the function, finds the promises that
-survived, and skips past the work they represent.
+That is the agent from the top of this post, character for character, plus one
+line. The bookkeeping did not move into a helper; the bookkeeping moved under
+the language. `await llm(messages)` derives an id, creates the promise, runs
+the call if the promise is pending, settles the promise, reads back what the
+store holds, and returns or raises from that. A crash and restart replays the
+function, finds the promises that survived, and skips past the work they
+represent.
 
 Interruption-agnostic code, interruption-tolerant execution. Nothing about the
 guarantee changed between this section and the last one. What changed is where
-the awareness lives: out of your program, into the runtime.
+the awareness lives: out of your program, into the runtime. The two properties
+that started out fused have been separated, and the seam is the function call.
+Fourteen lines at the top of this post; fourteen lines here. The difference is
+that these fourteen do not die.
 
 Here is what that does to the stack for the same call.
 
@@ -476,9 +500,10 @@ The call site no longer calls `llm` but `invoke`, and `invoke` is the
 runtime's frame — deriving the id, creating the promise, calling the real
 function, and settling the promise with whatever came back. The frames above
 `invoke` are always these three, in this order, whatever the call underneath
-happens to be. That is the manual diagram with one frame slid underneath, the
-same frame `durable` pushed, except you no longer pass a store or an id and no
-longer have to remember to call the thing at all.
+happens to be. From where the agent stands, `await llm(messages)` returned a
+response, same as always. That is the manual diagram with one frame slid
+underneath, the same frame `durable` pushed, except you no longer pass a store
+or an id and no longer have to remember to call the thing at all.
 
 Step 2 is the interesting one on a restart. `invoke` derives the same id, finds
 the promise already settled from a previous life of this program, and returns
@@ -518,6 +543,30 @@ promise whose children are also promises.
 
 None of that needs a workflow DSL, a state machine, or a YAML file describing
 your control flow. The control flow is the Python. The durability is the store.
+
+## What you are signing up for
+
+None of this is free, and the asks are worth stating plainly, because they are
+the same asks the hand-wrapped version made — they have only stopped being
+visible.
+
+**Your code between awaits must be deterministic.** Replay re-runs that code,
+and the re-run has to arrive at the same calls in the same order. Read the
+clock or roll dice inside an awaited call, where the result gets recorded;
+never in between.
+
+**Your side effects must be idempotent at the boundary.** The runtime can give
+every attempt a stable id. Whether the thing on the other end honours the id
+is up to you.
+
+**Your recorded values must be serialisable, and reasonably sized.** They are
+going into a store, and replay means reading every one of them back.
+
+**A run is a different kind of object than a process.** A run has an id. A run
+can outlive the machine that started the run and finish on another. Two
+workers can pick up the same run, and first-writer-wins is what stops both of
+them doing step seven: the loser gets the winner's promise back and moves on.
+Hold on to that one — the next post is built on top of that.
 
 ## What that leaves
 
