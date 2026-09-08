@@ -20,11 +20,14 @@ const parseRow = (row) => {
 
 const snapshot = (rows = []) => Object.fromEntries(rows.map(parseRow));
 
-export default function StackEvolution({ columns, accentFrames = [], interval = 2200 }) {
+export default function StackEvolution({ columns, accentFrames = [], interval = 3000 }) {
   const stripRef = useRef(null);
   const trackRef = useRef(null);
   const [animated, setAnimated] = useState(false);
   const [active, setActive] = useState(0);
+  // The store lags the stack by half a step: the frame that creates or settles
+  // a promise is on screen first, and the store changes while it is showing.
+  const [shown, setShown] = useState(0);
 
   const hasStore = columns.some((c) => c.store);
   const last = columns[columns.length - 1];
@@ -44,8 +47,8 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
     });
   });
 
-  const current = snapshot(cells[active]?.store);
-  const previous = snapshot(cells[active - 1]?.store);
+  const current = snapshot(cells[shown]?.store);
+  const previous = snapshot(cells[shown - 1]?.store);
 
   const centre = useCallback((index) => {
     const strip = stripRef.current;
@@ -69,12 +72,16 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
     if (!strip) return;
 
     let timer = null;
+    let lag = null;
     let i = 0;
 
     const step = () => {
       i = (i + 1) % cells.length;
       setActive(i);
       centre(i);
+      const at = i;
+      clearTimeout(lag);
+      lag = setTimeout(() => setShown(at), interval / 2);
     };
 
     const io = new IntersectionObserver(
@@ -99,6 +106,7 @@ export default function StackEvolution({ columns, accentFrames = [], interval = 
     return () => {
       io.disconnect();
       if (timer) clearInterval(timer);
+      clearTimeout(lag);
       window.removeEventListener('resize', onResize);
     };
   }, [animated, cells.length, interval, centre]);
