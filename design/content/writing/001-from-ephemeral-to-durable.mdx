@@ -111,11 +111,7 @@ class Store:
 
 This store is a dict, so the store dies with the process. Useless for the real
 job, but the interface is what matters, and the interface is two operations:
-create a promise, settle a promise. Both are first-writer-wins, and that makes
-both idempotent: the first call sets the record, and every later call returns
-that record no matter what arguments come with it. Here's what that means in
-practice:
-
+create a promise, settle a promise. Here's how they behave over one session:
 
 ```python name="Store, in one session" listing="4"
 #                                 Promise(id, state, param, value)
@@ -132,26 +128,26 @@ s.settle("a", REJECTED, Err())  # Promise("a", RESOLVED, 1, 9)  <- so is Err
 s.create("a", 3)                # Promise("a", RESOLVED, 1, 9)  <- replay sees
 ```
 
-Nothing after the first create changes the param. Nothing after the first
-settle changes the value.
+Nothing after the first `create` changes the param. Nothing after the first
+`settle` changes the value. Both operations are first-writer-wins, and that
+makes both idempotent: the first call sets the record, and every later call
+with the same id gets that record back, whatever arguments come with it. Two
+things follow. A step that runs twice can't end up with two outcomes on
+record. And a restarted program can call `create` on an id from a previous
+life and get back what happened last time — which is the last line above, and
+the whole reason the store exists.
 
-**Both are first-writer-wins.** The first `create` fixes the param. The first
-`settle` fixes the outcome. A later call with the same id changes nothing,
-whatever arguments come with it — so a step that runs twice can't end up with
-two different outcomes on record.
+That's all the store does. It doesn't know what an agent is. It holds
+promises, and it holds them the same way for anyone who asks.
 
-**And so both are idempotent.** Call either one again and you get back exactly
-what the first call produced. That's what makes replay work: a restarted
-program calls `create` on ids that already exist and gets back what happened
-last time, and a retried `settle` can't overwrite an answer that's already
-there.
-
+<Ornament />
 
 ### A first solution, wrapping by hand
 
-Now put the store in the agent. Every call site gets the same treatment: build
-an id, create the promise, do the work if the promise is still pending, settle
-either way, then return or raise based on what the store says.
+So use it. Memoizing a call now has a shape: give the call an id, create the
+promise, and if the promise comes back pending, do the work and settle it. Then
+return or raise from whatever the store holds — not from what you just
+computed. Do that at every call site in the agent and this is what comes out.
 
 ```python name="agent, wrapped by hand" listing="5"
 def agent(question, store, run_id):
