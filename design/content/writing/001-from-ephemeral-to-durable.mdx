@@ -152,10 +152,11 @@ promises, and it holds them the same way for anyone who asks.
 
 ### Wrapping by hand: sixteen lines become sixty-four
 
-So use it. Memoizing a call now has a shape: give the call an id, create the
-promise, and if the promise comes back pending, do the work and settle it. Then
-return or raise from whatever the store holds, not from what you just
-computed. Do that at every call site in the agent and this is what comes out.
+With the store in hand, memoizing a call has a shape: give the call an id,
+create the promise, and if the promise comes back pending, do the work and
+settle it. Then return or raise from whatever the store holds, not from what
+you just computed. Do that at every call site in the agent and this is what
+comes out.
 
 ```python name="agent, wrapped by hand" listing="5"
 def agent(question, store, run_id):
