@@ -34,6 +34,12 @@ export default async function Post({ params }) {
       <p className="standfirst rise rise-2">{frontmatter.standfirst}</p>
 
       <div className="meta rise rise-3">
+        {frontmatter.author && (
+          <>
+            <span>{frontmatter.author}</span>
+            <span className="dot">·</span>
+          </>
+        )}
         <span>{frontmatter.readTime}</span>
         <span className="dot">·</span>
         <span>{longDate(frontmatter.date)}</span>
