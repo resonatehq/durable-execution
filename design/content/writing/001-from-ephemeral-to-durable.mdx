@@ -234,27 +234,30 @@ this approach except the cost.
 
 Here's what the bookkeeping does to the stack for the same three calls, with
 the store beside it. The run has an id, `agent.012d7`, and each step gets one
-beneath it.
+beneath it. The run gets a promise too, created by whoever calls `agent` and
+settled when `agent` returns — the same treatment, one level up.
 
 <Figure
   number="Fig. 2"
-  caption="Create, call, settle, three times over, all of it pushed by agent itself. The store changes only at create and at settle. Note what the store never holds: a promise for the run. There is a run id, but nothing records the call to agent."
+  caption="Create, call, settle, three times over, all of it pushed by agent itself. The store changes only at create and at settle. The run's own promise is the caller's job: created before agent is called, settled after agent returns."
 >
   <StackEvolution
     columns={[
-      { label: '1',  frames: ['agent'],                       store: [] },
-      { label: '2',  frames: ['agent', 'store.create'],       store: ['agent.012d7:1 PENDING'] },
-      { label: '3',  frames: ['agent', 'prompt(messages)'],   store: ['agent.012d7:1 PENDING'] },
-      { label: '4',  frames: ['agent', 'store.settle'],       store: ['agent.012d7:1 RESOLVED'] },
-      { label: '5',  frames: ['agent'],                       store: ['agent.012d7:1 RESOLVED'] },
-      { label: '6',  frames: ['agent', 'store.create'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
-      { label: '7',  frames: ['agent', 'invoke(tool, args)'], store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
-      { label: '8',  frames: ['agent', 'store.settle'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
-      { label: '9',  frames: ['agent'],                       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
-      { label: '10', frames: ['agent', 'store.create'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
-      { label: '11', frames: ['agent', 'prompt(messages)'],   store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
-      { label: '12', frames: ['agent', 'store.settle'],       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
-      { label: '13', frames: ['agent'],                       store: ['agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
+      { label: '1',  frames: ['store.create'],                 store: ['agent.012d7 PENDING'] },
+      { label: '2',  frames: ['agent'],                        store: ['agent.012d7 PENDING'] },
+      { label: '3',  frames: ['agent', 'store.create'],        store: ['agent.012d7 PENDING', 'agent.012d7:1 PENDING'] },
+      { label: '4',  frames: ['agent', 'prompt(messages)'],    store: ['agent.012d7 PENDING', 'agent.012d7:1 PENDING'] },
+      { label: '5',  frames: ['agent', 'store.settle'],        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED'] },
+      { label: '6',  frames: ['agent'],                        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED'] },
+      { label: '7',  frames: ['agent', 'store.create'],        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
+      { label: '8',  frames: ['agent', 'invoke(tool, args)'],  store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 PENDING'] },
+      { label: '9',  frames: ['agent', 'store.settle'],        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '10', frames: ['agent'],                        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED'] },
+      { label: '11', frames: ['agent', 'store.create'],        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
+      { label: '12', frames: ['agent', 'prompt(messages)'],    store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 PENDING'] },
+      { label: '13', frames: ['agent', 'store.settle'],        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
+      { label: '14', frames: ['agent'],                        store: ['agent.012d7 PENDING', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
+      { label: '15', frames: ['store.settle'],                 store: ['agent.012d7 RESOLVED', 'agent.012d7:1 RESOLVED', 'agent.012d7:2 RESOLVED', 'agent.012d7:3 RESOLVED'] },
     ]}
   />
 </Figure>
@@ -450,9 +453,10 @@ function, and settles the promise with whatever came back. The frames above
 happens to be. From where the agent stands, `prompt(messages)` returned a
 response, same as always. That's the manual diagram with one frame slid
 underneath every call — including the call to `agent`. The decorator is that
-bottom frame: the run gets a promise of its own, `agent.012d7`, pending from
-state 2 until `agent` returns at state 19. By hand, nothing recorded the run;
-now the run is just another durable call, and the steps hang off its id.
+bottom frame: the run's promise, `agent.012d7`, pending from state 2 until
+`agent` returns at state 19, is created and settled by the same code that
+handles every step. By hand, the caller had to do that part; now the run is
+just another durable call, and the steps hang off its id.
 
 State 4 is the interesting one on a restart. `durable` derives the same id,
 finds `agent.012d7:1` already resolved from a previous life of this program,
