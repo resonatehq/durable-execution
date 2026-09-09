@@ -80,8 +80,19 @@ interruption-intolerant.
 ## Memoize every call, keyed by a stable id
 
 The easiest fix is to memoize the function call. Store the return value, and
-next time, don't call the function, return the stored value. The only thing to
-add is a stable id for each call, so the stored value can be found again.
+next time, don't call the function, return the stored value.
+
+Memoization is usually shown keyed by the arguments: same inputs, same output,
+so look the output up. That works for mathematical functions, and only for
+those. In a world with side effects, the same call with the same arguments can
+be two different events. Charging the same card the same amount twice is two
+charges, and a lookup keyed by arguments would collapse the second into the
+first and quietly skip it, or worse, run one when the other was meant. So we
+key by position instead. Every call gets an id that says where in the run the
+call happened: the run has an id, the first call the run makes is `:1`, the
+second `:2`, and a call made from inside `:2` is `:2:1`. The ids are
+hierarchical, they sort in the order the execution unfolds, and the same call
+gets the same id on every replay. That's the only thing we have to add.
 
 ### The store: create and settle, first writer wins
 
