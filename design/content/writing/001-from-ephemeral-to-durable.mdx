@@ -7,11 +7,13 @@ author: Dominik Tornow
 date: 2026-09-06
 readTime: 7 min read
 ---
-An agent that runs for minutes has a problem a ten-millisecond function never
-has: the process can die halfway through, and everything the agent did dies
-with it. This post fixes that with one primitive, a persisted promise per
-function call. First by hand, so you can see what the fix costs, then with a
-decorator.
+A function that runs in milliseconds, is deterministic, and has no side
+effects can simply be run again when its process crashes halfway through. A
+function that runs for minutes, is non-deterministic, and has side effects
+cannot: the second run pays again and may not do the same thing.
+
+This post fixes that with one primitive: a durable promise. First by hand, so
+you can see what the fix costs, then with a decorator.
 
 Listing 1 shows a simple tool-calling agent. First the function prompts a
 model. If the model returns a tool call, the function invokes the tool and
@@ -55,9 +57,8 @@ def agent(question):
 </Figure>
 
 When the process dies, the stack is gone, and with it everything the function
-knew. For a cheap, deterministic function that's fine: run it again. An agent
-runs for minutes, burns tokens, gives a different answer every time, and calls
-tools that do things in the world.
+knew. An agent runs for minutes, burns tokens, gives a different answer every
+time, and calls tools that do things in the world.
 
 Say the agent books travel: the model picks a flight, the agent charges the
 card, then books the seat. The process dies between the two, we retry, the
@@ -84,8 +85,8 @@ gets the same id on every replay.
 ### The store: create and settle, first writer wins
 
 A function call has an identity, arguments, and either an outcome or nothing
-yet. Bundle those together and you have a promise: not the JavaScript kind,
-but an in-memory promise with an id, kept in a database instead of a
+yet. Bundle those together and you have a durable promise: not the JavaScript
+kind, but an in-memory promise with an id, kept in a database instead of a
 variable.
 
 ```python name="Promise" listing="2"
@@ -319,7 +320,7 @@ The third is a property of the problem and doesn't change. The first two do.
 
 Nothing in `durable` mentions agents, models, or tools; the shape is the same
 for every call in every durable function anyone will write. So make it the
-primitive: persist promises, and let the call sites use them.
+primitive: durable promises, and let the call sites use them.
 
 ```python name="agent" listing="8"
 @resonate
