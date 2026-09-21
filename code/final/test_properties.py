@@ -218,7 +218,7 @@ TRANS_VIOLATORS = {
     "consistent_listener_consumption_enqueues_unblock": lambda a, b: (settle(b, "o:e", RESOLVED, NOW), setattr(p(b, "o:e"), "listeners", [])),
     "consistent_wake_follows_callback_consumption": lambda a, b: (
         setattr(t(b, "o:s"), "state", T_PENDING), setattr(t(b, "o:s"), "retry_at", NOW + 30_000), setattr(t(b, "o:s"), "resumes", {"o:e"})),
-    "consistent_suspension_registers_callback": lambda a, b: (
+    "consistent_suspension_registers_callback_adapted": lambda a, b: (
         setattr(t(a, "o:b"), "state", T_ACQUIRED), setattr(t(a, "o:b"), "pid", "p"), setattr(t(a, "o:b"), "ttl", 1), setattr(t(a, "o:b"), "lease_at", NOW + 1), setattr(t(a, "o:b"), "retry_at", None),
         setattr(t(b, "o:b"), "state", T_SUSPENDED), setattr(t(b, "o:b"), "retry_at", None)),
     "consistent_task_birth_couples_promise_birth": lambda a, b: new_obj(b, "o:n", {"resonate:target": W}),
@@ -280,6 +280,27 @@ def test_each_transition_violator_is_rejected_by_its_own_entry():
         a, b = base(), base()
         violate(a, b)
         assert name in P.internal_failures(NOW, a, b), name
+
+
+def test_a_re_suspension_registers_nothing_new():
+    """The path the specification's corpus never reaches: suspend, halt,
+    continue, acquire, suspend on the same promise. The spec form of
+    `consistent_suspension_registers_callback` rejects the last step; the
+    adapted form, and the rest of the catalogue, accept it."""
+    d = Document()
+    d = apply(d, create("o:x", 1_000_000, {"resonate:scope": "global"}), 0)
+    d = apply(d, create("o:a", 1_000_000, {"resonate:target": W}), 1)
+    d = apply(d, TaskAcquire("o:a", 0, "p1", 5_000), 2)
+    d = apply(d, TaskSuspend("o:a", 1, ("o:x",)), 3)
+    d = apply(d, TaskHalt("o:a"), 4)
+    d = apply(d, TaskContinue("o:a"), 5)
+    d = apply(d, TaskAcquire("o:a", 1, "p1", 5_000), 6)
+    a = P.State(d)
+    d2, sends, reply = run(d, TaskSuspend("o:a", 2, ("o:x",)), 7)
+    b = a.after(d2, sends)
+    assert reply.status == 200 and d2.get("o:x").promise.callbacks == ["o:a"]
+    assert P.trans_failures(7, a, b) == []
+    assert not P.consistent_suspension_registers_callback(7, a, b)
 
 
 def test_the_spec_forms_of_the_fused_entries_fail_on_our_fused_step():

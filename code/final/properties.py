@@ -12,13 +12,20 @@ run a catalogue and return the NAMES of the properties that broke. The names
 are the specification's own, so a violation means the same thing here as in
 Lean, Go or TypeScript.
 
-Two entries are adapted, and both are marked `_fused`. The abstract machine's
-request steps only arm a task's retry deadline at `now`; the internal retry
-step then sends the execute message and re-arms at `now + retry_timeout`. Our
-kernel fuses those two steps into one, as the Rust kernel does, so on entry
-to `pending` the deadline is already `now + retry_timeout` and the execute is
-already in the outbox. The specification's originals are kept beside them as
-`SPEC_ONLY` for reference and are not walked.
+Three entries are adapted. Two are marked `_fused`: the abstract machine's
+request steps only arm a task's retry deadline at `now`, and the internal
+retry step then sends the execute message and re-arms at `now +
+retry_timeout`; our kernel fuses those two steps into one, as the Rust kernel
+does, so on entry to `pending` the deadline is already `now + retry_timeout`
+and the execute is already in the outbox. One is marked `_adapted`:
+`consistent_suspension_registers_callback` demands a callback NEW in the
+step, but a task that suspends on a promise, is halted, continued,
+re-acquired, and suspends on the same promise again registers nothing new,
+because registration is idempotent in the specification's own `taskSuspend`.
+The specification samples that entry on scripts of length three, which never
+reach the five-step path; our walk did. The adapted form asks that the task
+hold a registration on a pending promise after the step. The originals are
+kept beside them as `SPEC_ONLY` for reference and are not walked.
 
 Schedules are not implemented, so the six schedule properties hold over an
 empty list. They are transcribed anyway so the catalogue is the whole
@@ -665,6 +672,7 @@ def consistent_wake_follows_callback_consumption(_now, a, b):
 
 
 def consistent_suspension_registers_callback(_now, a, b):
+    """SPEC FORM: a task entering suspended registered a NEW callback. See `_adapted`."""
     for o in b.doc.objects:
         u = o.task
         if u is None or u.state != T_SUSPENDED:
@@ -679,6 +687,21 @@ def consistent_suspension_registers_callback(_now, a, b):
             for q in b.doc.objects
         )
         if not ok:
+            return False
+    return True
+
+
+def consistent_suspension_registers_callback_adapted(_now, a, b):
+    """A task entering suspended holds a registration on a pending promise
+    after the step, whether this step made it or an earlier one did."""
+    for o in b.doc.objects:
+        u = o.task
+        if u is None or u.state != T_SUSPENDED:
+            continue
+        t = a.task(o.id)
+        if t is not None and t.state == T_SUSPENDED:
+            continue
+        if not any(o.id in q.promise.callbacks and q.promise.state == PENDING for q in b.doc.objects):
             return False
     return True
 
@@ -1104,7 +1127,7 @@ TRANS: list[tuple[str, Callable[[int, State, State], bool]]] = [
         consistent_callback_consumption_resumes_awaiter,
         consistent_listener_consumption_enqueues_unblock,
         consistent_wake_follows_callback_consumption,
-        consistent_suspension_registers_callback,
+        consistent_suspension_registers_callback_adapted,
         consistent_task_birth_couples_promise_birth,
         monotone_outbox_keys_never_disappear,
         consistent_new_execute_matches_task_and_target,
@@ -1131,8 +1154,13 @@ TRANS: list[tuple[str, Callable[[int, State, State], bool]]] = [
     ]
 ]
 
-#: The two entries whose specification form assumes unfused steps.
-SPEC_ONLY = [consistent_task_pending_entry_arms_retry, consistent_task_wake_records_resume]
+#: The entries whose specification form is not walked: two assume unfused
+#: steps, one a corpus too short to reach a re-suspension.
+SPEC_ONLY = [
+    consistent_task_pending_entry_arms_retry,
+    consistent_task_wake_records_resume,
+    consistent_suspension_registers_callback,
+]
 
 INTERNAL = [
     (f.__name__, f) for f in [
