@@ -18,6 +18,7 @@ and a heap, which is what makes a whole run a unit test.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -26,7 +27,9 @@ from kernel import (
     REJECTED, RESOLVED, Execute, PromiseCreate, PromiseSettle, TAG_TARGET,
     TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend, Unblock, Value,
 )
-from sdk import _CURRENT, REGISTRY, Blocked, Failed, Invocation, _Call, dumps, loads
+from sdk import (
+    _FRAME, _INVOCATION, REGISTRY, Blocked, Failed, Invocation, _Call, dumps, loads, route,
+)
 
 
 @dataclass
@@ -67,10 +70,8 @@ class Worker:
         fn = REGISTRY[call["f"]]
 
         while True:
-            inv = Invocation(self.engine, task_id, v, self.clock, stack=[_Call(task_id)])
-            token = _CURRENT.set(inv)
             try:
-                result = fn.fn(*call["a"])
+                result = self._run(fn, call["a"], task_id, v)
             except Blocked as b:
                 suspend = self.engine.process(
                     TaskSuspend(task_id, v, tuple(b.ids)), self.clock())
@@ -88,11 +89,24 @@ class Worker:
                 # Hand the task back at the same version so it is offered again.
                 self.engine.process(TaskRelease(task_id, v), self.clock())
                 raise
-            finally:
-                _CURRENT.reset(token)
             self.engine.process(TaskFulfill(
                 task_id, v, PromiseSettle(task_id, RESOLVED, dumps(result))), self.clock())
             return "done"
+
+    def _run(self, fn, args, task_id: str, version: int):
+        """Drive one attempt of a durable function to its end or its block.
+
+        A durable function is async, and a worker is not: something has to
+        own the loop. It is here rather than around the whole runtime so a
+        leaf that does real I/O can await it, while everything outside stays
+        the ordinary synchronous shell it is in production.
+        """
+        async def attempt():
+            _INVOCATION.set(Invocation(self.engine, task_id, version, self.clock))
+            _FRAME.set(_Call(task_id))
+            return await fn.invoke(*args)
+
+        return asyncio.run(attempt())
 
 
 @dataclass
@@ -106,17 +120,24 @@ class Runtime:
     #: registered a listener would have received.
     notified: dict[str, dict] = field(default_factory=dict)
 
-    def serve(self, address: str, worker: Worker) -> None:
+    def serve(self, address: str, worker: Worker, *functions) -> None:
+        """Put a worker at an address, and say which functions run there.
+        The routing is deployment rather than definition: the same function
+        is a local call on one machine and a remote one seen from another."""
         self.workers[address] = worker
+        for fn in functions:
+            route(fn, address)
 
     def start(self, id: str, fn, *args, timeout: int = 10 ** 9) -> None:
         """Create the run's own promise. It carries a target, so the engine
         dispatches it and a worker picks it up on the next drain."""
-        if fn.target is None:
-            raise RuntimeError(f"{fn.name} has no target, so nothing can run it")
+        from sdk import TARGETS
+        target = TARGETS.get(fn.name)
+        if target is None:
+            raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
         self.engine.process(PromiseCreate(
             id, self.clock() + timeout, dumps({"f": fn.name, "a": args}),
-            {TAG_TARGET: fn.target}), self.clock())
+            {TAG_TARGET: target}), self.clock())
 
     def step(self) -> bool:
         """One unit of work: deliver what is queued, or fire the nearest

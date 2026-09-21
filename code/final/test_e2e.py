@@ -1,9 +1,9 @@
 """The whole thing, from a decorated function to bytes in a bucket.
 
-The program is the one from the repository's own README: plan the searches,
-fan them out, synthesize the results. It is ordinary Python. Nothing in it
-mentions promises, tasks, leases, retries or recovery, which is the claim
-the entire project is making.
+The program is the one from the repository's own README, character for
+character: plan the searches, fan them out, synthesize the results. It is
+ordinary async/await. Nothing in it mentions promises, tasks, leases,
+retries or recovery, which is the claim the entire project is making.
 
 Everything under it is real: the kernel decides, the engine commits one
 conditional write per transition, the document lands in a simulated bucket
@@ -28,7 +28,7 @@ from engine import Engine
 from kernel import KernelCfg, PromiseRegisterListener, Send
 from ports import Crash, Fault, MemoryTimers, MemoryTransport
 from runtime import Clock, Runtime, Worker
-from sdk import REGISTRY, gather, resonate
+from sdk import gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)
 AGENT, SEARCH = "worker://agent", "worker://search"
@@ -40,8 +40,9 @@ VALIDATOR = jsonschema.Draft202012Validator(
 CALLS: Counter = Counter()
 
 
-@resonate(target=AGENT)
-def agent(prompt: str):
+@resonate
+async def agent(prompt: str):
+    """A model call. Async, because that is what a model call is."""
     CALLS["agent"] += 1
     if prompt.startswith("Plan"):
         return ["durable execution", "workflow recovery", "sagas"]
@@ -50,20 +51,23 @@ def agent(prompt: str):
     return {"report": prompt}
 
 
-@resonate(target=SEARCH)
+@resonate
 def search(query: str):
+    """A leaf with nothing to await. It does not have to pretend."""
     CALLS["search:" + query] += 1
     return f"finding about {query}"
 
 
-@resonate(target=AGENT)
-def research(question: str):
+@resonate
+async def research(question: str):
     # Plan the searches
-    queries = agent(f"Plan the searches for: {question}")
+    queries = await agent(f"Plan the searches for: {question}")
+
     # Fan out the searches
-    results = gather(*[search.rpc(q) for q in queries])
+    results = await gather(search.rpc(q) for q in queries)
+
     # Synthesize the results
-    return agent(f"Write a cited report. {question}: {results}")
+    return await agent(f"Write a cited report. {question}: {results}")
 
 
 QUESTION = "What is durable execution?"
@@ -78,8 +82,8 @@ def world(fault: Fault | None = None):
     clock = Clock()
     engine = Engine(store, timers, transport, CFG)
     rt = Runtime(engine, timers, transport, clock)
-    rt.serve(AGENT, Worker(engine, clock, "agent-1"))
-    rt.serve(SEARCH, Worker(engine, clock, "search-1"))
+    rt.serve(AGENT, Worker(engine, clock, "agent-1"), research, agent)
+    rt.serve(SEARCH, Worker(engine, clock, "search-1"), search)
     return rt, blob, engine, clock
 
 

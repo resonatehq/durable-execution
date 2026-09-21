@@ -1,16 +1,22 @@
-"""The programming model: ordinary Python, one decorator.
+"""The programming model: ordinary async/await, one decorator.
 
-This is what the two posts promise, made real over the engine. A function
-marked `@resonate` runs durably. Calling one from inside another is a
-durable call, memoized by position. Calling one with `.rpc` dispatches it to
-whatever worker serves its target and returns a handle. `gather` reads
-several handles at once.
+This is the target from the repository's README, and it is the whole claim:
 
     @resonate
-    def agent(question):
-        response = prompt(messages)          # durable, and skipped on replay
-        result = invoke.rpc(tool, args)      # somewhere else, and suspended on
-        return gather(*[search.rpc(q) for q in queries])
+    async def research(question: str):
+        # Plan the searches
+        queries = await agent(f"Plan the searches for: {question}")
+
+        # Fan out the searches
+        results = await gather(search.rpc(q) for q in queries)
+
+        # Synthesize the results
+        return await agent(f"Write a cited report. {question}: {results}")
+
+No state machines, no workflow DSL, no context object threaded through every
+call. `await agent(...)` runs durably in this process. `search.rpc(q)` runs
+durably in another one, the same function on a different machine. `gather`
+does what it always did.
 
 ## What derives an id
 
@@ -24,19 +30,23 @@ The counter has to land on the same number every time, which is the one thing
 this model asks of your code. Read a clock or roll dice inside a durable call,
 never between two of them.
 
-## Why `.rpc` returns a handle
+## Why async is not a detail
 
-In the posts the model is async and `await` is where a value is read, so the
-handle is invisible. Here it is explicit: `.rpc(q)` dispatches and returns,
-`.result()` reads. That is not a decoration. A fan-out has to dispatch every
-branch *before* anything blocks, or the branches run one at a time — so
-dispatching and reading have to be separable, and in a synchronous language
-that means two calls.
+`gather` has to dispatch every branch before anything blocks, or the branches
+run one at a time. In async that falls out: each branch is a coroutine, they
+all run up to the point where their value is not there yet, and only then is
+there anything to wait for. A synchronous model would need the dispatch and
+the read to be two calls the programmer writes separately, and then this
+would not be the program above.
+
+A durable function may be `async def` or a plain `def`. A leaf that only
+calls a model or an index has nothing to await, and should not have to
+pretend it does.
 
 ## What happens when a value is not there yet
 
 `Blocked` unwinds the stack, carrying the ids it is waiting for. The worker
-turns it into one `task.suspend` naming all of them and releases the task.
+turns it into one `task.suspend` naming all of them and hands the task back.
 Nothing waits anywhere: no coroutine parked on a socket, no thread, no row
 marked in progress. What is left is a pending promise and a note to wake this
 task when it settles.
@@ -44,14 +54,16 @@ task when it settles.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from kernel import (
-    PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TaskFence,
-    TAG_TARGET, Value,
+    PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
+    TaskFence, Value,
 )
 
 #: How long a promise this SDK creates has to settle before it times out.
@@ -68,14 +80,19 @@ class Blocked(Exception):
 
 
 class Failed(Exception):
-    """A durable call that was recorded as rejected. Raised on the run that
-    made it and on every replay after, because the rejection is the result."""
+    """A durable call recorded as rejected. Raised on the run that made it
+    and on every replay after, because the rejection is the result."""
 
 
 @dataclass
 class _Call:
     """One frame of the durable call stack: which promise is running, and how
-    many durable calls it has made so far."""
+    many durable calls it has made so far.
+
+    The counter is shared by everything that call makes, including branches
+    running concurrently, which is what keeps `:1`, `:2`, `:3` in the order
+    the program asked for them.
+    """
 
     id: str
     n: int = 0
@@ -90,20 +107,17 @@ class _Call:
 
 @dataclass
 class Invocation:
-    """What a worker is running: the task it holds, and the call stack."""
+    """What a worker is running: the task it holds, and the clock."""
 
     engine: Any
     task_id: str
     version: int
     now: Callable[[], int]
-    stack: list[_Call] = field(default_factory=list)
     corr: int = 0
 
     def fence(self, action):
         """Every write a running function makes goes through its task's
-        version, so a worker that lost its lease cannot write. The action is
-        always on a *child* of the task, never the task's own promise, which
-        is what `task.fulfill` is for."""
+        version, so a worker that lost its lease cannot write."""
         self.corr += 1
         reply = self.engine.process(
             TaskFence(self.task_id, self.version, f"c{self.corr}", action), self.now())
@@ -113,14 +127,19 @@ class Invocation:
         return inner["head"]["status"], inner["data"]
 
 
-_CURRENT: ContextVar[Invocation | None] = ContextVar("invocation", default=None)
+#: The task being run, and the call inside it that is running now. Two
+#: context variables rather than a stack object, because `asyncio` copies the
+#: context into each task it creates: concurrent branches get their own
+#: current frame for free, and cannot tread on each other's.
+_INVOCATION: ContextVar[Invocation | None] = ContextVar("invocation", default=None)
+_FRAME: ContextVar[_Call | None] = ContextVar("frame", default=None)
 
 
-def current() -> Invocation:
-    inv = _CURRENT.get()
-    if inv is None:
+def current() -> tuple[Invocation, _Call]:
+    inv, frame = _INVOCATION.get(), _FRAME.get()
+    if inv is None or frame is None:
         raise RuntimeError("a durable function was called outside a durable execution")
-    return inv
+    return inv, frame
 
 
 # ---------------------------------------------------------------------------
@@ -148,87 +167,104 @@ def read_back(record: dict) -> Any:
 # The decorator
 # ---------------------------------------------------------------------------
 
+#: Every durable function, by name. What a worker looks in to find the code
+#: for a task it just claimed.
 REGISTRY: dict[str, "Durable"] = {}
 
-
-class Future:
-    """A dispatched remote call. Reading it is where the run may block."""
-
-    def __init__(self, id: str) -> None:
-        self.id = id
-
-    def result(self) -> Any:
-        return gather(self)[0]
+#: Where each function runs when it is called with `.rpc`. Deployment, not
+#: definition: the same function is a local call on one machine and a remote
+#: one from another, and only the wiring knows which.
+TARGETS: dict[str, str] = {}
 
 
 class Durable:
-    """A registered function. Called from inside a durable execution it is a
-    durable call; called with `.rpc` it is dispatched somewhere else."""
-
-    def __init__(self, fn: Callable, name: str, target: str | None) -> None:
-        self.fn, self.name, self.target = fn, name, target
+    def __init__(self, fn: Callable, name: str) -> None:
+        self.fn, self.name = fn, name
         REGISTRY[name] = self
 
-    def __call__(self, *args) -> Any:
+    async def __call__(self, *args) -> Any:
         """A local durable call: create, run if pending, settle, read back.
 
-        The three lines of post 001, with the bookkeeping under the language
+        The whole of post 001, with the bookkeeping under the language
         instead of at the call site.
         """
-        inv = current()
-        id = inv.stack[-1].child()
-        status, data = inv.fence(PromiseCreate(
+        inv, frame = current()
+        id = frame.child()
+        _, data = inv.fence(PromiseCreate(
             id, inv.now() + DEFAULT_TIMEOUT, dumps({"f": self.name, "a": args}), {}))
         record = data["promise"]
         if record["state"] != PENDING:
             return read_back(record)
 
-        inv.stack.append(_Call(id))
+        token = _FRAME.set(_Call(id))
         try:
-            value, state = dumps(self.fn(*args)), RESOLVED
+            value, state = dumps(await self.invoke(*args)), RESOLVED
         except Failed as e:
             value, state = dumps(str(e)), REJECTED
         finally:
-            inv.stack.pop()
+            _FRAME.reset(token)
         # Settle from what the store returns, never from the local result: if
         # another worker got there first, that outcome is the one that counts.
         _, data = inv.fence(PromiseSettle(id, state, value))
         return read_back(data["promise"])
 
-    def rpc(self, *args) -> Future:
-        """Dispatch to whatever serves this function's target, and return."""
-        if self.target is None:
-            raise RuntimeError(f"{self.name} has no target, so it cannot be called remotely")
-        inv = current()
-        id = inv.stack[-1].child()
-        inv.fence(PromiseCreate(
+    async def invoke(self, *args) -> Any:
+        """Call the user's function, whether or not it is a coroutine. A leaf
+        that only prompts a model has nothing to await."""
+        result = self.fn(*args)
+        return await result if inspect.isawaitable(result) else result
+
+    async def rpc(self, *args) -> Any:
+        """Dispatch to wherever this function runs, and read the answer.
+
+        Awaited on its own it dispatches and then blocks. Handed to `gather`
+        it dispatches alongside its siblings, and they block together, which
+        is the difference between a fan-out and a queue.
+        """
+        target = TARGETS.get(self.name)
+        if target is None:
+            raise RuntimeError(f"{self.name} is not routed anywhere, so it cannot be called remotely")
+        inv, frame = current()
+        id = frame.child()
+        _, data = inv.fence(PromiseCreate(
             id, inv.now() + DEFAULT_TIMEOUT, dumps({"f": self.name, "a": args}),
-            {TAG_TARGET: self.target}))
-        return Future(id)
-
-
-def resonate(fn: Callable | None = None, *, target: str | None = None, name: str | None = None):
-    """Mark a function durable. `target` is where it runs when called with
-    `.rpc`, and a function without one can only be called locally."""
-
-    def wrap(f: Callable) -> Durable:
-        return Durable(f, name or f.__name__, target)
-
-    return wrap(fn) if fn is not None else wrap
-
-
-def gather(*futures: Future) -> list[Any]:
-    """Read several dispatched calls. Everything still pending is collected
-    into one `Blocked`, so a fan-out suspends once rather than once per
-    branch, and one settlement is enough to wake it."""
-    inv = current()
-    records, pending = [], []
-    for f in futures:
-        status, data = inv.fence(PromiseCreate(f.id, inv.now() + DEFAULT_TIMEOUT, Value(), {}))
+            {TAG_TARGET: target}))
         record = data["promise"]
-        records.append(record)
         if record["state"] == PENDING:
-            pending.append(f.id)
-    if pending:
-        raise Blocked(pending)
-    return [read_back(r) for r in records]
+            raise Blocked([id])
+        return read_back(record)
+
+
+def resonate(fn: Callable) -> Durable:
+    """Mark a function durable. That is the whole of the syntax."""
+    return Durable(fn, fn.__name__)
+
+
+def route(fn: Durable, target: str) -> None:
+    """Say where a function runs. Wiring, not definition."""
+    TARGETS[fn.name] = target
+
+
+async def gather(*awaitables) -> list[Any]:
+    """Await several durable calls at once.
+
+    What it always did, with one thing added: everything still pending is
+    collected into a single `Blocked`, so a fan-out suspends once rather than
+    once per branch, and the run is woken by the first settlement rather than
+    walked through them one at a time.
+
+    A branch that failed does not propagate while another is still pending.
+    Its rejection is recorded and will be raised on the next run, after the
+    picture is complete — acting on half of a fan-out would mean acting on
+    something the next replay might disagree with.
+    """
+    if len(awaitables) == 1 and not inspect.isawaitable(awaitables[0]):
+        awaitables = tuple(awaitables[0])  # a generator, as the README passes one
+    outcomes = await asyncio.gather(*awaitables, return_exceptions=True)
+    blocked = [id for o in outcomes if isinstance(o, Blocked) for id in o.ids]
+    if blocked:
+        raise Blocked(blocked)
+    for o in outcomes:
+        if isinstance(o, BaseException):
+            raise o
+    return list(outcomes)

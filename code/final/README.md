@@ -15,17 +15,30 @@ processes rather than two objects.
 The program the tests run is the one from this repository's README:
 
 ```python
-@resonate(target=AGENT)
-def research(question):
-    queries = agent(f"Plan the searches for: {question}")
-    results = gather(*[search.rpc(q) for q in queries])
-    return agent(f"Write a cited report. {question}: {results}")
+@resonate
+async def research(question: str):
+    # Plan the searches
+    queries = await agent(f"Plan the searches for: {question}")
+
+    # Fan out the searches
+    results = await gather(search.rpc(q) for q in queries)
+
+    # Synthesize the results
+    return await agent(f"Write a cited report. {question}: {results}")
 ```
 
-Nothing in it mentions promises, tasks, leases, retries or recovery. It runs
-to completion over a simulated bucket, calls the model twice and the search
-index three times and never more, and when the power is cut at any of the
-25 writes the run performs it finishes anyway with the same answer.
+Character for character, which is the point. Nothing in it mentions
+promises, tasks, leases, retries or recovery. It runs to completion over a
+simulated bucket, calls the model twice and the search index three times and
+never more, and when the power is cut at any of the 25 writes the run
+performs it finishes anyway with the same answer.
+
+Async is not a detail. `gather` has to dispatch every branch before anything
+blocks, or the branches run one at a time, and in async that falls out: each
+branch is a coroutine, they all run up to the point where their value is not
+there yet, and only then is there anything to wait for. A leaf that only
+prompts a model may be a plain `def`, because it has nothing to await and
+should not have to pretend.
 
 | file | |
 |---|---|
