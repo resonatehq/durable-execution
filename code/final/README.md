@@ -21,7 +21,15 @@ the plan.
 | `test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
 
 The kernel has no dependencies. The tests need `pytest` and `hypothesis`
-(`requirements-dev.txt`); `python -m pytest` runs in about 45 seconds.
+(`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.
+
+Two campaigns are opt-in because they take minutes rather than seconds:
+
+```
+DEEP=1 python -m pytest test_machine.py -k deep --hypothesis-show-statistics
+python explore.py --depth 7 --alphabet narrow
+hypothesis fuzz -- -k TestKernelMachine      # needs hypofuzz; runs until stopped
+```
 
 Four layers of evidence, each answering something the others cannot:
 
@@ -35,6 +43,39 @@ Four layers of evidence, each answering something the others cannot:
   narrow one, which is where the long chains live.
 - **The Hypothesis machine** goes further than any bound, and shrinks what it
   finds.
+
+### Steering the search
+
+Three mechanisms, and only one of them steers.
+
+`event()` labels a test case and shows in `--hypothesis-show-statistics`.
+Every request emits one, which is how the ratio of real work to refusals is
+read off a campaign. It is observational and changes nothing.
+
+`target()` is the signal. Hypothesis hill-climbs to maximize what it is
+given, so `teardown` hands it the widest the document got during the script,
+under two labels: tasks in flight, and obligations registered between them.
+A document can be wide in either way independently. Two constraints shape
+where the call goes: at most one per label per test case, so it cannot live
+inside a rule; and it needs volume to bite, noticeably above a thousand test
+cases and obviously around ten thousand per label. The default campaign runs
+four hundred, so targeting earns its keep only in the deep profile, which
+runs ten thousand and takes about nine minutes.
+
+The rules are grouped by what they need rather than by which operation they
+send, with the operation drawn inside. Hypothesis samples a rule and then
+filters it against its preconditions, so a rule gated on a task state the
+document rarely holds costs a retry every time it is drawn. Collapsing
+twenty such rules into five coarse groups moved the share of steps reaching
+the kernel rather than a door from 45% to 64% on the same budget, and
+brought the wake and the halted awaiter's buffered resume into every
+campaign instead of the lucky ones.
+
+Beyond all of this is **HypoFuzz**, which runs the same state machine as a
+coverage-guided campaign using real branch coverage rather than a metric we
+invented, for as long as it is left running. It needs no change to the
+tests. A short run found nothing, which is worth exactly what a short fuzz
+run is worth.
 
 Three entries in the catalogue are adapted to our shape and marked in the
 source, with the specification's own form kept beside them: two because we

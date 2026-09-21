@@ -1,2 +1,8 @@
 pytest
 hypothesis
+
+# Optional: the overnight instrument. `hypothesis fuzz -- -k TestKernelMachine`
+# runs the same state machine as a coverage-guided campaign, forever, using
+# real branch coverage rather than a metric we invented. It needs no change
+# to the tests, and it is not part of any suite.
+# hypofuzz

@@ -6,13 +6,23 @@ it to its minimal form and stores it, so the next run replays it first. The
 walk it replaces found one real defect and handed over two document dumps to
 read; this hands over the shortest script that breaks.
 
-The steering the walk did by hand is `@precondition`: a rule that needs an
-acquired task only fires when the document holds one, so the long chains
+The steering the walk did by hand is `@precondition`, so the long chains
 (acquire, suspend, settle, wake, re-acquire, fulfil) are walked rather than
 stumbled into. Ids, tags and deadlines still come from an adversarial
-alphabet, so the doors are knocked on too — but only where no guided twin
-exists. Breadth over refusals is `explore.py`'s job, which enumerates them;
-this machine is for the long chains, which no exhaustive search reaches.
+alphabet, so the doors are knocked on too — but only where no guided rule
+covers them. Breadth over refusals is `explore.py`'s job, which enumerates
+them; this machine is for the long chains, which no exhaustive search
+reaches.
+
+Rules are grouped by what they need rather than by which operation they
+send, and the operation is drawn inside. That is not tidiness: Hypothesis
+samples a rule and then filters it against its preconditions, so a rule
+gated on a task state that the document rarely holds costs a retry every
+time it is drawn. Collapsing twenty such rules into five coarse groups, plus
+six that are always enabled, moved the share of steps that reach the kernel
+rather than a door from 45% to 64% on the same budget — and brought the wake
+and the halted awaiter's buffered resume, which the ungrouped version only
+reached by luck, into every campaign.
 
 Each rule runs one request through both abstract halves, as the other suites
 do: the sweep as an internal step and the operation as an external step, with
@@ -30,9 +40,12 @@ refusals. The deep chains are `test_explore.py`'s narrow profile.
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 
-from hypothesis import HealthCheck, event, settings
+import pytest
+
+from hypothesis import HealthCheck, event, settings, target
 from hypothesis import strategies as st
 from hypothesis.stateful import (
     RuleBasedStateMachine, invariant, precondition, rule, run_state_machine_as_test,
@@ -99,6 +112,9 @@ class KernelMachine(RuleBasedStateMachine):
         super().__init__()
         self.now = 0
         self.s = P.State(Document(), retry_timeout=CFG.retry_timeout)
+        #: The widest the document got during this script, for `target`.
+        self.peak_live = 0
+        self.peak_obligations = 0
 
     # ── the pools the preconditions read ──────────────────────────────────
 
@@ -108,6 +124,12 @@ class KernelMachine(RuleBasedStateMachine):
     def _awaitable(self, pending=True):
         return [o for o in self.s.doc.objects
                 if o.promise.is_external() and (o.promise.state == PENDING) == pending]
+
+    def _awaited_by(self, *states):
+        """Pending awaitable promises with an awaiter whose task is in one of
+        `states`. What a settlement has to fan out to."""
+        who = {o.id for o in self._with_task(*states)}
+        return [o for o in self._awaitable() if who & set(o.promise.callbacks)]
 
     @staticmethod
     def _pick(pool, i):
@@ -145,7 +167,11 @@ class KernelMachine(RuleBasedStateMachine):
         self._tally(mid, after, sends, reply)
         event(f"{type(req).__name__} {reply.status}")
         self.s = after
-        return reply
+        self.peak_live = max(self.peak_live, len(self._with_task(T_PENDING, T_ACQUIRED, T_SUSPENDED, T_HALTED)))
+        self.peak_obligations = max(self.peak_obligations, sum(
+            len(o.promise.callbacks) + len(o.promise.listeners) for o in doc.objects))
+        # No return value: Hypothesis reserves a rule's return for its target
+        # bundle, and the grouped rules below end in `return self.do(...)`.
 
     def _tally(self, a, b, sends, reply):
         for o in b.doc.objects:
@@ -181,7 +207,7 @@ class KernelMachine(RuleBasedStateMachine):
         SEEN["unblock"] += sum(isinstance(e.msg, Unblock) for e in sends)
         SEEN["execute"] += sum(isinstance(e.msg, Execute) for e in sends)
 
-    # ── the clock, and the internal message ───────────────────────────────
+    # ══ always enabled ════════════════════════════════════════════════════
 
     @rule(by=st.sampled_from([1, 1, 100, 100, 5_000, 30_000, 200_000]))
     def advance(self, by):
@@ -191,8 +217,6 @@ class KernelMachine(RuleBasedStateMachine):
     def timeout(self):
         """What a timer fires: the sweep alone, with no request behind it."""
         self.s = self._sweep()
-
-    # ── promises ──────────────────────────────────────────────────────────
 
     @rule(id=ids, to=timeouts, tag=tags, delay=delays, absolute=absolute)
     def promise_create(self, id, to, tag, delay, absolute):
@@ -209,136 +233,100 @@ class KernelMachine(RuleBasedStateMachine):
                "timer": {"resonate:timer": "true"}}[kind]
         self.do(PromiseCreate(id, self.now + 10_000_000, Value(), tag))
 
-    @rule(id=ids)
-    def promise_get(self, id):
-        self.do(PromiseGet(id))
-
-    @precondition(lambda self: self._awaitable())
-    @rule(i=idx, state=settle_states, value=payloads)
-    def settle_something_awaited(self, i, state, value):
-        """The settle that fans out: it wakes suspended awaiters and unblocks
-        listeners, which the blind rule above reaches only by luck."""
-        self.do(PromiseSettle(self._pick(self._awaitable(), i).id, state, value))
-
-    @precondition(lambda self: self._awaitable() and self._with_task(T_PENDING, T_ACQUIRED, T_SUSPENDED, T_HALTED))
-    @rule(i=idx, j=idx)
-    def register_a_real_callback(self, i, j):
-        awaited = self._pick(self._awaitable(), i)
-        awaiter = self._pick(self._with_task(T_PENDING, T_ACQUIRED, T_SUSPENDED, T_HALTED), j)
-        self.do(PromiseRegisterCallback(awaited.id, awaiter.id))
-
-    @precondition(lambda self: self._awaitable(pending=False) and self._with_task(T_SUSPENDED, T_ACQUIRED))
-    @rule(i=idx, j=idx)
-    def register_against_a_settled_promise(self, i, j):
-        """The branch that resumes instead of registering."""
-        awaited = self._pick(self._awaitable(pending=False), i)
-        awaiter = self._pick(self._with_task(T_SUSPENDED, T_ACQUIRED), j)
-        self.do(PromiseRegisterCallback(awaited.id, awaiter.id))
-
-    @precondition(lambda self: self._awaitable())
-    @rule(i=idx, address=addresses)
-    def listen_to_something_awaitable(self, i, address):
-        self.do(PromiseRegisterListener(self._pick(self._awaitable(), i).id, address))
-
-    # ── tasks ─────────────────────────────────────────────────────────────
-
-    @rule(id=ids)
-    def task_get(self, id):
-        self.do(TaskGet(id))
-
-    @rule(id=ids, pid=pids, ttl=st.sampled_from([0, 1, 5_000, 50_000, 10_000_000]), to=timeouts, tag=tags)
+    @rule(id=ids, pid=pids, ttl=st.sampled_from([0, 1, 5_000, 50_000, 10_000_000]),
+          to=timeouts, tag=tags)
     def task_create(self, id, pid, ttl, to, tag):
         self.do(TaskCreate(pid, ttl, PromiseCreate(id, self.now + to, Value(), dict(tag))))
 
-    @precondition(lambda self: self._with_task(T_PENDING))
-    @rule(i=idx, pid=pids, ttl=st.sampled_from([1, 5_000, 50_000, 10_000_000]))
-    def acquire_a_pending_task(self, i, pid, ttl):
-        o = self._pick(self._with_task(T_PENDING), i)
-        self.do(TaskAcquire(o.id, o.task.version, pid, ttl))
-
-    @precondition(lambda self: self._with_task(T_ACQUIRED))
-    @rule(i=idx)
-    def release_an_acquired_task(self, i):
-        o = self._pick(self._with_task(T_ACQUIRED), i)
-        self.do(TaskRelease(o.id, o.task.version))
-
-    @precondition(lambda self: self._with_task(T_ACQUIRED))
-    @rule(i=idx, state=st.sampled_from([RESOLVED, REJECTED]), value=payloads)
-    def fulfil_an_acquired_task(self, i, state, value):
-        o = self._pick(self._with_task(T_ACQUIRED), i)
-        self.do(TaskFulfill(o.id, o.task.version, PromiseSettle(o.id, state, value)))
-
-    @precondition(lambda self: self._with_task(T_ACQUIRED) and len(self._awaitable()) > 1)
-    @rule(i=idx, j=idx, two=st.booleans())
-    def suspend_an_acquired_task(self, i, j, two):
-        o = self._pick(self._with_task(T_ACQUIRED), i)
-        pool = [x.id for x in self._awaitable() if x.id != o.id]
-        if not pool:
-            return
-        awaited = (self._pick(pool, j),)
-        if two and len(pool) > 1:
-            awaited += (self._pick(pool, j + 1),)
-        self.do(TaskSuspend(o.id, o.task.version, tuple(dict.fromkeys(awaited))))
-
-    @precondition(lambda self: self._with_task(T_ACQUIRED) and self._awaitable(pending=False))
-    @rule(i=idx, j=idx)
-    def suspend_on_something_settled(self, i, j):
-        """Nothing to wait for: the 300 that tells the caller to carry on."""
-        o = self._pick(self._with_task(T_ACQUIRED), i)
-        pool = [x.id for x in self._awaitable(pending=False) if x.id != o.id]
-        if pool:
-            self.do(TaskSuspend(o.id, o.task.version, (self._pick(pool, j),)))
+    @rule(id=ids, task=st.booleans())
+    def read(self, id, task):
+        self.do(TaskGet(id) if task else PromiseGet(id))
 
     @rule(id=ids, version=versions, awaited=st.lists(any_ids, max_size=3).map(tuple))
     def a_request_that_may_be_refused(self, id, version, awaited):
         """The doors no guided rule reaches: a wrong version, a foreign
-        origin, an empty or duplicated awaited list, an id with no task.
-        One rule rather than a blind twin per operation, because a campaign
-        spent on refusals never builds a chain."""
+        origin, an empty or duplicated awaited list, an id with no task."""
         self.do(TaskSuspend(id, version, awaited))
 
-    @precondition(lambda self: self._with_task(T_ACQUIRED))
-    @rule(i=idx, other=ids, to=timeouts, tag=tags, settle=st.booleans(), state=settle_states)
-    def fence_an_action(self, i, other, to, tag, settle, state):
-        o = self._pick(self._with_task(T_ACQUIRED), i)
-        action = (PromiseSettle(other, state, Value())
-                  if settle else PromiseCreate(other, self.now + to, Value(), dict(tag)))
-        self.do(TaskFence(o.id, o.task.version, "c", action))
+    # ══ gated on what the document holds ══════════════════════════════════
 
-    @precondition(lambda self: self._with_task(T_ACQUIRED))
-    @rule(i=idx)
-    def heartbeat_a_held_task(self, i):
-        o = self._pick(self._with_task(T_ACQUIRED), i)
-        self.do(TaskHeartbeat(o.task.pid, ((o.id, o.task.version),)))
+    @precondition(lambda self: self._awaitable() or self._awaitable(pending=False))
+    @rule(i=idx, j=idx, op=st.sampled_from(["settle", "listen", "register", "register_settled"]),
+          state=settle_states, value=payloads, address=addresses)
+    def on_an_awaitable_promise(self, i, j, op, state, value, address):
+        pending, settled = self._awaitable(), self._awaitable(pending=False)
+        if op == "register_settled" and settled and self._with_task(T_SUSPENDED, T_ACQUIRED):
+            # The branch the specification makes a no-op, and the Rust kernel
+            # does not. Worth reaching on purpose.
+            awaiter = self._pick(self._with_task(T_SUSPENDED, T_ACQUIRED), j)
+            return self.do(PromiseRegisterCallback(self._pick(settled, i).id, awaiter.id))
+        if not pending:
+            return self.do(PromiseGet(self._pick(settled, i).id))
+        awaited = self._pick(pending, i)
+        if op == "listen":
+            return self.do(PromiseRegisterListener(awaited.id, address))
+        if op == "register":
+            who = self._with_task(T_PENDING, T_ACQUIRED, T_SUSPENDED, T_HALTED)
+            if who:
+                return self.do(PromiseRegisterCallback(awaited.id, self._pick(who, j).id))
+        self.do(PromiseSettle(awaited.id, state, value))
 
-    @precondition(lambda self: self._with_task(T_PENDING, T_ACQUIRED, T_SUSPENDED))
-    @rule(i=idx)
-    def halt_a_live_task(self, i):
-        """A halted awaiter buffers a resume instead of being dispatched."""
-        self.do(TaskHalt(self._pick(self._with_task(T_PENDING, T_ACQUIRED, T_SUSPENDED), i).id))
-
-    @precondition(lambda self: self._with_task(T_HALTED))
-    @rule(i=idx)
-    def continue_a_halted_task(self, i):
-        self.do(TaskContinue(self._pick(self._with_task(T_HALTED), i).id))
-
-    def _awaited_by(self, *states):
-        """Pending awaitable promises with an awaiter whose task is in one of
-        `states`. What a settlement has to fan out to."""
-        who = {o.id for o in self._with_task(*states)}
-        return [o for o in self._awaitable() if who & set(o.promise.callbacks)]
-
-    @precondition(lambda self: self._awaited_by(T_HALTED, T_ACQUIRED, T_PENDING))
+    @precondition(lambda self: self._awaited_by(T_HALTED, T_ACQUIRED, T_PENDING, T_SUSPENDED))
     @rule(i=idx, state=st.sampled_from([RESOLVED, REJECTED]),
-          who=st.sampled_from([(T_HALTED,), (T_ACQUIRED,), (T_PENDING,), (T_HALTED, T_ACQUIRED, T_PENDING)]))
-    def settle_what_a_running_task_awaits(self, i, state, who):
+          who=st.sampled_from([(T_SUSPENDED,), (T_HALTED,), (T_ACQUIRED,), (T_PENDING,),
+                               (T_SUSPENDED, T_HALTED, T_ACQUIRED, T_PENDING)]))
+    def settle_what_a_task_awaits(self, i, state, who):
         """A settlement fans out to every awaiter whatever state its task is
         in: a suspended one is woken and dispatched, a running or halted one
         only records the resume. Four steps of setup, which is why the
         fan-out targets get a rule of their own rather than being left to
         luck."""
-        pool = self._awaited_by(*who) or self._awaited_by(T_HALTED, T_ACQUIRED, T_PENDING)
+        pool = self._awaited_by(*who) or self._awaited_by(T_HALTED, T_ACQUIRED, T_PENDING, T_SUSPENDED)
         self.do(PromiseSettle(self._pick(pool, i).id, state, Value()))
+
+    @precondition(lambda self: self._with_task(T_PENDING))
+    @rule(i=idx, op=st.sampled_from(["acquire", "acquire", "halt"]), pid=pids,
+          ttl=st.sampled_from([1, 5_000, 50_000, 10_000_000]))
+    def on_a_pending_task(self, i, op, pid, ttl):
+        o = self._pick(self._with_task(T_PENDING), i)
+        self.do(TaskHalt(o.id) if op == "halt" else TaskAcquire(o.id, o.task.version, pid, ttl))
+
+    @precondition(lambda self: self._with_task(T_ACQUIRED))
+    @rule(i=idx, j=idx, other=ids, to=timeouts, tag=tags, state=settle_states, value=payloads,
+          op=st.sampled_from(["fulfil", "suspend", "suspend", "suspend_settled", "release",
+                              "fence_create", "fence_settle", "heartbeat", "halt"]))
+    def on_an_acquired_task(self, i, j, other, to, tag, state, value, op):
+        o = self._pick(self._with_task(T_ACQUIRED), i)
+        v = o.task.version
+        if op == "fulfil":
+            return self.do(TaskFulfill(o.id, v, PromiseSettle(o.id, state, value)))
+        if op == "release":
+            return self.do(TaskRelease(o.id, v))
+        if op == "halt":
+            return self.do(TaskHalt(o.id))
+        if op == "fence_create":
+            return self.do(TaskFence(o.id, v, "c", PromiseCreate(other, self.now + to, Value(), dict(tag))))
+        if op == "fence_settle":
+            return self.do(TaskFence(o.id, v, "c", PromiseSettle(other, state, value)))
+        if op == "suspend":
+            pool = [x.id for x in self._awaitable() if x.id != o.id]
+            if pool:
+                a = (self._pick(pool, j),)
+                if len(pool) > 1:
+                    a += (self._pick(pool, j + 1),)
+                return self.do(TaskSuspend(o.id, v, tuple(dict.fromkeys(a))))
+        if op == "suspend_settled":
+            pool = [x.id for x in self._awaitable(pending=False) if x.id != o.id]
+            if pool:
+                # Nothing to wait for: the 300 that tells the caller to carry on.
+                return self.do(TaskSuspend(o.id, v, (self._pick(pool, j),)))
+        self.do(TaskHeartbeat(o.task.pid, ((o.id, v),)))
+
+    @precondition(lambda self: self._with_task(T_SUSPENDED, T_HALTED))
+    @rule(i=idx, op=st.sampled_from(["halt", "continue"]))
+    def on_a_parked_task(self, i, op):
+        o = self._pick(self._with_task(T_SUSPENDED, T_HALTED), i)
+        self.do(TaskHalt(o.id) if op == "halt" else TaskContinue(o.id))
 
     # ── the catalogue's state half ────────────────────────────────────────
 
@@ -349,6 +337,21 @@ class KernelMachine(RuleBasedStateMachine):
     @invariant()
     def the_kernels_own_invariants_hold(self):
         assert check_invariants(self.s.doc) is None, check_invariants(self.s.doc)
+
+    # ── the signal ────────────────────────────────────────────────────────
+
+    def teardown(self):
+        """Tell Hypothesis what a good script looks like, so it hill-climbs
+        toward the wide ones. Two labels, because a document can be wide in
+        two independent ways: many tasks in flight, and many obligations
+        registered between them. At most one call per label per test case,
+        which is why this is `teardown` and not something inside a rule.
+
+        Targeting needs volume to bite — noticeably above a thousand test
+        cases, obviously around ten thousand per label — so it earns its
+        keep in the deep profile below rather than in the default run."""
+        target(float(self.peak_live), label="tasks in flight")
+        target(float(self.peak_obligations), label="registered obligations")
 
 
 KernelMachine.TestCase.settings = settings(
@@ -369,6 +372,30 @@ REQUIRED = [
     "born_pending", "born_acquired", "acquired", "suspended", "settled", "expired",
     "retry", "ok", "refused", "execute", "unblock",
 ]
+
+
+@pytest.mark.skipif(not os.environ.get("DEEP"), reason="set DEEP=1: this is a long campaign")
+def test_the_deep_campaign():
+    """The targeted profile. Twenty-five times the budget, so `target` in
+    `teardown` has the volume it needs to hill-climb toward wide documents:
+    many tasks in flight, many obligations registered between them. Not in
+    the default run — it takes minutes, and its job is to look for what the
+    short campaigns cannot reach, not to gate a commit.
+
+        DEEP=1 python -m pytest test_machine.py -k deep --hypothesis-show-statistics
+
+    The statistics print the best score reached for each label, which is how
+    you tell whether the search is still finding wider documents or has
+    plateaued and the budget is spent."""
+    SEEN.clear()
+    run_state_machine_as_test(
+        KernelMachine,
+        settings=settings(max_examples=10_000, stateful_step_count=60, deadline=None,
+                          suppress_health_check=list(HealthCheck)),
+    )
+    missing = [k for k in REQUIRED + ["wake", "halted_buffer", "lease_expired", "carry_on_300"]
+               if SEEN[k] == 0]
+    assert not missing, (missing, dict(SEEN))
 
 
 def test_the_campaign_reaches_every_interesting_transition():
