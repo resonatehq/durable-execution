@@ -7,9 +7,25 @@ below should grow an entry in `notes/` as it gets implemented.
 
 ## 0. What exists
 
-The kernel and the engine, and the evidence for them. What is left is the
+The whole thing, end to end, over in-memory ports. What is left is the
 outside: the GCS and Cloud Tasks implementations of three ports that already
-have in-memory twins, the HTTP routes, and the SDK.
+have in-memory twins, and the HTTP routes that carry a message between two
+processes rather than two objects.
+
+The program the tests run is the one from this repository's README:
+
+```python
+@resonate(target=AGENT)
+def research(question):
+    queries = agent(f"Plan the searches for: {question}")
+    results = gather(*[search.rpc(q) for q in queries])
+    return agent(f"Write a cited report. {question}: {results}")
+```
+
+Nothing in it mentions promises, tasks, leases, retries or recovery. It runs
+to completion over a simulated bucket, calls the model twice and the search
+index three times and never more, and when the power is cut at any of the
+25 writes the run performs it finishes anyway with the same answer.
 
 | file | |
 |---|---|
@@ -20,6 +36,8 @@ have in-memory twins, the HTTP routes, and the SDK.
 | `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
 | `blob.py` | the bucket, as the four operations a real one offers, with a simulated bucket and the adapter that narrows it to the engine's store |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
+| `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
+| `runtime.py` | a worker, which is post 002's outer half in the protocol's words, and the loop that carries messages and fires deadlines |
 | `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
 | `explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
 | `test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
@@ -30,6 +48,7 @@ have in-memory twins, the HTTP routes, and the SDK.
 | `test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
 | `test_blob.py` | the bucket's four operations, and the adapter |
 | `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
+| `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
 
 The kernel has no dependencies. The tests need `pytest` and `hypothesis`
 (`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.

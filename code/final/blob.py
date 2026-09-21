@@ -56,7 +56,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ports import Conflict, Unavailable
+from ports import Conflict, Fault, Unavailable
 
 #: A refused precondition. The state moved: re-decide, never replay. Spelled
 #: as the store's `Conflict` so there is one name for it in the codebase.
@@ -88,9 +88,12 @@ class MemoryBlob:
     neither does this.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fault: Fault | None = None) -> None:
         self._objects: dict[str, tuple[str, str]] = {}
         self._n = 0
+        #: Where the power goes out. A bucket is the thing most likely to
+        #: stop answering mid-write, so the simulated one can.
+        self.fault = fault
 
     def get(self, key: str) -> tuple[str, str] | None:
         return self._objects.get(key)
@@ -107,12 +110,16 @@ class MemoryBlob:
                 raise PreconditionFailed(f"{key} does not exist")
             if current[1] != if_match:
                 raise PreconditionFailed(f"{key} is at {current[1]}, not {if_match}")
+        if self.fault is not None:
+            self.fault.tick(f"put {key}")
         self._n += 1
         version = f"v{self._n}"
         self._objects[key] = (body, version)
         return version
 
     def delete(self, key: str) -> None:
+        if self.fault is not None:
+            self.fault.tick(f"delete {key}")
         self._objects.pop(key, None)
 
     def list(self, prefix: str, limit: int) -> list[str]:
