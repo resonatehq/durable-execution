@@ -178,6 +178,11 @@ class Document:
     clock: int = 0  # latest `now` observed; the shell's, diagnostic
     gen: int = 0  # bumped by the shell per committed write; diagnostic
     timer_at: int | None = None  # the one deadline armed for this origin
+    #: What the shell called the timer it armed at `timer_at`. The kernel
+    #: carries it and never reads it: the name comes back from whatever
+    #: armed the deadline, which is I/O, and a writer must be able to remove
+    #: the object its own predecessor wrote rather than one by coordinates.
+    timer_name: str | None = None
 
     def get(self, id: str) -> Object | None:
         for o in self.objects:

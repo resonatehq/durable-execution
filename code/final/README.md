@@ -7,18 +7,23 @@ below should grow an entry in `notes/` as it gets implemented.
 
 ## 0. What exists
 
-The kernel, and the evidence for it. Everything below this section is still
-the plan.
+The kernel and the engine, and the evidence for them. What is left is the
+outside: the GCS and Cloud Tasks implementations of three ports that already
+have in-memory twins, the HTTP routes, and the SDK.
 
 | file | |
 |---|---|
 | `kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
+| `engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send. The only method, and the only place that does I/O |
+| `codec.py` | the document's canonical byte form, and the key it lives under |
+| `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
 | `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
 | `explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
 | `test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
 | `test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
 | `test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
 | `test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
+| `test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
 
 The kernel has no dependencies. The tests need `pytest` and `hypothesis`
 (`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.
@@ -81,6 +86,46 @@ Three entries in the catalogue are adapted to our shape and marked in the
 source, with the specification's own form kept beside them: two because we
 fuse the wake and its dispatch into one step, one because the specification
 samples it on scripts too short to reach a re-suspension.
+
+### The engine
+
+One method, because there is one thing to do. A protocol request and a
+deadline coming due differ in which kernel function decides them and in
+nothing else, so `process` takes either and the caller never has to know
+which shell it is talking to.
+
+```python
+def process(self, msg: Req | Timeout, now: int) -> Reply:
+    origin = origin_of_msg(msg)
+    raw, generation = self.store.load(doc_key(origin))
+    doc = decode(raw, origin) if raw is not None else Document()
+    now = max(now, doc.clock)
+    fx, reply = (handle_internal(doc, now, cfg), Reply.ok({})) if isinstance(msg, Timeout) \
+        else handle_external(doc, msg, now, cfg)
+    ...  # write law, then: arm, commit, disarm, send
+```
+
+Four rules carry the whole design, and each one is a test:
+
+- **Arm before the commit.** A committed document whose deadline was never
+  armed is the one state nothing repairs. A failed arm fails the request.
+- **One conditional write.** A `Conflict` goes back to the caller. The engine
+  never loops: a loop would choose a retry policy before anything has said
+  what it should be.
+- **Disarm by name, after the commit.** The name comes back from whatever
+  armed the deadline and is recorded in the document, so a writer removes
+  what its own predecessor wrote rather than a deadline by coordinates that
+  someone else has since re-armed.
+- **The write law.** If the objects and the armed deadline are untouched,
+  nothing is written. The clock is outside that comparison, or every read
+  would be a write.
+
+`test_engine.py` cuts the power at each of the ten writes the exercise
+performs — across the store, the timers and the transport — then does what
+the world does, retrying the request and firing the deadlines, and requires
+the run to reach the promises and tasks a clean run reached. It also covers
+the window nothing can close over a network: a commit that landed and whose
+answer was lost.
 
 ### What the search found
 
