@@ -174,7 +174,7 @@ function from the top, then `fulfill` on return, `suspend` on `Blocked`, or
 positional ids from a contextvar, `.rpc` which creates the callee's promise
 with a `resonate:target` tag so the kernel dispatches it, and `gather`, which
 collects every `Blocked` id and suspends on all of them at once. Nothing in
-`sdk/` knows about S3; it calls `applier.submit`.
+`sdk/` knows about the bucket or Pub/Sub; it calls `applier.submit`.
 
 ## 3. Order of work
 
