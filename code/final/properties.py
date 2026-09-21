@@ -43,11 +43,6 @@ from kernel import (
     TAG_TARGET, Document, Execute, Object, Promise, Send, Task, Unblock,
 )
 
-#: The server's dial, as the fused properties need it. Tests set it to the
-#: KernelCfg they run with.
-RETRY_TIMEOUT = 30_000
-
-
 # ---------------------------------------------------------------------------
 # The state the catalogue is stated over
 # ---------------------------------------------------------------------------
@@ -66,6 +61,7 @@ class State:
     doc: Document
     outbox: list[Send] = field(default_factory=list)  # upserted by key, never dropped
     schedules: tuple = ()  # not implemented; the schedule properties hold vacuously
+    retry_timeout: int = 30_000  # the server's dial, as the fused properties need it
 
     def after(self, doc: Document, sends: list[Send]) -> State:
         """The state one step later: the new document, and the outbox with
@@ -73,7 +69,7 @@ class State:
         entries = {outbox_key(e): e for e in self.outbox}
         for e in sends:
             entries[outbox_key(e)] = e
-        return State(doc, list(entries.values()), self.schedules)
+        return State(doc, list(entries.values()), self.schedules, self.retry_timeout)
 
     # The two faces, as views of the one store.
     @property
@@ -902,7 +898,7 @@ def consistent_task_pending_entry_arms_retry_fused(now, a, b):
             continue
         if t.state != T_PENDING and u.state == T_PENDING:
             sent = any(isinstance(e.msg, Execute) and e.msg == Execute(o.id, u.version) for e in b.outbox)
-            if u.retry_at != now + RETRY_TIMEOUT or not sent:
+            if u.retry_at != now + b.retry_timeout or not sent:
                 return False
     return True
 
@@ -947,7 +943,7 @@ def consistent_task_wake_records_resume_fused(now, a, b):
             continue
         if t.state == T_SUSPENDED and u.state == T_PENDING:
             sent = any(isinstance(e.msg, Execute) and e.msg == Execute(o.id, u.version) for e in b.outbox)
-            if not (u.resumes and u.retry_at == now + RETRY_TIMEOUT and u.version == t.version and sent):
+            if not (u.resumes and u.retry_at == now + b.retry_timeout and u.version == t.version and sent):
                 return False
     return True
 

@@ -34,13 +34,12 @@ from kernel import (
 
 W = "http://w"
 CFG = KernelCfg(retry_timeout=100)
-P.RETRY_TIMEOUT = CFG.retry_timeout
 
 IDS = ["o", "o:1", "o:2"]
 TAGS = [{"resonate:target": W}, {"resonate:scope": "global"}, {"resonate:timer": "true"},
         {"resonate:target": W, "resonate:delay": "60"}]
 TIMEOUTS = [50, 1_000]
-CLOCK = [5, 50, 1_000]
+CLOCK = [5, 100, 1_000]
 
 
 class Timeout:
@@ -185,7 +184,7 @@ def tally_edge(a, b, sends, reply, tally, internal):
 
 def explore(depth, limit=None, log=None):
     """Breadth-first to `depth`. Returns (states per depth, edges, tally)."""
-    start = (0, P.State(Document()))
+    start = (0, P.State(Document(), retry_timeout=CFG.retry_timeout))
     seen = {key(*start): 0}
     frontier = deque([(start, [])])
     per_depth = [1]

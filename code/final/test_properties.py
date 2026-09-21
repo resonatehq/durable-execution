@@ -26,7 +26,6 @@ from kernel import (
 
 W = "http://w"
 CFG = KernelCfg(retry_timeout=30_000)
-P.RETRY_TIMEOUT = CFG.retry_timeout
 
 
 def run(doc, req, now):
