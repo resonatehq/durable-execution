@@ -46,6 +46,26 @@ from kernel import (
 )
 from ports import Conflict, Fault, MemoryStore, MemoryTimers, MemoryTransport, Store, Timers, Transport
 
+
+class _Recorded:
+    """Any `Store`, with its writes written down.
+
+    The effect order and the write law are claims about *when* the engine
+    wrote, so the suite has to see the writes. Wrapping rather than
+    requiring a particular store is what lets the same suite grade an engine
+    over a dict, over a simulated bucket, or over a real one.
+    """
+
+    def __init__(self, inner: Store, fault: Fault) -> None:
+        self.inner, self.fault = inner, fault
+
+    def load(self, key):
+        return self.inner.load(key)
+
+    def commit(self, key, body, if_generation):
+        self.fault.tick(f"commit {key}")
+        return self.inner.commit(key, body, if_generation)
+
 #: Everything an engine can be asked to do. A protocol request, which a
 #: client sent, or a deadline coming due, which nobody did.
 Msg = Req | Timeout
@@ -189,7 +209,8 @@ def _effect_order(segment: list[str]) -> str | None:
 
 
 def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
-                cfg: KernelCfg = CFG, origin: str = ORIGIN) -> list[Violation]:
+                cfg: KernelCfg = CFG, origin: str = ORIGIN,
+                store: Store | None = None) -> list[Violation]:
     """Drive `module.Engine` through a script and return everything it broke.
 
     Three things are checked at every step, and they are independent:
@@ -204,10 +225,14 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
     - **The write law**, because a read that writes is a read that costs a
       conditional write per poll, and on a store with a per-object write
       rate that is the difference between working and not.
+
+    `store` is the world the engine is given. It defaults to a dict; hand it
+    a `BlobStore` over a simulated bucket and the same suite grades the same
+    engine through the seam it will really run on.
     """
     script = STANDARD_SCRIPT if script is None else script
     fault = Fault()  # not injecting: used here only as the log of what was written
-    store = MemoryStore(fault)
+    store = _Recorded(MemoryStore() if store is None else store, fault)
     timers, transport = MemoryTimers(fault), MemoryTransport(fault)
     engine = module.Engine(store, timers, transport, cfg)
     out: list[Violation] = []

@@ -84,3 +84,12 @@ def test_the_standard_script_exercises_what_it_claims_to():
                 seen.add(o.task.state)
             seen.add(o.promise.state)
     assert {"pending", "acquired", "suspended", "fulfilled", "resolved"} <= seen, seen
+
+
+def test_the_engine_conforms_over_a_simulated_bucket():
+    """The same engine, the same script, the same catalogue, but reaching the
+    document through the four operations a real bucket offers rather than a
+    dict. The adapter is the only thing that changed, so this is what says
+    the adapter is right."""
+    from blob import BlobStore, MemoryBlob
+    assert conformance(engine_module, store=BlobStore(MemoryBlob())) == []
