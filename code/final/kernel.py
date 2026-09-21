@@ -366,6 +366,15 @@ class Reply:
         return Reply(status, message)
 
 
+SETTLE_STATES = (RESOLVED, REJECTED, REJECTED_CANCELED)  # rejected_timedout is server-owned
+
+
+def origin_of(id: str) -> str:
+    """Everything before the first ':'. The routing key, and the reason one
+    document can answer any single operation."""
+    return id.split(":", 1)[0]
+
+
 def is_valid_address(address: str) -> bool:
     """Any URI with a scheme. Deliberately shallow: what follows the scheme is
     the transport's business, and validation must be the same on every
@@ -463,7 +472,8 @@ def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[
     The sweep's own timer effects are discarded: the merged timer transition
     is from the document that came in to the document that goes out, so an
     intermediate deadline the request then moved is never armed. Sends keep
-    their order: the sweep's first, then the request's."""
+    their order, the sweep's first, then the request's, except that a sweep
+    dispatch the request overtook is dropped."""
     swept = handle_internal(doc, now, cfg)
     tx = Tx(doc=next(e.doc for e in swept if isinstance(e, SetDocument)))
     match req:
@@ -506,7 +516,17 @@ def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[
     fx.append(SetDocument(tx.doc))
     if old != new and old is not None:
         fx.append(DelTimeout(old))
-    fx.extend(e for e in swept if isinstance(e, Send))
+    for e in swept:
+        if not isinstance(e, Send):
+            continue
+        if isinstance(e.msg, Execute):
+            # A dispatch the request overtook is not sent: the task it names
+            # is no longer pending at that version (the request settled its
+            # promise, or acquired it), so the message could only be refused.
+            o = tx.doc.get(e.msg.task_id)
+            if o is None or o.task is None or o.task.state != T_PENDING or o.task.version != e.msg.version:
+                continue
+        fx.append(e)
     fx.extend(tx.sends)
     return fx, reply
 
@@ -527,6 +547,16 @@ def promise_create(tx: Tx, r: PromiseCreate, now: int, cfg: KernelCfg) -> Reply:
     address = r.tags.get(TAG_TARGET)
     if address is not None and not is_valid_address(address):
         return Reply.err(400, "Invalid resonate:target address")
+    if r.tags.get(TAG_TIMER) == "true" and address is not None:
+        return Reply.err(400, "A timer promise must not have a resonate:target tag")
+    delay = r.tags.get(TAG_DELAY)
+    if delay is not None:
+        if not delay.isdigit():
+            return Reply.err(400, "resonate:delay must be a non-negative integer")
+        if int(delay) >= r.timeout_at:
+            return Reply.err(400, "resonate:delay must be less than timeoutAt")
+        if address is None:
+            return Reply.err(400, "resonate:delay requires a resonate:target tag")
     o = tx.doc.get(r.id)
     if o is not None:
         # Create is idempotent on id alone: the stored promise wins.
@@ -544,12 +574,10 @@ def promise_create(tx: Tx, r: PromiseCreate, now: int, cfg: KernelCfg) -> Reply:
         # Born settled, so its task is born done.
         return Reply.ok({"promise": record})
     o.task.state = T_PENDING
-    delay = r.tags.get(TAG_DELAY)
-    delay_at = int(delay) if delay is not None and delay.lstrip("-").isdigit() else None
-    if delay_at is not None and now < delay_at:
+    if delay is not None and now < int(delay):
         # An absolute instant before which the task must not be dispatched:
         # arm the retry timer there and send nothing.
-        o.task.arm_retry(delay_at)
+        o.task.arm_retry(int(delay))
     else:
         o.task.arm_retry(o.promise.created_at + cfg.retry_timeout)
         send_execute(tx, r.id, 0)
@@ -557,6 +585,8 @@ def promise_create(tx: Tx, r: PromiseCreate, now: int, cfg: KernelCfg) -> Reply:
 
 
 def promise_settle(tx: Tx, r: PromiseSettle, now: int, cfg: KernelCfg) -> Reply:
+    if r.state not in SETTLE_STATES:
+        return Reply.err(400, "Invalid settle state")
     o = tx.doc.get(r.id)
     if o is None:
         return Reply.err(404, "Promise not found")
@@ -567,6 +597,10 @@ def promise_settle(tx: Tx, r: PromiseSettle, now: int, cfg: KernelCfg) -> Reply:
 
 
 def promise_register_callback(tx: Tx, r: PromiseRegisterCallback, now: int, cfg: KernelCfg) -> Reply:
+    if r.awaited == r.awaiter:
+        return Reply.err(400, "Awaited and awaiter must be different promises")
+    if origin_of(r.awaited) != origin_of(r.awaiter):
+        return Reply.err(400, "Awaiter and awaited must belong to the same origin")
     awaited = tx.doc.get(r.awaited)
     if awaited is None:
         return Reply.err(404, "Awaited promise not found")
@@ -633,8 +667,16 @@ def task_create(tx: Tx, r: TaskCreate, now: int, cfg: KernelCfg) -> Reply:
     the caller *is* the worker."""
     a = r.action
     address = a.tags.get(TAG_TARGET)
-    if address is not None and not is_valid_address(address):
+    if address is None:
+        return Reply.err(400, "Action must have a resonate:target tag")
+    if not is_valid_address(address):
         return Reply.err(400, "Invalid resonate:target address")
+    if a.tags.get(TAG_TIMER) == "true":
+        return Reply.err(400, "A timer promise must not have a resonate:target tag")
+    if TAG_DELAY in a.tags:
+        return Reply.err(400, "Action must not have a resonate:delay tag")
+    if r.ttl < 1:
+        return Reply.err(400, "TTL must be a positive integer")
     o = tx.doc.get(a.id)
     if o is not None and o.task is not None:
         t = o.task
@@ -683,6 +725,8 @@ def task_create(tx: Tx, r: TaskCreate, now: int, cfg: KernelCfg) -> Reply:
 
 
 def task_acquire(tx: Tx, r: TaskAcquire, now: int, cfg: KernelCfg) -> Reply:
+    if r.ttl < 1:
+        return Reply.err(400, "TTL must be a positive integer")
     o = tx.doc.get(r.id)
     if o is None or o.task is None:
         return Reply.err(404, "Task not found")
@@ -724,6 +768,10 @@ def task_release(tx: Tx, r: TaskRelease, now: int, cfg: KernelCfg) -> Reply:
 
 
 def task_fulfill(tx: Tx, r: TaskFulfill, now: int, cfg: KernelCfg) -> Reply:
+    if r.action.id != r.id:
+        return Reply.err(400, "Action ID must match the task ID")
+    if r.action.state not in SETTLE_STATES:
+        return Reply.err(400, "Invalid settle state")
     o = tx.doc.get(r.id)
     if o is None or o.task is None:
         return Reply.err(404, "Task not found")
@@ -741,8 +789,6 @@ def task_fulfill(tx: Tx, r: TaskFulfill, now: int, cfg: KernelCfg) -> Reply:
         t.ttl = None
         t.resumes.clear()
         t.disarm()
-        for other in tx.doc.objects:
-            other.promise.callbacks = [x for x in other.promise.callbacks if x != r.id]
         return Reply.ok({"promise": po.promise.to_record(r.action.id)})
     return Reply.ok({"promise": settle(tx, r.action.id, r.action.state, r.action.value, now, cfg)})
 
@@ -751,6 +797,14 @@ def task_suspend(tx: Tx, r: TaskSuspend, cfg: KernelCfg) -> Reply:
     """Park a task on a set of promises, unless one of them has already
     settled, in which case there is nothing to wait for and the caller is
     told to carry on (300)."""
+    if not r.awaited:
+        return Reply.err(400, "Actions array cannot be empty")
+    if r.id in r.awaited:
+        return Reply.err(400, "Action awaited promise must not equal the task ID")
+    if len(set(r.awaited)) != len(r.awaited):
+        return Reply.err(400, "Awaited promise IDs must be unique")
+    if any(origin_of(a) != origin_of(r.id) for a in r.awaited):
+        return Reply.err(400, "Awaited promise must belong to the same origin as the task")
     o = tx.doc.get(r.id)
     if o is None or o.task is None:
         return Reply.err(404, "Task not found")
@@ -783,6 +837,8 @@ def task_fence(tx: Tx, r: TaskFence, now: int, cfg: KernelCfg) -> Reply:
     """Run one promise operation under the task's version, so a worker that
     lost its lease cannot write. The action's outcome comes back as a nested
     response envelope."""
+    if r.action.id == r.id:
+        return Reply.err(400, "Action ID must not equal the task ID")
     o = tx.doc.get(r.id)
     if o is None or o.task is None:
         return Reply.err(404, "Task not found")
@@ -810,6 +866,8 @@ def task_fence(tx: Tx, r: TaskFence, now: int, cfg: KernelCfg) -> Reply:
 def task_heartbeat(tx: Tx, r: TaskHeartbeat, now: int) -> Reply:
     """Extend the lease of every task in the batch the caller still owns, and
     silently ignore the rest: a liveness signal, not a query."""
+    if len({origin_of(id) for id, _ in r.tasks}) > 1:
+        return Reply.err(400, "All tasks must belong to the same origin")
     for id, version in r.tasks:
         o = tx.doc.get(id)
         t = o.task if o is not None else None
@@ -908,16 +966,18 @@ def trigger_settlement(tx: Tx, id: str, now: int, cfg: KernelCfg) -> None:
     o = tx.doc.get(id)
     assert o is not None
 
-    # settlement_enqueued: the settled promise's own task is done, and its
-    # registrations against other promises are dropped.
+    # settlement_enqueued: the settled promise's own task is done. Its
+    # registrations against other, still pending promises stay where they
+    # are: the specification only ever removes a callback when the awaited
+    # promise settles, and the fan-out below skips a finished awaiter. (The
+    # Rust kernel deletes them here, mirroring its SQL schema; the wire
+    # cannot tell the difference, and the catalogue forbids the deletion.)
     if o.task is not None and o.task.state != T_FULFILLED:
         o.task.state = T_FULFILLED
         o.task.pid = None
         o.task.ttl = None
         o.task.resumes.clear()
         o.task.disarm()
-        for other in tx.doc.objects:
-            other.promise.callbacks = [a for a in other.promise.callbacks if a != id]
 
     # resumption_enqueued: every awaiter registered against `id` observes the
     # settlement, in registration order. A settlement fanning out marks every

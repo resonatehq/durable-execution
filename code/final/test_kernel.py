@@ -1,5 +1,17 @@
-"""Ported from crates/resonate-server-blob/src/kernel/handle.rs, `mod tests`."""
+"""Ported from crates/resonate-server-blob/src/kernel/handle.rs, `mod tests`.
 
+Every step also runs the whole conformance catalogue (`properties.py`). The
+catalogue is stated per abstract step, and `handle_external` fuses two of
+them, the sweep and the request, so each is checked on its own half: the
+sweep from the document that came in to the swept document, as an internal
+step; the request from the swept document to the document that goes out, as
+an external step. The fused result is then held equal to the composition. A
+step whose pre-state was built by hand rather than reached through the kernel
+passes `legal_pre=False` and is checked against the kernel's own invariants
+only.
+"""
+
+from properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
 from kernel import (
     PENDING, REJECTED_TIMEDOUT, RESOLVED, T_FULFILLED, T_PENDING, TAG_TIMER,
     T_ACQUIRED, DelTimeout, Document, Execute, KernelCfg, PromiseCreate, Reply,
@@ -11,14 +23,33 @@ W = "http://worker:9999"
 CFG = KernelCfg(retry_timeout=30_000)
 
 
-def step(doc, req, now):
+def step(doc, req, now, legal_pre=True):
     """Apply a request: the new document, the sends, and the reply."""
     fx, reply = handle_external(doc, req, now, CFG)
     docs = [e.doc for e in fx if isinstance(e, SetDocument)]
     assert len(docs) == 1
     assert check_invariants(docs[0]) is None, check_invariants(docs[0])
     sends = [e for e in fx if isinstance(e, Send)]
+    if legal_pre:
+        halves(doc, req, now, docs[0])
     return docs[0], sends, reply, fx
+
+
+def halves(doc, req, now, fused):
+    """Check the catalogue on the two abstract steps the fused transition is
+    made of, and that the fused document is their composition."""
+    before = State(doc)
+    swept = handle_internal(doc, now, CFG)
+    mid = before.after(next(e.doc for e in swept if isinstance(e, SetDocument)), [e for e in swept if isinstance(e, Send)])
+    assert state_failures(now, before) == [], state_failures(now, before)
+    assert state_failures(now, mid) == [], state_failures(now, mid)
+    assert trans_failures(now, before, mid) == [], trans_failures(now, before, mid)
+    assert internal_failures(now, before, mid) == [], internal_failures(now, before, mid)
+    fx2, _ = handle_external(mid.doc, req, now, CFG)  # its own sweep is a no-op now
+    after = mid.after(next(e.doc for e in fx2 if isinstance(e, SetDocument)), [e for e in fx2 if isinstance(e, Send)])
+    assert state_failures(now, after) == [], state_failures(now, after)
+    assert trans_failures(now, mid, after) == [], trans_failures(now, mid, after)
+    assert after.doc == fused, "fused != composed"
 
 
 def create(id, timeout_at, tags=None):
@@ -182,7 +213,13 @@ def sweep(doc, now):
     docs = [e.doc for e in fx if isinstance(e, SetDocument)]
     assert len(docs) == 1
     assert check_invariants(docs[0]) is None, check_invariants(docs[0])
-    return docs[0], [e for e in fx if isinstance(e, Send)], fx
+    sends = [e for e in fx if isinstance(e, Send)]
+    before, after = State(doc), State(docs[0], sends)
+    assert state_failures(now, before) == [], state_failures(now, before)
+    assert state_failures(now, after) == [], state_failures(now, after)
+    assert trans_failures(now, before, after) == [], trans_failures(now, before, after)
+    assert internal_failures(now, before, after) == [], internal_failures(now, before, after)
+    return docs[0], sends, fx
 
 
 def test_an_empty_document_sweeps_to_nothing():
@@ -348,9 +385,13 @@ def test_settling_fans_out_to_awaiters_in_registration_order():
 def test_a_settled_awaiter_is_not_resumed():
     doc = with_suspended("o:a", "o:x")
     doc = apply(doc, PromiseSettle("o:a", REJECTED), 5)  # the awaiter settles first
-    assert doc.get("o:x").promise.callbacks == [], "a finished task waits on nothing"
+    # The stale registration stays until the awaited settles (the catalogue
+    # forbids removing a callback from a pending promise); the fan-out skips
+    # the finished awaiter.
+    assert doc.get("o:x").promise.callbacks == ["o:a"]
     nxt, sends, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 6)
     assert sends == [] and nxt.get("o:a").task.state == T_FULFILLED
+    assert nxt.get("o:x").promise.callbacks == []
 
 
 def test_a_halted_awaiter_buffers_a_resume_when_a_settlement_fans_out():
@@ -399,9 +440,9 @@ def test_registering_twice_registers_once():
 def test_registering_against_a_settled_promise_resumes_a_suspended_awaiter():
     doc = with_suspended("o:a", "o:x")
     doc.get("o:x").promise.callbacks = []  # forget the registration, keep the parked task
-    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
+    doc, _, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 5, legal_pre=False)
     assert doc.get("o:a").task.state == T_SUSPENDED
-    nxt, sends, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
+    nxt, sends, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6, legal_pre=False)
     assert reply.data["promise"]["state"] == "resolved"
     t = nxt.get("o:a").task
     assert (t.state, t.resumes, t.retry_at) == (T_PENDING, {"o:x"}, 30_006)
@@ -531,9 +572,8 @@ def test_acquiring_at_the_wrong_version_is_a_conflict():
 
 
 def test_acquiring_takes_the_lease_and_drops_buffered_resumes():
-    doc = with_targeted("o:a", 100_000)
+    doc = apply(with_targeted("o:a", 100_000), create("o:x", 100_000), 0)
     doc.get("o:a").task.resumes.add("o:x")
-    doc = apply(doc, create("o:x", 100_000), 0)
     nxt, sends, reply, fx = step(doc, TaskAcquire("o:a", 0, PID, 5_000), 100)
     t = nxt.get("o:a").task
     assert (t.state, t.version, t.pid, t.ttl, t.resumes, t.lease_at, t.retry_at) == (
@@ -799,8 +839,18 @@ def test_a_remote_call_end_to_end():
 
 def test_settling_after_the_lease_expired_reclaims_the_task_first():
     # The sweep runs before the request: a lease past due hands the task back
-    # and re-dispatches it, and only then does the settle fulfil it.
+    # and would re-dispatch it, but the settle then fulfils it in the same
+    # step, so the merge drops the dispatch the request overtook.
     doc = with_acquired("o:a")  # lease at 5_000
     nxt, sends, _, _ = step(doc, PromiseSettle("o:a", RESOLVED), 7_000)
-    assert sends == [Send(W, Execute("o:a", 1))]
+    assert sends == []
     assert nxt.get("o:a").task.state == T_FULFILLED
+
+
+def test_acquiring_after_the_lease_expired_drops_the_stale_dispatch():
+    # Lease past due: the sweep hands the task back at version 1; the acquire
+    # takes it at version 2. The version-1 execute could only be refused.
+    doc = with_acquired("o:a")
+    nxt, sends, reply, _ = step(doc, TaskAcquire("o:a", 1, "p2", 5_000), 7_000)
+    assert reply.status == 200 and nxt.get("o:a").task.version == 2
+    assert sends == []
