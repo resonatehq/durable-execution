@@ -1,7 +1,7 @@
 """The kernel: the protocol's state machine, as a pure function.
 
-    handle_external(doc, req, now, cfg) -> (effects, reply)   one protocol request
-    handle_internal(doc, now, cfg)      -> effects            the sweep of everything due
+    handle_internal(doc, now, cfg)      -> effects            the sweep: everything whose deadline has passed
+    handle_external(doc, req, now, cfg) -> (effects, reply)   the sweep, then one protocol request
 
 Neither reads a clock, generates an id, or does I/O. Everything a decision
 implies comes back as an Effect for the shell to perform, in order: arm the new
@@ -307,16 +307,49 @@ def send_execute(tx: Tx, task_id: str, version: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[list[Effect], Reply]:
-    tx = Tx(doc=copy.deepcopy(doc))
-    match req:
-        case PromiseCreate():
-            reply = promise_create(tx, req, now, cfg)
-        case _:
-            raise NotImplementedError(type(req).__name__)
+def handle_internal(doc: Document, now: int, cfg: KernelCfg) -> list[Effect]:
+    """Sweep every deadline at or before `now`, in one pass.
 
-    # Linearize the outcome in the order the shell must perform it: arm the new
-    # timer, commit the document, clear the old timer, send.
+    Four phases, each reading the state the previous one left: settle every
+    expired promise, run their settlement chains, re-dispatch pending tasks
+    past their retry deadline, reclaim acquired tasks past their lease. A
+    promise without a target expires here like any other; its chain simply
+    has nobody to fulfil, wake, or notify, so it sends nothing."""
+    tx = Tx(doc=copy.deepcopy(doc))
+
+    # Phase 1: settle first, all of them, so an awaiter that is itself expiring
+    # is already settled when its awaited promise fans out, and is skipped
+    # rather than resumed. `settled_at` is the deadline, not `now`.
+    expired = [o for o in tx.doc.objects if o.promise.state == PENDING and now >= o.promise.timeout_at]
+    for o in expired:
+        o.promise.state = o.promise.timeout_state()
+        o.promise.settled_at = o.promise.timeout_at
+    # Phase 2: the chains, in id order.
+    for o in expired:
+        trigger_settlement(tx, o.id, now, cfg)
+
+    # Phase 3: re-dispatch pending tasks whose retry deadline has passed. Read
+    # after phase 2: a task the settlement just fulfilled has no timer left.
+    for o in tx.doc.objects:
+        t = o.task
+        if t is not None and t.state == T_PENDING and t.retry_at is not None and t.retry_at <= now:
+            t.arm_retry(now + cfg.retry_timeout)
+            send_execute(tx, o.id, t.version)
+
+    # Phase 4: expire leases. The holder is presumed gone, so the task goes
+    # back to pending at the *same* version and is re-dispatched; whoever picks
+    # it up bumps the version and fences the old holder out.
+    for o in tx.doc.objects:
+        t = o.task
+        if t is not None and t.state == T_ACQUIRED and t.lease_at is not None and t.lease_at <= now:
+            t.state = T_PENDING
+            t.pid = None
+            t.ttl = None
+            t.arm_retry(now + cfg.retry_timeout)
+            send_execute(tx, o.id, t.version)
+
+    # Linearize in the order the shell performs it: arm the new timer, commit
+    # the document, clear the old timer, send.
     old, new = doc.timer_at, min_deadline(tx.doc)
     tx.doc.timer_at = new
     fx: list[Effect] = []
@@ -325,6 +358,34 @@ def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[
     fx.append(SetDocument(tx.doc))
     if old != new and old is not None:
         fx.append(DelTimeout(old))
+    fx.extend(tx.sends)
+    return fx
+
+
+def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[list[Effect], Reply]:
+    """Sweep, then decide one request against the swept document, then merge.
+
+    The sweep's own timer effects are discarded: the merged timer transition
+    is from the document that came in to the document that goes out, so an
+    intermediate deadline the request then moved is never armed. Sends keep
+    their order: the sweep's first, then the request's."""
+    swept = handle_internal(doc, now, cfg)
+    tx = Tx(doc=next(e.doc for e in swept if isinstance(e, SetDocument)))
+    match req:
+        case PromiseCreate():
+            reply = promise_create(tx, req, now, cfg)
+        case _:
+            raise NotImplementedError(type(req).__name__)
+
+    old, new = doc.timer_at, min_deadline(tx.doc)
+    tx.doc.timer_at = new
+    fx: list[Effect] = []
+    if old != new and new is not None:
+        fx.append(SetTimeout(new))
+    fx.append(SetDocument(tx.doc))
+    if old != new and old is not None:
+        fx.append(DelTimeout(old))
+    fx.extend(e for e in swept if isinstance(e, Send))
     fx.extend(tx.sends)
     return fx, reply
 
@@ -338,7 +399,6 @@ def promise_create(tx: Tx, r: PromiseCreate, now: int, cfg: KernelCfg) -> Reply:
     address = r.tags.get(TAG_TARGET)
     if address is not None and not is_valid_address(address):
         return Reply.err(400, "Invalid resonate:target address")
-    try_timeout(tx, [r.id], now, cfg)
     o = tx.doc.get(r.id)
     if o is not None:
         # Create is idempotent on id alone: the stored promise wins.
@@ -392,19 +452,6 @@ def insert_promise(tx: Tx, id: str, r: PromiseCreate, now: int) -> Object:
         p.state = p.timeout_state()
         p.settled_at = r.timeout_at
     return tx.doc.insert(Object(id=id, promise=p))
-
-
-def try_timeout(tx: Tx, ids: list[str], now: int, cfg: KernelCfg) -> None:
-    """Settle every named promise whose deadline has passed. `settled_at` is
-    the deadline, not `now`, so the record is identical whenever the expiry is
-    noticed."""
-    for id in ids:
-        o = tx.doc.get(id)
-        if o is None or o.promise.state != PENDING or now < o.promise.timeout_at:
-            continue
-        o.promise.state = o.promise.timeout_state()
-        o.promise.settled_at = o.promise.timeout_at
-        trigger_settlement(tx, id, now, cfg)
 
 
 def trigger_settlement(tx: Tx, id: str, now: int, cfg: KernelCfg) -> None:

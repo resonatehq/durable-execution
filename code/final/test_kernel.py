@@ -2,8 +2,9 @@
 
 from kernel import (
     PENDING, REJECTED_TIMEDOUT, RESOLVED, T_FULFILLED, T_PENDING, TAG_TIMER,
-    DelTimeout, Document, Execute, KernelCfg, PromiseCreate, Reply, Send,
-    SetDocument, SetTimeout, Value, check_invariants, dewey, handle_external,
+    T_ACQUIRED, DelTimeout, Document, Execute, KernelCfg, PromiseCreate, Reply,
+    Send, SetDocument, SetTimeout, Task, Value, check_invariants, dewey,
+    handle_external, handle_internal,
 )
 
 W = "http://worker:9999"
@@ -108,7 +109,8 @@ def test_a_delay_already_past_dispatches_immediately():
 
 
 def test_creating_a_promise_settles_an_expired_one_it_names_first():
-    # Ghost timeouts: the id a request names is swept before the operation.
+    # The sweep runs before the operation, so a create on an expired id sees
+    # the settled promise and reports it.
     doc = with_targeted("o:a", 1_000)
     nxt, sends, reply, fx = step(doc, create("o:a", 5_000, {"resonate:target": W}), 2_000)
     assert reply.data["promise"]["state"] == "rejected_timedout"
@@ -152,3 +154,85 @@ def test_a_promise_record_carries_the_wire_shape():
             "createdAt": 7,
         }
     }
+
+
+def test_an_unrelated_request_settles_an_expired_untargeted_promise():
+    doc, _, _, _ = step(Document(), create("o:a", 1_000), 0)
+    assert doc.timer_at is None, "an untargeted promise arms nothing"
+    nxt, sends, _, _ = step(doc, create("o:b", 100_000), 2_000)
+    assert nxt.get("o:a").promise.state == REJECTED_TIMEDOUT
+    assert nxt.get("o:a").promise.settled_at == 1_000
+    assert sends == [], "internal: nothing to fulfil, wake, or notify"
+
+
+def test_the_sweep_and_the_request_merge_to_one_timer_transition():
+    doc = with_targeted("o:a", 1_000)  # timer at 1_000
+    # At 2_000 the sweep clears o:a's timer; the request then arms o:b's.
+    # The merged effects go straight from 1_000 to o:b's retry, never through
+    # "no timer" in between.
+    nxt, _, _, fx = step(doc, create("o:b", 100_000, {"resonate:target": W}), 2_000)
+    assert fx == [SetTimeout(32_000), SetDocument(nxt), DelTimeout(1_000), Send(W, Execute("o:b", 0))]
+
+
+# --- the sweep -------------------------------------------------------------
+
+
+def sweep(doc, now):
+    fx = handle_internal(doc, now, CFG)
+    docs = [e.doc for e in fx if isinstance(e, SetDocument)]
+    assert len(docs) == 1
+    assert check_invariants(docs[0]) is None, check_invariants(docs[0])
+    return docs[0], [e for e in fx if isinstance(e, Send)], fx
+
+
+def test_an_empty_document_sweeps_to_nothing():
+    nxt, sends, fx = sweep(Document(), 1_000_000)
+    assert nxt == Document()
+    assert sends == []
+    assert fx == [SetDocument(Document())]
+
+
+def test_a_document_with_nothing_due_is_unchanged():
+    doc = with_targeted("o:a", 100_000)
+    nxt, sends, _ = sweep(doc, 1_000)
+    assert nxt == doc
+    assert sends == []
+
+
+def test_an_expired_promise_settles_at_its_own_deadline():
+    doc = with_targeted("o:a", 1_000)
+    nxt, sends, fx = sweep(doc, 5_000)
+    p = nxt.get("o:a").promise
+    assert (p.state, p.settled_at) == (REJECTED_TIMEDOUT, 1_000)
+    assert nxt.get("o:a").task.state == T_FULFILLED
+    assert nxt.timer_at is None
+    assert sends == []
+    assert fx == [SetDocument(nxt), DelTimeout(1_000)]
+
+
+def test_a_pending_task_past_its_retry_is_re_dispatched_at_the_same_version():
+    doc = with_targeted("o:a", 100_000)  # retry at 30_000
+    nxt, sends, fx = sweep(doc, 30_000)
+    assert nxt.get("o:a").task.retry_at == 60_000
+    assert sends == [Send(W, Execute("o:a", 0))]
+    assert fx[0] == SetTimeout(60_000) and DelTimeout(30_000) in fx
+
+
+def test_an_expired_lease_hands_the_task_back_pending_at_the_same_version():
+    doc = with_targeted("o:a", 100_000)
+    t = doc.get("o:a").task
+    t.state, t.version, t.pid, t.ttl = T_ACQUIRED, 3, "p1", 5_000
+    t.arm_lease(10_000)
+    doc.timer_at = 10_000
+    nxt, sends, _ = sweep(doc, 10_000)
+    t = nxt.get("o:a").task
+    assert (t.state, t.version, t.pid, t.ttl) == ("pending", 3, None, None)
+    assert (t.retry_at, t.lease_at) == (40_000, None)
+    assert sends == [Send(W, Execute("o:a", 3))]
+
+
+def test_a_sweep_that_fires_nothing_changes_nothing():
+    doc = with_targeted("o:a", 100_000)
+    for now in (0, 1, 29_999):
+        nxt, sends, fx = sweep(doc, now)
+        assert nxt == doc and sends == [] and fx == [SetDocument(doc)]
