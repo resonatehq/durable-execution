@@ -1,7 +1,7 @@
-"""The bucket, for real.
+"""A store, for real: Google Cloud Storage.
 
-`GcsBlob` is the `Blob` protocol over Google Cloud Storage, and it is almost
-empty, which is the test of whether the port was drawn in the right place.
+`store_gcp.Store` is `store.StoreP` over a bucket, and it is almost empty,
+which is the test of whether the interface was drawn in the right place.
 Everything the design rests on, GCS already offers: a generation per object,
 and writes conditioned on it.
 
@@ -26,10 +26,10 @@ latency rather than loss.
 ## What is not verified
 
 This file has never been run against Google Cloud Storage. It is written
-against the library's documented behaviour and the contract in
-`test_contract.py`, which the simulated bucket passes and which this will
-pass or fail the moment someone sets `GCS_BUCKET`. Until then, "it works on
-GCS" rests on the documentation, and saying so is better than implying
+against the library's documented behaviour and against `store.conformance`,
+which the simulated store passes and which this will pass or fail the moment
+someone sets `GCS_BUCKET` (see `test_conformance.py`). Until then, "it works
+on GCS" rests on the documentation, and saying so is better than implying
 otherwise.
 """
 
@@ -37,11 +37,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ports import Conflict as PreconditionFailed
-from ports import Unavailable
-
-#: What `Blob.get` reports, and what a create writes against.
-ABSENT = ""
+from store import PreconditionFailed, Unavailable
 
 #: The bytes a document is. Not `application/json`: a document is a sequence
 #: of JSON values, one per line, which is a different media type and worth
@@ -49,8 +45,8 @@ ABSENT = ""
 CONTENT_TYPE = "application/x-ndjson"
 
 
-class GcsBlob:
-    """The `Blob` protocol over a real bucket.
+class Store:
+    """The four operations over a real bucket.
 
     `client` is injected rather than constructed so a test can hand in a
     double, and so a process that already has one does not make a second.

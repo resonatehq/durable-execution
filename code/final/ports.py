@@ -1,20 +1,28 @@
-"""The three things the engine needs from the world, and in-memory versions.
+"""The vocabulary everything else shares, and two of the engine's ports.
 
-A port is what the engine calls; everything about *where* the bytes go lives
-behind it. There are three, and no more, because that is all one origin's
-transition needs: somewhere to keep the document, something to arm a deadline
-with, and something to carry a message.
+This module imports nothing, on purpose. It is what `store.py`, `timer.py`,
+`spec.py`, the engine and the kernel's shell can all reach for without any
+of them reaching for each other: the two failures a world can hand back, the
+fault injector that simulates the third, the thing a conformance suite
+reports, and the two narrow ports the engine calls.
+
+The store is not here. It is an interface with three implementations and a
+contract of its own, so it has a module — `store.py` — the way the engine
+has `spec.py`. What is left here are the two ports that are adapters rather
+than implementations: arming a deadline and sending a message are both one
+queue in production (`timer.py`), and the engine should not have to know
+that.
 
 The in-memory implementations are not toys. They have the same semantics the
-real ones must have — a generation that a conditional write is checked
-against, a timer named by whatever armed it, a send that happens once — and
-they are what every test runs on. `Fault` is what makes them interesting: it
-cuts the power between two effects, so the crash windows the engine claims to
-survive are tested rather than argued.
+real ones must have — a timer named by whatever armed it, a send that happens
+once — and they are what every test runs on. `Fault` is what makes them
+interesting: it cuts the power between two effects, so the crash windows the
+engine claims to survive are tested rather than argued.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 
@@ -68,45 +76,27 @@ class Fault:
 
 
 # ---------------------------------------------------------------------------
-# Store
+# What a conformance suite reports
 # ---------------------------------------------------------------------------
 
 
-class Store(Protocol):
-    def load(self, key: str) -> tuple[bytes | None, int]:
-        """The body and its generation. Generation 0 means it is not there,
-        which is also what a create writes against."""
+@dataclass
+class Violation:
+    """One claim an implementation did not honour.
 
-    def commit(self, key: str, body: bytes, if_generation: int) -> int:
-        """Replace the object only if it is still at `if_generation`, or
-        create it when that is 0. Raises `Conflict` otherwise."""
+    There are three conformance suites — `spec.py` for an engine, `store.py`
+    for a store, `timer.py` for a timer — and they report the same way, so a
+    caller can collect from all three and a reader learns one format. `step`
+    is where in the suite it happened: which message of a script, or which
+    claim of a contract.
+    """
 
+    step: int
+    msg: str
+    detail: str
 
-class MemoryStore:
-    """A dict with generations. Reads never fault, so a test can see exactly
-    what landed after the power went out."""
-
-    def __init__(self, fault: Fault | None = None) -> None:
-        self.objects: dict[str, tuple[bytes, int]] = {}
-        self.fault = fault
-        #: When set, a faulted commit writes and *then* raises, which is the
-        #: window where nothing is known about whether the write landed.
-        self.land_then_fail = False
-
-    def load(self, key: str) -> tuple[bytes | None, int]:
-        body, gen = self.objects.get(key, (None, 0))
-        return body, gen
-
-    def commit(self, key: str, body: bytes, if_generation: int) -> int:
-        current = self.objects.get(key, (None, 0))[1]
-        if current != if_generation:
-            raise Conflict(f"{key} is at generation {current}, not {if_generation}")
-        if self.land_then_fail and self.fault is not None and self.fault.budget == 0:
-            self.objects[key] = (body, current + 1)
-        if self.fault is not None:
-            self.fault.tick(f"commit {key}")
-        self.objects[key] = (body, current + 1)
-        return current + 1
+    def __str__(self) -> str:
+        return f"step {self.step} ({self.msg}): {self.detail}"
 
 
 # ---------------------------------------------------------------------------

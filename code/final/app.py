@@ -37,15 +37,13 @@ import json
 import os
 from datetime import datetime, timezone
 
-from blob import BlobStore
-from cloudtasks import CloudTasksQueue
+import store_gcp
+import timer_gcp
 from engine import Timeout
-from gcs import GcsBlob
 from kernel import KernelCfg
 from ports import Conflict, Unavailable
 from runtime import Clock, Worker
-from sdk import route
-from tasks import QueueTimers, QueueTransport
+from timer import Timers, Transport
 from wire import Invalid, decode_message, encode_reply, parse_request
 
 
@@ -56,16 +54,16 @@ def wall_clock() -> int:
 class Service:
     """Everything one container instance needs, built once."""
 
-    def __init__(self, blob, queue, cfg: KernelCfg, pid: str, ttl: int, clock=wall_clock) -> None:
+    def __init__(self, store, timer, cfg: KernelCfg, pid: str, ttl: int,
+                 clock=wall_clock) -> None:
         from engine import Engine
 
         self.clock = clock
-        self.queue = queue
-        self.engine = Engine(BlobStore(blob), QueueTimers(queue), QueueTransport(queue), cfg)
+        self.store, self.timer = store, timer
+        self.engine = Engine(store, Timers(timer), Transport(timer), cfg)
         self.worker = Worker(self.engine, Clock(), pid, ttl)
         # The worker's clock is the wall clock, not a test's.
         self.worker.clock = clock
-        self.blob = blob
 
     # -- the routes --------------------------------------------------------
 
@@ -92,7 +90,7 @@ class Service:
 
     def ready(self) -> tuple[dict, int]:
         try:
-            self.blob.list("", 1)
+            self.store.list("", 1)
         except Unavailable as e:
             return {"ready": False, "why": str(e)}, 503
         return {"ready": True}, 200
@@ -140,8 +138,8 @@ def from_environment() -> Service:  # pragma: no cover - needs credentials
     is the only thing in this system that knows the shape of the
     deployment: `{"search": "https://search-abc.a.run.app/execute"}`.
     """
-    blob = GcsBlob(os.environ["BUCKET"])
-    queue = CloudTasksQueue(
+    store = store_gcp.Store(os.environ["BUCKET"])
+    timer = timer_gcp.Timer(
         project=os.environ["PROJECT"],
         location=os.environ["LOCATION"],
         queue=os.environ["QUEUE"],
@@ -153,7 +151,7 @@ def from_environment() -> Service:  # pragma: no cover - needs credentials
 
         TARGETS[name] = url
     return Service(
-        blob, queue,
+        store, timer,
         KernelCfg(retry_timeout=int(os.environ.get("RETRY_TIMEOUT", 30_000))),
         pid=os.environ.get("K_REVISION", "local"),
         ttl=int(os.environ.get("LEASE", 60_000)),

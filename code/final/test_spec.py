@@ -12,8 +12,9 @@ from __future__ import annotations
 import engine as engine_module
 import spec
 from kernel import Execute, KernelCfg, PromiseCreate, PromiseGet, Reply, Value
-from ports import MemoryStore, MemoryTimers, MemoryTransport
+from ports import MemoryTimers, MemoryTransport
 from spec import EngineP, conformance
+from store_mem import Store
 
 
 def test_the_engine_conforms():
@@ -21,13 +22,13 @@ def test_the_engine_conforms():
 
 
 def test_the_engine_satisfies_the_protocol_at_runtime():
-    e = engine_module.Engine(MemoryStore(), MemoryTimers(), MemoryTransport())
+    e = engine_module.Engine(Store(), MemoryTimers(), MemoryTransport())
     assert isinstance(e, EngineP)
 
 
 def test_the_module_offers_a_constructor_under_the_agreed_name():
     m: spec.EngineM = engine_module
-    e = m.Engine(MemoryStore(), MemoryTimers(), MemoryTransport(), KernelCfg())
+    e = m.Engine(Store(), MemoryTimers(), MemoryTransport(), KernelCfg())
     assert isinstance(e.process(PromiseCreate("o:a", 10, Value(), {}), 0), Reply)
 
 
@@ -39,8 +40,8 @@ def test_the_suite_rejects_an_engine_that_writes_on_a_read():
             reply = super().process(msg, now)
             if isinstance(msg, PromiseGet):
                 key = spec.doc_key(spec.ORIGIN)
-                raw, gen = self.store.load(key)
-                self.store.commit(key, raw, gen)  # the same bytes, at a cost
+                body, version = self.store.get(key)
+                self.store.put(key, body, if_match=version)  # same bytes, at a cost
             return reply
 
     class Module:
@@ -72,13 +73,14 @@ def test_the_standard_script_exercises_what_it_claims_to():
     """A conformance script that never suspends a task, never expires a
     lease and never settles a timer grades nothing."""
     from codec import decode, doc_key
-    from ports import MemoryStore, MemoryTimers, MemoryTransport
-    store, timers, transport = MemoryStore(), MemoryTimers(), MemoryTransport()
+    from ports import MemoryTimers, MemoryTransport
+    from store_mem import Store
+    store, timers, transport = Store(), MemoryTimers(), MemoryTransport()
     e = engine_module.Engine(store, timers, transport, spec.CFG)
     seen = set()
     for msg, now in spec.STANDARD_SCRIPT:
         e.process(msg, now)
-        raw, _ = store.load(doc_key(spec.ORIGIN))
+        raw = store.get(doc_key(spec.ORIGIN))[0].encode()
         for o in decode(raw, spec.ORIGIN).objects:
             if o.task is not None:
                 seen.add(o.task.state)
@@ -86,10 +88,10 @@ def test_the_standard_script_exercises_what_it_claims_to():
     assert {"pending", "acquired", "suspended", "fulfilled", "resolved"} <= seen, seen
 
 
-def test_the_engine_conforms_over_a_simulated_bucket():
-    """The same engine, the same script, the same catalogue, but reaching the
-    document through the four operations a real bucket offers rather than a
-    dict. The adapter is the only thing that changed, so this is what says
-    the adapter is right."""
-    from blob import BlobStore, MemoryBlob
-    assert conformance(engine_module, store=BlobStore(MemoryBlob())) == []
+def test_the_engine_conforms_over_a_store_it_was_handed():
+    """The same engine, the same script, the same catalogue, over a store
+    the suite was given rather than the one it defaults to. Any module that
+    passes `store.conformance` can be dropped in here — including
+    `store_gcp` against a real bucket."""
+    import store_mem
+    assert conformance(engine_module, store=store_mem.Store()) == []

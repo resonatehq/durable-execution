@@ -212,7 +212,7 @@ class CloudRuntime:
 
     def handle(self, delivery) -> bool:
         """What the URL means. Returns whether the handler answered."""
-        from tasks import SWEEP
+        from timer import SWEEP
 
         if delivery.url.startswith(SWEEP):
             self.swept += 1

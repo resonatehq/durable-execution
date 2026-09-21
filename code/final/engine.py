@@ -11,14 +11,14 @@ message came from.
 Everything else about the method is the same for both, and the order is the
 part that matters:
 
-1. **Load** the origin's document and the generation it is at.
+1. **Load** the origin's document and the version it is at.
 2. **Decide**, purely: the kernel returns the next document and its effects.
 3. **Arm** the new deadline, *before* the commit, and record what it is
    called. A committed document whose deadline was never armed is the one
    state nothing repairs — the promise never times out and every answer about
    it stays correct forever — so the arm comes first and a failed arm fails
    the request rather than committing anyway.
-4. **Commit**, as one conditional write against the generation loaded in (1).
+4. **Commit**, as one conditional write against the version loaded in (1).
    A `Conflict` means the state moved and the decision is stale; it goes back
    to the caller, who retries, because every operation is idempotent. The
    engine never loops: a loop here would choose a retry policy before anything
@@ -54,7 +54,8 @@ from kernel import (
     TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
     handle_external, handle_internal, origin_of,
 )
-from ports import Store, Timers, Transport
+from ports import Timers, Transport
+from store import StoreP
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,7 @@ def _substance(doc: Document) -> tuple:
 
 
 class Engine:
-    def __init__(self, store: Store, timers: Timers, transport: Transport,
+    def __init__(self, store: StoreP, timers: Timers, transport: Transport,
                  cfg: KernelCfg = KernelCfg(), prefix: str = "") -> None:
         self.store, self.timers, self.transport = store, timers, transport
         self.cfg, self.prefix = cfg, prefix
@@ -102,8 +103,13 @@ class Engine:
     def process(self, msg: Req | Timeout, now: int) -> Reply:
         origin = origin_of_msg(msg)
         key = doc_key(origin, self.prefix)
-        raw, generation = self.store.load(key)
-        doc = decode(raw, origin) if raw is not None else Document()
+        # The store speaks text, because the body of an object in a bucket
+        # is something a person can read; the codec speaks bytes, because a
+        # document's canonical form is bytes. One `encode` each way is the
+        # whole of the difference.
+        found = self.store.get(key)
+        version = None if found is None else found[1]
+        doc = Document() if found is None else decode(found[0].encode("utf-8"), origin)
         # Fold the clock forward rather than taking it: a caller whose clock
         # has regressed must not be able to un-expire anything.
         now = max(now, doc.clock)
@@ -128,7 +134,11 @@ class Engine:
             # nothing to name, and a leftover name is a handle on something
             # that no longer exists. Found by the line schema.
             new.timer_name = None
-        self.store.commit(key, encode(new, origin), generation)
+        body = encode(new, origin).decode("utf-8")
+        if version is None:
+            self.store.put(key, body, if_absent=True)
+        else:
+            self.store.put(key, body, if_match=version)
         for e in fx:
             # By name, never by coordinates: the deadline being removed is the
             # one this document's predecessor armed, and a deadline that became

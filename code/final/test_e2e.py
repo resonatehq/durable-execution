@@ -22,7 +22,7 @@ import jsonschema
 import pytest
 
 import properties as P
-from blob import BlobStore, MemoryBlob
+from store_mem import Store
 from codec import decode, doc_key
 from engine import Engine
 from kernel import KernelCfg, PromiseRegisterListener, Send
@@ -77,31 +77,31 @@ ORIGIN = "research.1"
 def world(fault: Fault | None = None):
     """One bucket, one queue, one clock, two workers."""
     CALLS.clear()
-    blob = MemoryBlob(fault)
-    store, timers, transport = BlobStore(blob), MemoryTimers(fault), MemoryTransport(fault)
+    store = Store(fault)
+    timers, transport = MemoryTimers(fault), MemoryTransport(fault)
     clock = Clock()
     engine = Engine(store, timers, transport, CFG)
     rt = Runtime(engine, timers, transport, clock)
     rt.serve(AGENT, Worker(engine, clock, "agent-1"), research, agent)
     rt.serve(SEARCH, Worker(engine, clock, "search-1"), search)
-    return rt, blob, engine, clock
+    return rt, store, engine, clock
 
 
-def document(blob: MemoryBlob, origin: str = ORIGIN):
-    found = blob.get(doc_key(origin))
+def document(store: Store, origin: str = ORIGIN):
+    found = store.get(doc_key(origin))
     return decode(found[0].encode(), origin) if found else None
 
 
-def check_bytes(blob: MemoryBlob) -> None:
+def check_bytes(store: Store) -> None:
     """Every line of every document in the bucket, against the schema."""
-    for key, (body, _) in blob._objects.items():
+    for key, (body, _) in store.objects.items():
         for i, line in enumerate(body.split("\n")):
             errs = list(VALIDATOR.iter_errors(json.loads(line)))
             assert not errs, f"{key} line {i}: {[e.message for e in errs]}"
 
 
-def answer(blob: MemoryBlob, origin: str = ORIGIN):
-    doc = document(blob, origin)
+def answer(store: Store, origin: str = ORIGIN):
+    doc = document(store, origin)
     root = doc.get(origin)
     assert root.promise.state == "resolved", f"the run did not finish: {root.promise.state}"
     return json.loads(root.promise.value.data)
@@ -120,17 +120,17 @@ EXPECTED = {"report": (
 
 
 def test_the_research_agent_runs_to_completion():
-    rt, blob, _, _ = world()
+    rt, store, _, _ = world()
     rt.start(ORIGIN, research, QUESTION)
     rt.drain()
-    assert answer(blob) == EXPECTED
-    check_bytes(blob)
+    assert answer(store) == EXPECTED
+    check_bytes(store)
 
 
 def test_nothing_is_paid_for_twice():
     """Three searches, two model calls, each exactly once, across however
     many times the function was re-run from the top."""
-    rt, blob, _, _ = world()
+    rt, store, _, _ = world()
     rt.start(ORIGIN, research, QUESTION)
     rt.drain()
     assert dict(CALLS) == {
@@ -145,10 +145,10 @@ def test_the_fan_out_is_a_fan_out():
     """All three searches are dispatched before anything blocks, and the
     caller suspends once rather than once per branch. Dispatching and
     reading are separable for exactly this reason."""
-    rt, blob, engine, clock = world()
+    rt, store, engine, clock = world()
     rt.start(ORIGIN, research, QUESTION)
     rt.drain()
-    doc = document(blob)
+    doc = document(store)
     branches = [o for o in doc.objects if o.id.startswith(f"{ORIGIN}:") and o.task is not None]
     assert len(branches) == 3, [o.id for o in doc.objects]
     # The run's own task was claimed twice: once to plan and fan out, once to
@@ -158,7 +158,7 @@ def test_the_fan_out_is_a_fan_out():
 
 
 def test_a_listener_is_told_when_the_run_settles():
-    rt, blob, engine, clock = world()
+    rt, store, engine, clock = world()
     rt.start(ORIGIN, research, QUESTION)
     engine.process(PromiseRegisterListener(ORIGIN, "http://client"), clock())
     rt.drain()
@@ -169,11 +169,11 @@ def test_a_listener_is_told_when_the_run_settles():
 def test_the_bucket_holds_one_document_for_the_whole_run():
     """Every promise and task of this run is one object under one key, which
     is why one conditional write commits a whole transition."""
-    rt, blob, _, _ = world()
+    rt, store, _, _ = world()
     rt.start(ORIGIN, research, QUESTION)
     rt.drain()
-    assert list(blob._objects) == [doc_key(ORIGIN)]
-    doc = document(blob)
+    assert list(store.objects) == [doc_key(ORIGIN)]
+    doc = document(store)
     assert {o.id for o in doc.objects} == {
         ORIGIN, f"{ORIGIN}:1", f"{ORIGIN}:2", f"{ORIGIN}:3", f"{ORIGIN}:4", f"{ORIGIN}:5"}
 
@@ -181,25 +181,25 @@ def test_the_bucket_holds_one_document_for_the_whole_run():
 def test_every_state_the_run_passes_through_is_one_the_catalogue_admits():
     """The conformance catalogue, over a real program rather than a script
     somebody wrote to be graded."""
-    rt, blob, engine, clock = world()
+    rt, store, engine, clock = world()
     rt.start(ORIGIN, research, QUESTION)
-    seen = P.State(document(blob), retry_timeout=CFG.retry_timeout)
+    seen = P.State(document(store), retry_timeout=CFG.retry_timeout)
     steps = 0
     while rt.step():
         steps += 1
-        seen = seen.after(document(blob), [Send(a, m) for a, m in rt.transport.sent])
+        seen = seen.after(document(store), [Send(a, m) for a, m in rt.transport.sent])
         assert P.state_failures(clock(), seen) == [], P.state_failures(clock(), seen)
-    assert steps >= 3 and answer(blob) == EXPECTED
+    assert steps >= 3 and answer(store) == EXPECTED
 
 
 # --- it survives ------------------------------------------------------------
 
 
 def clean_run() -> tuple[object, Counter]:
-    rt, blob, _, _ = world()
+    rt, store, _, _ = world()
     rt.start(ORIGIN, research, QUESTION)
     rt.drain()
-    return answer(blob), Counter(CALLS)
+    return answer(store), Counter(CALLS)
 
 
 @pytest.mark.parametrize("k", range(28))
@@ -217,7 +217,7 @@ def test_killing_the_worker_at_any_write_still_finishes_the_run(k):
     want, clean = clean_run()
 
     fault = Fault()
-    rt, blob, engine, clock = world(fault)
+    rt, store, engine, clock = world(fault)
     rt.start(ORIGIN, research, QUESTION)
     fault.crash_after(k)
     try:
@@ -227,13 +227,13 @@ def test_killing_the_worker_at_any_write_still_finishes_the_run(k):
     else:
         pytest.skip(f"the run performs fewer than {k + 1} writes")
 
-    assert document(blob) is None or P.state_failures(clock(), P.State(document(blob))) == []
+    assert document(store) is None or P.state_failures(clock(), P.State(document(store))) == []
     fault.heal()
     for _ in range(6):  # each round: let a deadline come due, then work it
         clock.advance(40_000)
         rt.drain()
-    assert answer(blob) == want
-    check_bytes(blob)
+    assert answer(store) == want
+    check_bytes(store)
 
     extra = sum((Counter(CALLS) - clean).values())
     assert extra <= 1, f"more than the in-flight call was repeated: {CALLS} vs {clean}"
@@ -282,11 +282,11 @@ async def survives_a_broken_call(x: int):
 
 
 def run(fn, id, *args, extra=()):
-    rt, blob, engine, clock = world()
+    rt, store, engine, clock = world()
     rt.serve(AGENT, Worker(engine, clock, "w"), fn, *extra)
     rt.start(id, fn, *args)
     rt.drain()
-    return decode(blob.get(doc_key(id))[0].encode(), id)
+    return decode(store.get(doc_key(id))[0].encode(), id)
 
 
 def test_a_durable_call_can_contain_one():
@@ -331,7 +331,7 @@ def test_a_rejection_is_read_back_rather_than_re_raised_by_running_again():
     second time to discover that it fails; the rejection is the result, and
     replay reads results."""
     fault = Fault()
-    rt, blob, engine, clock = world(fault)
+    rt, store, engine, clock = world(fault)
     rt.serve(AGENT, Worker(engine, clock, "w"), calls_something_broken, on_fire)
     rt.start("boom.2", calls_something_broken, 1)
     # Stop after the rejection is committed but before the run settles.
@@ -345,7 +345,7 @@ def test_a_rejection_is_read_back_rather_than_re_raised_by_running_again():
     for _ in range(6):
         clock.advance(40_000)
         rt.drain()
-    doc = decode(blob.get(doc_key("boom.2"))[0].encode(), "boom.2")
+    doc = decode(store.get(doc_key("boom.2"))[0].encode(), "boom.2")
     assert doc.get("boom.2").promise.state == "rejected"
     assert CALLS["on_fire"] == called_once, "the failing call was made again"
 
@@ -356,7 +356,7 @@ def test_another_worker_finishes_what_a_dead_one_started():
     the first worker managed to settle."""
     want, _ = clean_run()
     fault = Fault()
-    rt, blob, engine, clock = world(fault)
+    rt, store, engine, clock = world(fault)
     rt.start(ORIGIN, research, QUESTION)
     fault.crash_after(6)
     try:
@@ -370,6 +370,6 @@ def test_another_worker_finishes_what_a_dead_one_started():
     for _ in range(6):
         clock.advance(40_000)
         rt.drain()
-    assert answer(blob) == want
+    assert answer(store) == want
     assert second.ran, "the second worker never picked anything up"
     assert second is not first

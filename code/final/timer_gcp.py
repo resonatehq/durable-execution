@@ -1,11 +1,10 @@
-"""The queue, for real.
+"""A timer, for real: Google Cloud Tasks.
 
-`CloudTasksQueue` is the `Queue` protocol over Google Cloud Tasks. Two
-methods, because that is all the engine needs: put a task in, take one out
-again. There is no third method for receiving, and that is not an omission
-— Cloud Tasks is push-only. A task is delivered by an HTTP POST to the URL
-it carries, which is why `app.py` exists and why a worker is a service
-rather than a loop.
+`timer_gcp.Timer` is `timer.TimerP` over a real queue. Two methods, because
+that is all the engine needs: put a task in, take one out again. There is
+no third method for receiving, and that is not an omission — Cloud Tasks is
+push-only. A task is delivered by an HTTP POST to the URL it carries, which
+is why `app.py` exists and why a worker is a service rather than a loop.
 
 ## What a task is here
 
@@ -34,9 +33,10 @@ it has a test.
 ## What is not verified
 
 This file has never been run against Google Cloud Tasks. It is written
-against the documented API, and `MemoryQueue` is what the tests drive. The
-two agree on the protocol by construction — both satisfy `Queue` — and on
-nothing else until someone points this at a project.
+against the documented API, and `timer_mem` is what the tests drive. The
+two agree on the interface by construction and on the contract by
+`timer.conformance`, which both pass, and on nothing else until someone
+points this at a project.
 """
 
 from __future__ import annotations
@@ -51,8 +51,8 @@ from ports import Unavailable
 HORIZON_MS = 30 * 24 * 60 * 60 * 1_000
 
 
-class CloudTasksQueue:
-    """The `Queue` protocol over a real queue.
+class Timer:
+    """The two operations over a real queue.
 
     `service_account` turns on OIDC: Cloud Tasks signs each request with a
     token for that account, and the handler verifies it. Without one the

@@ -11,12 +11,40 @@ The whole thing, end to end, and now with the outside wired: the GCS and
 Cloud Tasks implementations of the ports, and the Cloud Run service that
 turns a queue delivery into a call.
 
+Three interfaces, and each one is a module that says what it is, beside two
+modules that are it:
+
+```
+spec.py    EngineP  EngineC  EngineM      engine.py
+store.py   StoreP   StoreC   StoreM       store_mem.py   store_gcp.py
+timer.py   TimerP   TimerC   TimerM       timer_mem.py   timer_gcp.py
+```
+
+The same three layers each time. `…P` is the thing once it exists, `…C` is
+how one is made, and `…M` is a module that offers one under an agreed name
+— `Engine`, `Store`, `Timer`. A contract cannot be handed a class, because
+an implementation may choose its class at import time, and it cannot be
+handed an instance, because only the caller knows how to configure one. It
+is handed the module.
+
+Which is why the contract lives in the interface's own module rather than
+beside an implementation: a suite that shipped with the simulator would be
+grading the bucket against a rival instead of against a contract.
+
+```python
+assert spec.conformance(engine) == []
+assert store.conformance(store_mem) == []
+assert store.conformance(store_gcp, bucket="runs", prefix="t/") == []
+assert timer.conformance(timer_mem) == []
+```
+
 The simulators are still what every test runs on, because a simulator can be
 made unkind and a real service cannot. The adapters are held to the same
-contract rather than to a separate set of tests: `test_contract.py` runs one
-suite against the simulated bucket, against `GcsBlob` over a fake client that
-raises the libraries' own exceptions, and — only when `GCS_BUCKET` names a
-bucket this machine can reach — against Google Cloud Storage itself.
+claims rather than to a separate set of tests: `test_conformance.py` runs
+each contract against the simulated implementation, against the real one
+over a double that raises the libraries' own exceptions, and — only when
+`GCS_BUCKET` names a bucket this machine can reach — against Google Cloud
+Storage itself.
 
 Which means the honest status is: **nothing here has run on GCP.** The
 contract says what the adapters must do, the fake client says they do it when
@@ -49,7 +77,7 @@ object in Cloud Tasks: a task with an HTTP target and a time before which it
 must not be delivered. Only deadlines carry a time. A dispatch is never
 deferred, because anything that must wait waits by having a deadline.
 
-The order is the whole crash story, and `test_tasks.py` watches it through
+The order is the whole crash story, and `test_timer.py` watches it through
 the queue and the bucket together rather than through a log the engine
 kept:
 
@@ -77,13 +105,15 @@ should not have to pretend.
 | `kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
 | `engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send. The only method, and the only place that does I/O |
 | `spec.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
+| `store.py` | the same three protocols for a store, the four operations, and the eleven claims every store is held to |
+| `store_mem.py` | a store in a dict, with a power cut |
+| `store_gcp.py` | a store in Google Cloud Storage, with generation preconditions and the two failures mapped |
+| `timer.py` | the same three protocols for a timer, the two operations, the eight claims, and the engine's two ports over one queue |
+| `timer_mem.py` | a timer in a dict: duplicate delivery, no order, lateness, and giving up |
+| `timer_gcp.py` | a timer in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
 | `codec.py` | the document's canonical byte form, and the key it lives under |
-| `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
-| `blob.py` | the bucket, as the four operations a real one offers, with a simulated bucket and the adapter that narrows it to the engine's store |
-| `tasks.py` | the queue, as one thing rather than two: a simulated Cloud Tasks with duplicate delivery, no order, lateness and giving up, and the timer and transport ports over it |
+| `ports.py` | the vocabulary everything shares — the two failures, the fault injector, a conformance violation — and the two narrow ports the engine calls |
 | `wire.py` | the two JSON seams: the protocol's request envelope in, and the messages a queue carries out |
-| `gcs.py` | `GcsBlob`: the bucket's four operations over `google-cloud-storage`, with generation preconditions and the two failures mapped |
-| `cloudtasks.py` | `CloudTasksQueue`: create and delete over `google-cloud-tasks`, with the OIDC token, the schedule floor and the 30-day horizon |
 | `app.py` | the service: `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, and one engine built per container |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
@@ -96,20 +126,20 @@ should not have to pretend.
 | `test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
 | `test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
 | `test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
-| `test_blob.py` | the bucket's four operations, and the adapter |
+| `test_store.py` | what only a simulated store has: the power cut, and where in a write it happens |
 | `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 | `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
-| `test_tasks.py` | the queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the bucket at once |
-| `test_contract.py` | one contract, run against the simulated bucket, the GCS adapter over a fake client, and a real bucket when there is one, plus the Cloud Tasks adapter's requests |
+| `test_timer.py` | the simulated timer on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
+| `test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test_app.py` | the service through its own surface: methods, paths, status codes, who may knock, and the whole research agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
-made of: `engine.py`, `codec.py`, `ports.py`, `blob.py`, `tasks.py`, `sdk.py`
-and `runtime.py` import nothing but the standard library. Only `gcs.py`,
-`cloudtasks.py` and the entry point in `app.py` reach for Google's
-libraries, and they are the three files that cannot be tested without them.
-`requirements-dev.txt` has both groups, separately; `python -m pytest` runs
-292 tests in about a minute.
+made of: `engine.py`, `codec.py`, `ports.py`, `store.py`, `store_mem.py`,
+`timer.py`, `timer_mem.py`, `sdk.py` and `runtime.py` import nothing but the
+standard library. Only `store_gcp.py`, `timer_gcp.py` and the entry point in
+`app.py` reach for Google's libraries, and they are the three files that
+cannot be tested without them. `requirements-dev.txt` has both groups,
+separately; `python -m pytest` runs 277 tests in about a minute.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
 
@@ -327,6 +357,12 @@ is fine because ordering was never the correctness gate.
 
 ## 2. The system, end to end
 
+*The names below are the plan's, written before any of it existed. Section 0
+is what was actually built, and where they differ the table there is right:
+`store.py` turned out to be the interface rather than the GCS
+implementation, `transport.py` and the timers turned out to be one queue
+(`timer.py`), and `main.py` is `app.py`.*
+
 ```
  SDK worker (any process)          ── HTTP POST / ──▶   Cloud Run function      main.py
    @resonate, durable(), .rpc,                            parse → load → process → CAS → drain → reply
@@ -485,10 +521,10 @@ says it lacks.
    to end against the local function, is killed at random points, and resumes.
 4. **Two workers.** `rpc` and durable sleep cross the process boundary, still
    on the stand-in. The Lean trace checker runs over the recorded requests.
-5. **GCS and real Cloud Tasks.** Written — `gcs.py`, `cloudtasks.py`,
+5. **GCS and real Cloud Tasks.** Written — `store_gcp.py`, `timer_gcp.py`,
    `app.py`, and one contract they share with the simulators. Not yet run on
    GCP: "it works on GCS" is only true once it has run on GCS, and until
-   then the third leg of `test_contract.py` is the thing that would say so.
+   then the third leg of `test_conformance.py` is the thing that would say so.
    Still to do there: one service, two Cloud Run revisions, randomized
    traffic, and a snapshot diff against the Rust `resonate-server-blob`
    in-memory server on the same requests, so our semantics are held to
@@ -557,13 +593,15 @@ gcloud run deploy engine --source . --function handler \
 Two things the deployment must get right, because no amount of code here
 can:
 
-- **The bucket must honour generation preconditions**, which GCS does. The
+- **The bucket must honour generation preconditions**, which GCS does, and
+  which `store.conformance` is the check for: point it at whatever you
+  intend to run on before you run on it. The
   whole design is one conditional write per transition; a bucket that
   silently overwrites turns every concurrent request into lost state.
 - **The queue's retry policy must be generous.** A dropped `execute` is
   recoverable — the retry deadline was committed before the message left —
   but a dropped *sweep* is the one thing nothing here repairs, because the
   deadline it carried was the only thing that was going to fire.
-  `test_tasks.py` demonstrates the hole and the remedy beside it: a
+  `test_timer.py` demonstrates the hole and the remedy beside it: a
   periodic sweep over the bucket, on its own schedule, depending on no
   single queued task. That sweep is deployment, and it is not optional.

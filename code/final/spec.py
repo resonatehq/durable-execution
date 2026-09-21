@@ -33,7 +33,6 @@ than transcribed from it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import properties as P
@@ -44,27 +43,36 @@ from kernel import (
     PromiseSettle, Reply, Req, Send, TaskAcquire, TaskFulfill, TaskSuspend,
     Value, check_invariants,
 )
-from ports import Conflict, Fault, MemoryStore, MemoryTimers, MemoryTransport, Store, Timers, Transport
+from ports import Conflict, Fault, MemoryTimers, MemoryTransport, Timers, Transport, Violation
+from store import StoreP
 
 
 class _Recorded:
-    """Any `Store`, with its writes written down.
+    """Any `StoreP`, with its writes written down.
 
     The effect order and the write law are claims about *when* the engine
     wrote, so the suite has to see the writes. Wrapping rather than
     requiring a particular store is what lets the same suite grade an engine
-    over a dict, over a simulated bucket, or over a real one.
+    over the simulated store, over a real bucket, or over anything else that
+    passes `store.conformance`.
     """
 
-    def __init__(self, inner: Store, fault: Fault) -> None:
+    def __init__(self, inner: StoreP, fault: Fault) -> None:
         self.inner, self.fault = inner, fault
 
-    def load(self, key):
-        return self.inner.load(key)
+    def get(self, key):
+        return self.inner.get(key)
 
-    def commit(self, key, body, if_generation):
+    def put(self, key, body, **conditions):
         self.fault.tick(f"commit {key}")
-        return self.inner.commit(key, body, if_generation)
+        return self.inner.put(key, body, **conditions)
+
+    def delete(self, key):
+        return self.inner.delete(key)
+
+    def list(self, prefix, limit):
+        return self.inner.list(prefix, limit)
+
 
 #: Everything an engine can be asked to do. A protocol request, which a
 #: client sent, or a deadline coming due, which nobody did.
@@ -107,7 +115,7 @@ class EngineC(Protocol):
     a simulation, and it is why a simulated run is a real run.
     """
 
-    def __call__(self, store: Store, timers: Timers, transport: Transport,
+    def __call__(self, store: StoreP, timers: Timers, transport: Transport,
                  cfg: KernelCfg = ..., prefix: str = ...) -> EngineP: ...
 
 
@@ -161,16 +169,6 @@ STANDARD_SCRIPT: list[tuple[Msg, int]] = [
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class Violation:
-    step: int
-    msg: str
-    detail: str
-
-    def __str__(self) -> str:
-        return f"step {self.step} ({self.msg}): {self.detail}"
-
-
 def _substance(doc: Document) -> tuple:
     """What the write law compares: the objects and the armed deadline.
 
@@ -210,7 +208,7 @@ def _effect_order(segment: list[str]) -> str | None:
 
 def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
                 cfg: KernelCfg = CFG, origin: str = ORIGIN,
-                store: Store | None = None) -> list[Violation]:
+                store: StoreP | None = None) -> list[Violation]:
     """Drive `module.Engine` through a script and return everything it broke.
 
     Three things are checked at every step, and they are independent:
@@ -226,13 +224,15 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
       conditional write per poll, and on a store with a per-object write
       rate that is the difference between working and not.
 
-    `store` is the world the engine is given. It defaults to a dict; hand it
-    a `BlobStore` over a simulated bucket and the same suite grades the same
-    engine through the seam it will really run on.
+    `store` is the world the engine is given. It defaults to the simulated
+    one; hand it `store_gcp.Store` and the same suite grades the same engine
+    through the seam it will really run on.
     """
+    import store_mem  # here, so `store.py` may import this module's Violation
+
     script = STANDARD_SCRIPT if script is None else script
     fault = Fault()  # not injecting: used here only as the log of what was written
-    store = _Recorded(MemoryStore() if store is None else store, fault)
+    store = _Recorded(store_mem.Store() if store is None else store, fault)
     timers, transport = MemoryTimers(fault), MemoryTransport(fault)
     engine = module.Engine(store, timers, transport, cfg)
     out: list[Violation] = []
@@ -240,8 +240,8 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
     key = doc_key(origin)
 
     def committed() -> Document:
-        raw, _ = store.load(key)
-        return decode(raw, origin) if raw is not None else Document()
+        found = store.get(key)
+        return Document() if found is None else decode(found[0].encode("utf-8"), origin)
 
     for step, (msg, now) in enumerate(script):
         mark, before = len(fault.log), committed()

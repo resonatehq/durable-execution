@@ -81,15 +81,16 @@ def test_the_engine_writes_lines_the_schema_accepts():
     import spec
     from codec import decode, doc_key
     from engine import Engine
-    from ports import MemoryStore, MemoryTimers, MemoryTransport
+    from ports import MemoryTimers, MemoryTransport
+    from store_mem import Store
 
-    store = MemoryStore()
+    store = Store()
     e = Engine(store, MemoryTimers(), MemoryTransport(), spec.CFG)
     bad = []
     for msg, now in spec.STANDARD_SCRIPT:
         e.process(msg, now)
-        raw, _ = store.load(doc_key(spec.ORIGIN))
-        for line in json.loads("[" + raw.decode().replace("}\n{", "},{") + "]"):
+        raw = store.get(doc_key(spec.ORIGIN))[0]
+        for line in json.loads("[" + raw.replace("}\n{", "},{") + "]"):
             bad += errors(line)
     assert not bad, bad
 

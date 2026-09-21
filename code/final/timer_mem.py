@@ -1,11 +1,4 @@
-"""The queue, with the parts that bite.
-
-In production there is one queue, not two mechanisms. A deadline and a
-dispatch are the same object: a task with an HTTP target and a time before
-which it must not be delivered. Our two ports, `Timers` and `Transport`,
-are two uses of it, and modelling them as separate well-behaved gadgets
-hides everything interesting. So this is one queue, and both ports adapt
-onto it.
+"""A timer in a dict, with the parts that bite.
 
 What a real queue does that a list does not:
 
@@ -20,17 +13,23 @@ What a real queue does that a list does not:
 - **It gives up.** A task that has failed enough times is dropped. What was
   in it is gone.
 
-Every one of those is a knob here, off by default so a test can turn on one
-at a time and say which one it is about.
+Every one of those is a knob, off by default so a test can turn on one at a
+time and say which one it is about. Deterministic under a seed, so a run
+that finds something can be run again and find it again.
 
-## What the last one costs, and it is worth stating plainly
+`take`, `ack` and `nack` are not part of `timer.TimerP` and could not be:
+Cloud Tasks is push-only, and taking delivery belongs to whatever is being
+delivered to. They are here because something has to play the queue's own
+side in a test.
+
+## What giving up costs, and it is worth stating plainly
 
 A dropped `execute` is recoverable: the task's retry deadline was committed
 before the message left, so the sweep offers it again. A dropped *sweep* is
 not recoverable by anything in this design — the deadline it carried is the
 only thing that was going to fire. A deployment needs either a retry policy
 generous enough that this does not happen, or a periodic sweep over the
-bucket that does not depend on any single queued task. `test_tasks.py`
+bucket that does not depend on any single queued task. `test_timer.py`
 demonstrates the hole rather than pretending it is not there.
 """
 
@@ -38,7 +37,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -51,22 +50,6 @@ class Delivery:
     attempt: int
 
 
-@runtime_checkable
-class Queue(Protocol):
-    def create(self, url: str, body: Any, *, not_before: int = 0) -> str:
-        """Enqueue, and return the name the service gave it.
-
-        The name is the service's, not the caller's. A caller-chosen name
-        leaves a tombstone after deletion, so re-creating the same name
-        within the hour is refused, which is exactly the trap a deadline
-        re-armed at the same instant would fall into.
-        """
-
-    def delete(self, name: str) -> None:
-        """Cancel. Cancelling what is gone, or what is already out for
-        delivery, succeeds and may be too late."""
-
-
 @dataclass
 class _Entry:
     url: str
@@ -76,13 +59,7 @@ class _Entry:
 
 
 @dataclass
-class MemoryQueue:
-    """Cloud Tasks, as much of it as matters.
-
-    Deterministic under a seed, so a run that finds something can be run
-    again and find it again.
-    """
-
+class Timer:
     seed: int = 0
     #: Chance that an acknowledgement is lost, so the task is delivered
     #: again after the handler has already acted on it.
@@ -161,43 +138,3 @@ class MemoryQueue:
 
     def loses_this_one(self) -> bool:
         return self._rng.random() < self.lose
-
-
-# ---------------------------------------------------------------------------
-# The two ports, over the one queue
-# ---------------------------------------------------------------------------
-
-#: The URL a deadline is delivered to. Everything after it is the origin to
-#: sweep, exactly as a Cloud Run route would read it.
-SWEEP = "sweep/"
-
-
-class QueueTimers:
-    """The engine's `Timers`, as scheduled tasks. Arming is creating one at
-    the deadline; disarming is deleting it by the name the service gave."""
-
-    def __init__(self, queue: Queue) -> None:
-        self.queue = queue
-
-    def arm(self, origin: str, at: int) -> str:
-        return self.queue.create(f"{SWEEP}{origin}", {"origin": origin}, not_before=at)
-
-    def disarm(self, name: str) -> None:
-        self.queue.delete(name)
-
-
-class QueueTransport:
-    """The engine's `Transport`, as tasks with no schedule: deliver as soon
-    as you can, which is what an immediate dispatch is.
-
-    The body is JSON, here as in production. A simulator that carried live
-    Python objects would be testing a seam that does not exist.
-    """
-
-    def __init__(self, queue: Queue) -> None:
-        self.queue = queue
-
-    def send(self, address: str, msg: Any) -> None:
-        from wire import encode_message
-
-        self.queue.create(address, encode_message(msg))

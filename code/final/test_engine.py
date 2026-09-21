@@ -19,14 +19,15 @@ from kernel import (
     Value,
     check_invariants,
 )
-from ports import Conflict, Crash, Fault, MemoryStore, MemoryTimers, MemoryTransport
+from ports import Conflict, Crash, Fault, MemoryTimers, MemoryTransport
+from store_mem import Store
 
 W = "http://w"
 CFG = KernelCfg(retry_timeout=30_000)
 
 
 def build(fault=None):
-    store, timers, transport = MemoryStore(fault), MemoryTimers(fault), MemoryTransport(fault)
+    store, timers, transport = Store(fault), MemoryTimers(fault), MemoryTransport(fault)
     return Engine(store, timers, transport, CFG), store, timers, transport
 
 
@@ -35,8 +36,8 @@ def create(id, to=100_000, tags=None):
 
 
 def read(store, origin="o"):
-    raw, _ = store.load(doc_key(origin))
-    return decode(raw, origin) if raw is not None else Document()
+    found = store.get(doc_key(origin))
+    return Document() if found is None else decode(found[0].encode(), origin)
 
 
 def substance(doc):
@@ -54,7 +55,7 @@ def test_a_document_round_trips_and_its_bytes_are_stable():
     e.process(create("o:a"), 0)
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 10)
     e.process(PromiseRegisterListener("o:a", "http://l"), 20)
-    raw, _ = store.load(doc_key("o"))
+    raw = store.get(doc_key("o"))[0].encode()
     doc = decode(raw, "o")
     assert encode(doc, "o") == raw, "decode then encode is the identity on bytes"
     assert decode(encode(doc, "o"), "o") == doc, "and encode then decode on documents"
@@ -104,9 +105,9 @@ def test_a_read_that_changes_nothing_writes_nothing():
 def test_a_read_past_a_deadline_does_write_because_it_settles():
     e, store, _, _ = build()
     e.process(create("o:a", to=1_000), 0)
-    gen = store.objects[doc_key("o")][1]
+    version = store.objects[doc_key("o")][1]
     assert e.process(PromiseGet("o:a"), 5_000).data["promise"]["state"] == "rejected_timedout"
-    assert store.objects[doc_key("o")][1] == gen + 1
+    assert store.objects[doc_key("o")][1] != version, "the settlement was not written"
 
 
 def test_the_clock_alone_is_not_worth_a_write():
@@ -155,23 +156,23 @@ def test_a_disarm_names_the_deadline_its_own_predecessor_armed():
 
 
 def test_a_second_writer_on_a_stale_generation_is_refused():
-    store, timers, transport = MemoryStore(), MemoryTimers(), MemoryTransport()
+    store, timers, transport = Store(), MemoryTimers(), MemoryTransport()
     a = Engine(store, timers, transport, CFG)
     b = Engine(store, timers, transport, CFG)
     a.process(create("o:a"), 0)
-    # Both load the same generation; the first to commit wins.
-    raw, gen = store.load(doc_key("o"))
+    # Both read the same version; the first to write wins.
+    body, version = store.get(doc_key("o"))
     a.process(PromiseSettle("o:a", RESOLVED), 10)
     with pytest.raises(Conflict):
-        b.store.commit(doc_key("o"), raw, gen)
+        b.store.put(doc_key("o"), body, if_match=version)
 
 
 def test_a_conflict_reaches_the_caller_rather_than_being_retried_here():
     """The engine never loops. A loop would pick a retry policy — how many
     times, how long, whether a re-decided request is the same request —
     before anything has said what it should be."""
-    class Racing(MemoryStore):
-        def commit(self, key, body, if_generation):
+    class Racing(Store):
+        def put(self, key, body, **conditions):
             raise Conflict("someone else got there first")
 
     e = Engine(Racing(), MemoryTimers(), MemoryTransport(), CFG)
