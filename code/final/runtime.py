@@ -174,3 +174,86 @@ class Runtime:
             if not self.step():
                 return did
         raise AssertionError("the runtime did not settle down")
+
+
+@dataclass
+class CloudRuntime:
+    """The same world, over one queue instead of two gadgets.
+
+    Everything is a delivery to a URL, which is what Cloud Tasks does: a
+    deadline is a POST to the sweep endpoint for an origin, a dispatch is a
+    POST to a worker. The runtime is then only a loop that takes what the
+    queue offers, calls the handler, and says whether it worked.
+
+    A handler that answers is acknowledged. One that cannot is not, and the
+    queue decides whether to try again or give up, exactly as it would.
+    """
+
+    engine: Any
+    queue: Any
+    clock: Clock
+    workers: dict[str, Worker] = field(default_factory=dict)
+    notified: dict[str, dict] = field(default_factory=dict)
+    swept: int = 0
+
+    def serve(self, address: str, worker: Worker, *functions) -> None:
+        self.workers[address] = worker
+        for fn in functions:
+            route(fn, address)
+
+    def start(self, id: str, fn, *args, timeout: int = 10 ** 9) -> None:
+        from sdk import TARGETS
+        target = TARGETS.get(fn.name)
+        if target is None:
+            raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
+        self.engine.process(PromiseCreate(
+            id, self.clock() + timeout, dumps({"f": fn.name, "a": args}),
+            {TAG_TARGET: target}), self.clock())
+
+    def handle(self, delivery) -> bool:
+        """What the URL means. Returns whether the handler answered."""
+        from tasks import SWEEP
+
+        if delivery.url.startswith(SWEEP):
+            self.swept += 1
+            self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())
+            return True
+        msg = delivery.body
+        if isinstance(msg, Execute):
+            worker = self.workers.get(delivery.url)
+            if worker is not None:
+                # A refused acquire is still an answer: somebody else has it,
+                # and delivering this again would not change that.
+                worker.execute(msg.task_id, msg.version)
+            return True
+        if isinstance(msg, Unblock):
+            self.notified[msg.promise["id"]] = msg.promise
+            return True
+        return True
+
+    def step(self) -> bool:
+        delivery = self.queue.take(self.clock())
+        if delivery is None:
+            return False
+        if self.queue.loses_this_one():
+            self.queue.nack(delivery, self.clock())
+            return True
+        try:
+            answered = self.handle(delivery)
+        except Exception:
+            self.queue.nack(delivery, self.clock())
+            return True
+        if answered:
+            self.queue.ack(delivery, self.clock())
+        else:
+            self.queue.nack(delivery, self.clock())
+        return True
+
+    def drain(self, budget: int = 2_000) -> int:
+        """Deliver everything the queue is willing to deliver at this
+        instant. What is scheduled later stays there until the clock moves,
+        which is the difference between a queue and a list."""
+        for did in range(budget):
+            if not self.step():
+                return did
+        raise AssertionError("the queue never ran out of eligible work")

@@ -33,6 +33,27 @@ simulated bucket, calls the model twice and the search index three times and
 never more, and when the power is cut at any of the 25 writes the run
 performs it finishes anyway with the same answer.
 
+One queue, not two mechanisms. A deadline and a dispatch are the same
+object in Cloud Tasks: a task with an HTTP target and a time before which it
+must not be delivered. Only deadlines carry a time. A dispatch is never
+deferred, because anything that must wait waits by having a deadline.
+
+The order is the whole crash story, and `test_tasks.py` watches it through
+the queue and the bucket together rather than through a log the engine
+kept:
+
+```
+schedule sweep/research.1 at 30000     the deadline, first
+commit   wf/research.1                 then the state
+schedule worker://agent  at 0          then the message
+```
+
+A committed document whose deadline was never scheduled is the one state
+nothing repairs, so the task goes in first and a queue that will not take it
+fails the request rather than committing anyway. A dispatch goes the other
+way, after the commit, so a message is always a consequence of committed
+state rather than of an intention.
+
 Async is not a detail. `gather` has to dispatch every branch before anything
 blocks, or the branches run one at a time, and in async that falls out: each
 branch is a coroutine, they all run up to the point where their value is not
@@ -48,6 +69,7 @@ should not have to pretend.
 | `codec.py` | the document's canonical byte form, and the key it lives under |
 | `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
 | `blob.py` | the bucket, as the four operations a real one offers, with a simulated bucket and the adapter that narrows it to the engine's store |
+| `tasks.py` | the queue, as one thing rather than two: a simulated Cloud Tasks with duplicate delivery, no order, lateness and giving up, and the timer and transport ports over it |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `runtime.py` | a worker, which is post 002's outer half in the protocol's words, and the loop that carries messages and fires deadlines |
@@ -62,6 +84,7 @@ should not have to pretend.
 | `test_blob.py` | the bucket's four operations, and the adapter |
 | `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 | `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
+| `test_tasks.py` | the queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the bucket at once |
 
 The kernel has no dependencies. The tests need `pytest` and `hypothesis`
 (`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.
