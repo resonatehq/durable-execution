@@ -7,10 +7,21 @@ below should grow an entry in `notes/` as it gets implemented.
 
 ## 0. What exists
 
-The whole thing, end to end, over in-memory ports. What is left is the
-outside: the GCS and Cloud Tasks implementations of three ports that already
-have in-memory twins, and the HTTP routes that carry a message between two
-processes rather than two objects.
+The whole thing, end to end, and now with the outside wired: the GCS and
+Cloud Tasks implementations of the ports, and the Cloud Run service that
+turns a queue delivery into a call.
+
+The simulators are still what every test runs on, because a simulator can be
+made unkind and a real service cannot. The adapters are held to the same
+contract rather than to a separate set of tests: `test_contract.py` runs one
+suite against the simulated bucket, against `GcsBlob` over a fake client that
+raises the libraries' own exceptions, and — only when `GCS_BUCKET` names a
+bucket this machine can reach — against Google Cloud Storage itself.
+
+Which means the honest status is: **nothing here has run on GCP.** The
+contract says what the adapters must do, the fake client says they do it when
+the library behaves as documented, and the third run is the one that would
+settle it. It is skipped, so a green suite never implies a live one.
 
 The program the tests run is the one from this repository's README:
 
@@ -70,6 +81,10 @@ should not have to pretend.
 | `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
 | `blob.py` | the bucket, as the four operations a real one offers, with a simulated bucket and the adapter that narrows it to the engine's store |
 | `tasks.py` | the queue, as one thing rather than two: a simulated Cloud Tasks with duplicate delivery, no order, lateness and giving up, and the timer and transport ports over it |
+| `wire.py` | the two JSON seams: the protocol's request envelope in, and the messages a queue carries out |
+| `gcs.py` | `GcsBlob`: the bucket's four operations over `google-cloud-storage`, with generation preconditions and the two failures mapped |
+| `cloudtasks.py` | `CloudTasksQueue`: create and delete over `google-cloud-tasks`, with the OIDC token, the schedule floor and the 30-day horizon |
+| `app.py` | the service: `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, and one engine built per container |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `runtime.py` | a worker, which is post 002's outer half in the protocol's words, and the loop that carries messages and fires deadlines |
@@ -85,9 +100,16 @@ should not have to pretend.
 | `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 | `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
 | `test_tasks.py` | the queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the bucket at once |
+| `test_contract.py` | one contract, run against the simulated bucket, the GCS adapter over a fake client, and a real bucket when there is one, plus the Cloud Tasks adapter's requests |
+| `test_app.py` | the service through its own surface: methods, paths, status codes, who may knock, and the whole research agent over nothing but HTTP |
 
-The kernel has no dependencies. The tests need `pytest` and `hypothesis`
-(`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.
+The kernel has no dependencies, and neither does anything the kernel is
+made of: `engine.py`, `codec.py`, `ports.py`, `blob.py`, `tasks.py`, `sdk.py`
+and `runtime.py` import nothing but the standard library. Only `gcs.py`,
+`cloudtasks.py` and the entry point in `app.py` reach for Google's
+libraries, and they are the three files that cannot be tested without them.
+`requirements-dev.txt` has both groups, separately; `python -m pytest` runs
+292 tests in about a minute.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
 
@@ -463,11 +485,14 @@ says it lacks.
    to end against the local function, is killed at random points, and resumes.
 4. **Two workers.** `rpc` and durable sleep cross the process boundary, still
    on the stand-in. The Lean trace checker runs over the recorded requests.
-5. **GCS and real Cloud Tasks.** `fake-gcs-server` honours generation
-   preconditions for CI, but "it works on GCS" is only true once it has run on
-   GCS. One function, two Cloud Run workers, two queues, randomized traffic,
-   and a snapshot diff against the Rust `resonate-server-blob` in-memory
-   server on the same requests, so our semantics are held to theirs.
+5. **GCS and real Cloud Tasks.** Written — `gcs.py`, `cloudtasks.py`,
+   `app.py`, and one contract they share with the simulators. Not yet run on
+   GCP: "it works on GCS" is only true once it has run on GCS, and until
+   then the third leg of `test_contract.py` is the thing that would say so.
+   Still to do there: one service, two Cloud Run revisions, randomized
+   traffic, and a snapshot diff against the Rust `resonate-server-blob`
+   in-memory server on the same requests, so our semantics are held to
+   theirs.
 
 Line budget, first estimate: engine 900, doc 300, store 250, main 150,
 transport 200, worker 250, sdk 400, roughly 2,450 for the engine and the
@@ -480,13 +505,65 @@ rest for tests.
   signal. If it is high, Pub/Sub ordering keys on the origin serialize the
   dispatch path only, at the cost of head-of-line blocking per workflow, which
   may be worse than the retries. Measure first.
-- **Wire vocabulary.** Speak Resonate's envelope (`{"kind": "task.acquire",
-  "head": {...}, "data": {...}}`) so the differential and the trace checker are
-  free. Recommended: yes, at the function; the posts' names inside `sdk/`.
+- **Wire vocabulary.** Settled: Resonate's envelope (`{"kind":
+  "task.acquire", "head": {...}, "data": {...}}`) at the service, parsed by
+  `wire.py`, so the differential and the trace checker are free. The posts'
+  names stay inside the SDK.
 - **Who retries a `409`.** The SDK, with backoff, since every operation is
   idempotent and reports current state. The function never loops.
 - **Authentication.** Cloud Tasks signs with an OIDC token for a service
   account; the worker and the sweep route verify it and accept nothing else.
-- **The 30-day clamp.** Cloud Tasks schedules at most 30 days out. `ArmTimer`
-  clamps to `min(at, now + 30d)` and a no-op sweep re-arms. It gets its own
-  test, because a bug there makes a promise never time out.
+- **The 30-day clamp.** Settled: `CloudTasksQueue.create` clamps to
+  `min(at, now + 30d)`, a no-op sweep re-arms, and it has its own test,
+  because a bug there makes a promise never time out.
+
+## 6. Deploying
+
+One service, because Cloud Tasks is push-only: a worker is not a loop, it
+is an endpoint. Four routes, and the shape falls out of the queue rather
+than out of a preference.
+
+| route | who calls it |
+|---|---|
+| `POST /` | a client that does not embed the engine. One protocol request, one reply |
+| `POST /execute` | the queue, delivering a dispatch |
+| `POST /sweep/<origin>` | the queue, delivering a deadline |
+| `GET /ready` | the platform, asking whether the bucket answers |
+
+Everything a container needs comes from its environment, and nothing in
+`app.py` decides policy:
+
+```
+BUCKET           the bucket documents live in
+PROJECT          \
+LOCATION          | the queue both timers and dispatches go through
+QUEUE            /
+BASE_URL         where this service answers, so a sweep can be addressed
+SERVICE_ACCOUNT  whose OIDC token the queue signs with, and /execute and
+                 /sweep verify. Unset says the network is the protection,
+                 and a deployment had better mean it
+WORKERS          {"search": "https://search-xyz.a.run.app/execute"} — the
+                 only thing in the system that knows the deployment's shape
+RETRY_TIMEOUT    how long a claimed task may go quiet before it is offered
+                 again (default 30s)
+LEASE            how long a worker holds one (default 60s)
+```
+
+```
+gcloud run deploy engine --source . --function handler \
+  --set-env-vars BUCKET=...,PROJECT=...,LOCATION=...,QUEUE=...,BASE_URL=...
+```
+
+Two things the deployment must get right, because no amount of code here
+can:
+
+- **The bucket must honour generation preconditions**, which GCS does. The
+  whole design is one conditional write per transition; a bucket that
+  silently overwrites turns every concurrent request into lost state.
+- **The queue's retry policy must be generous.** A dropped `execute` is
+  recoverable — the retry deadline was committed before the message left —
+  but a dropped *sweep* is the one thing nothing here repairs, because the
+  deadline it carried was the only thing that was going to fire.
+  `test_tasks.py` demonstrates the hole and the remedy beside it: a
+  periodic sweep over the bucket, on its own schedule, depending on no
+  single queued task. That sweep is deployment, and it is not optional.

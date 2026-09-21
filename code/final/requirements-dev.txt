@@ -1,6 +1,23 @@
+# The kernel, the engine, the codec, the simulators and the SDK depend on
+# nothing. That is a property worth keeping, so it is stated here as much as
+# anywhere: the first group is what it takes to *check* the code, and the
+# second is what it takes to *deploy* it. Nothing in the first group is
+# imported by anything that runs in production, and nothing in the second is
+# imported by anything the kernel is made of.
+
+# -- to run the tests -------------------------------------------------------
 pytest
 hypothesis
 jsonschema
+
+# -- to run on Google Cloud -------------------------------------------------
+# Only gcs.py, cloudtasks.py and app.py's entry point import these, and each
+# import is inside the method that needs it, so the rest of the suite runs
+# without them. `test_contract.py` skips itself when they are absent.
+google-cloud-storage
+google-cloud-tasks
+google-auth
+functions-framework
 
 # Optional: the overnight instrument. `hypothesis fuzz -- -k TestKernelMachine`
 # runs the same state machine as a coverage-guided campaign, forever, using

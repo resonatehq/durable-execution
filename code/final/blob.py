@@ -54,7 +54,7 @@ adapter would add it rather than fold it into either of these.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from ports import Conflict, Fault, Unavailable
 
@@ -65,6 +65,7 @@ PreconditionFailed = Conflict
 __all__ = ["Blob", "MemoryBlob", "BlobStore", "PreconditionFailed", "Unavailable"]
 
 
+@runtime_checkable
 class Blob(Protocol):
     def get(self, key: str) -> tuple[str, str] | None:
         """The body and its version, or `None`."""

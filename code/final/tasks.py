@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,7 @@ class Delivery:
     attempt: int
 
 
+@runtime_checkable
 class Queue(Protocol):
     def create(self, url: str, body: Any, *, not_before: int = 0) -> str:
         """Enqueue, and return the name the service gave it.
@@ -187,10 +188,16 @@ class QueueTimers:
 
 class QueueTransport:
     """The engine's `Transport`, as tasks with no schedule: deliver as soon
-    as you can, which is what an immediate dispatch is."""
+    as you can, which is what an immediate dispatch is.
+
+    The body is JSON, here as in production. A simulator that carried live
+    Python objects would be testing a seam that does not exist.
+    """
 
     def __init__(self, queue: Queue) -> None:
         self.queue = queue
 
     def send(self, address: str, msg: Any) -> None:
-        self.queue.create(address, msg)
+        from wire import encode_message
+
+        self.queue.create(address, encode_message(msg))

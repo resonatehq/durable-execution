@@ -218,7 +218,9 @@ class CloudRuntime:
             self.swept += 1
             self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())
             return True
-        msg = delivery.body
+        from wire import decode_message
+
+        msg = decode_message(delivery.body)
         if isinstance(msg, Execute):
             worker = self.workers.get(delivery.url)
             if worker is not None:
