@@ -236,3 +236,571 @@ def test_a_sweep_that_fires_nothing_changes_nothing():
     for now in (0, 1, 29_999):
         nxt, sends, fx = sweep(doc, now)
         assert nxt == doc and sends == [] and fx == [SetDocument(doc)]
+
+
+# ===========================================================================
+# The remaining operations. Fixtures build documents through the kernel.
+# ===========================================================================
+
+from kernel import (  # noqa: E402
+    REJECTED, T_HALTED, T_SUSPENDED, PromiseGet, PromiseRegisterCallback,
+    PromiseRegisterListener, PromiseSettle, TaskAcquire, TaskContinue, TaskCreate,
+    TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat, TaskRelease,
+    TaskSuspend, Unblock,
+)
+
+PID = "pid-1"
+
+
+def apply(doc, req, now):
+    doc, _, reply, _ = step(doc, req, now)
+    assert reply.status < 400, reply
+    return doc
+
+
+def with_acquired(id, timeout_at=100_000, now=0):
+    """A targeted promise whose task has been acquired: version 1, lease armed."""
+    doc = with_targeted(id, timeout_at)
+    return apply(doc, TaskAcquire(id, 0, PID, 5_000), now)
+
+
+def with_suspended(task_id, awaited, now=0):
+    """`task_id` acquired and then parked on `awaited`, both targeted."""
+    doc = with_acquired(task_id)
+    doc = apply(doc, create(awaited, 100_000, {"resonate:target": W}), now)
+    return apply(doc, TaskSuspend(task_id, 1, (awaited,)), now)
+
+
+# --- get -------------------------------------------------------------------
+
+
+def test_getting_an_unknown_promise_is_a_404():
+    _, _, reply, _ = step(Document(), PromiseGet("o:a"), 0)
+    assert reply == Reply(404, "Promise not found")
+
+
+def test_getting_an_expired_promise_settles_it_first():
+    doc = with_targeted("o:a", 1_000)
+    nxt, _, reply, fx = step(doc, PromiseGet("o:a"), 5_000)
+    assert reply.data["promise"]["state"] == "rejected_timedout"
+    assert nxt.get("o:a").task.state == T_FULFILLED
+    assert DelTimeout(1_000) in fx
+
+
+def test_getting_a_live_promise_changes_nothing():
+    doc = with_targeted("o:a", 100_000)
+    nxt, sends, reply, fx = step(doc, PromiseGet("o:a"), 1)
+    assert reply.status == 200 and nxt == doc and sends == [] and fx == [SetDocument(doc)]
+
+
+# --- settle ----------------------------------------------------------------
+
+
+def test_settling_an_unknown_promise_is_a_404():
+    _, _, reply, _ = step(Document(), PromiseSettle("o:a", RESOLVED), 0)
+    assert reply == Reply(404, "Promise not found")
+
+
+def test_settling_stamps_now_and_fulfils_the_promises_own_task():
+    doc = with_acquired("o:a")
+    nxt, sends, reply, fx = step(doc, PromiseSettle("o:a", RESOLVED, Value(data="ok")), 3_000)
+    p = nxt.get("o:a").promise
+    assert (p.state, p.settled_at, p.value.data) == (RESOLVED, 3_000, "ok")
+    assert reply.data["promise"]["settledAt"] == 3_000
+    t = nxt.get("o:a").task
+    assert (t.state, t.pid, t.ttl, t.retry_at, t.lease_at) == (T_FULFILLED, None, None, None, None)
+    assert nxt.timer_at is None and DelTimeout(5_000) in fx
+    assert sends == []
+
+
+def test_settling_twice_reports_the_first_settlement():
+    doc = apply(with_acquired("o:a"), PromiseSettle("o:a", RESOLVED, Value(data="first")), 10)
+    nxt, _, reply, _ = step(doc, PromiseSettle("o:a", REJECTED, Value(data="second")), 20)
+    assert reply.data["promise"]["state"] == "resolved"
+    assert reply.data["promise"]["value"] == {"data": "first"}
+    assert nxt == doc
+
+
+def test_settling_unblocks_listeners_and_forgets_them():
+    doc = apply(with_targeted("o:a", 100_000), PromiseRegisterListener("o:a", "http://l1"), 0)
+    doc = apply(doc, PromiseRegisterListener("o:a", "http://l2"), 0)
+    nxt, sends, _, _ = step(doc, PromiseSettle("o:a", RESOLVED), 5)
+    record = nxt.get("o:a").promise.to_record("o:a")
+    assert sends == [Send("http://l1", Unblock(record)), Send("http://l2", Unblock(record))]
+    assert nxt.get("o:a").promise.listeners == []
+
+
+def test_settling_fans_out_to_awaiters_in_registration_order():
+    doc = with_targeted("o:x", 100_000)
+    for id in ("o:b", "o:a"):
+        doc = apply(doc, create(id, 100_000, {"resonate:target": W}), 0)
+        doc = apply(doc, TaskAcquire(id, 0, PID, 5_000), 0)
+        doc = apply(doc, TaskSuspend(id, 1, ("o:x",)), 0)
+    assert doc.get("o:x").promise.callbacks == ["o:b", "o:a"]
+    nxt, sends, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 10)
+    assert sends == [Send(W, Execute("o:b", 1)), Send(W, Execute("o:a", 1))]
+    for id in ("o:a", "o:b"):
+        t = nxt.get(id).task
+        assert (t.state, t.resumes, t.retry_at) == (T_PENDING, {"o:x"}, 30_010)
+    assert nxt.get("o:x").promise.callbacks == []
+
+
+def test_a_settled_awaiter_is_not_resumed():
+    doc = with_suspended("o:a", "o:x")
+    doc = apply(doc, PromiseSettle("o:a", REJECTED), 5)  # the awaiter settles first
+    assert doc.get("o:x").promise.callbacks == [], "a finished task waits on nothing"
+    nxt, sends, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 6)
+    assert sends == [] and nxt.get("o:a").task.state == T_FULFILLED
+
+
+def test_a_halted_awaiter_buffers_a_resume_when_a_settlement_fans_out():
+    doc = with_suspended("o:a", "o:x")
+    t = doc.get("o:a").task
+    t.state = T_HALTED
+    nxt, sends, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 5)
+    assert sends == [] and nxt.get("o:a").task.resumes == {"o:x"}
+    assert nxt.get("o:a").task.state == T_HALTED
+
+
+# --- register_callback -----------------------------------------------------
+
+
+def test_registering_against_an_unknown_awaited_is_a_404():
+    doc = with_targeted("o:a", 100_000)
+    _, _, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 0)
+    assert reply == Reply(404, "Awaited promise not found")
+
+
+def test_registering_an_unknown_awaiter_is_a_422():
+    doc = with_targeted("o:x", 100_000)
+    _, _, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 0)
+    assert reply == Reply(422, "Awaiter promise not found")
+
+
+def test_an_awaiter_without_a_target_cannot_register():
+    doc = apply(with_targeted("o:x", 100_000), create("o:a", 100_000), 0)
+    _, _, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 0)
+    assert reply == Reply(422, "Awaiter promise has no resonate:target tag")
+
+
+def test_an_internal_awaited_is_not_awaitable():
+    doc = apply(with_targeted("o:a", 100_000), create("o:x", 100_000), 0)
+    _, _, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 0)
+    assert reply == Reply(422, "Awaited promise is not awaitable")
+
+
+def test_registering_twice_registers_once():
+    doc = apply(with_targeted("o:a", 100_000), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
+    doc = apply(doc, PromiseRegisterCallback("o:x", "o:a"), 0)
+    nxt, _, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 0)
+    assert reply.status == 200 and nxt.get("o:x").promise.callbacks == ["o:a"] and nxt == doc
+
+
+def test_registering_against_a_settled_promise_resumes_a_suspended_awaiter():
+    doc = with_suspended("o:a", "o:x")
+    doc.get("o:x").promise.callbacks = []  # forget the registration, keep the parked task
+    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
+    assert doc.get("o:a").task.state == T_SUSPENDED
+    nxt, sends, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
+    assert reply.data["promise"]["state"] == "resolved"
+    t = nxt.get("o:a").task
+    assert (t.state, t.resumes, t.retry_at) == (T_PENDING, {"o:x"}, 30_006)
+    assert sends == [Send(W, Execute("o:a", 1))]
+
+
+def test_registering_against_a_settled_promise_records_a_resume_for_a_running_task():
+    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
+    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
+    nxt, sends, _, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
+    t = nxt.get("o:a").task
+    assert (t.state, t.resumes) == (T_ACQUIRED, {"o:x"}) and sends == []
+
+
+def test_a_halted_awaiter_registering_after_the_fact_buffers_nothing():
+    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
+    doc = apply(doc, TaskHalt("o:a"), 0)
+    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
+    nxt, _, _, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
+    assert nxt.get("o:a").task.resumes == set()
+
+
+# --- register_listener -----------------------------------------------------
+
+
+def test_a_listener_address_must_be_an_address():
+    _, _, reply, _ = step(with_targeted("o:a", 100_000), PromiseRegisterListener("o:a", "nope"), 0)
+    assert reply == Reply(400, "Invalid listener address")
+
+
+def test_listening_to_an_unknown_promise_is_a_404():
+    _, _, reply, _ = step(Document(), PromiseRegisterListener("o:a", "http://l"), 0)
+    assert reply == Reply(404, "Awaited promise not found")
+
+
+def test_listening_to_an_internal_promise_is_a_422():
+    doc = apply(Document(), create("o:a", 100_000), 0)
+    _, _, reply, _ = step(doc, PromiseRegisterListener("o:a", "http://l"), 0)
+    assert reply == Reply(422, "Awaited promise is not awaitable")
+
+
+def test_listening_to_a_settled_promise_registers_nothing():
+    doc = apply(with_targeted("o:a", 100_000), PromiseSettle("o:a", RESOLVED), 1)
+    nxt, _, reply, _ = step(doc, PromiseRegisterListener("o:a", "http://l"), 2)
+    assert reply.status == 200 and nxt.get("o:a").promise.listeners == []
+
+
+def test_listening_twice_from_one_address_registers_once():
+    doc = apply(with_targeted("o:a", 100_000), PromiseRegisterListener("o:a", "http://l"), 0)
+    nxt, _, _, _ = step(doc, PromiseRegisterListener("o:a", "http://l"), 0)
+    assert nxt.get("o:a").promise.listeners == ["http://l"]
+
+
+# --- task.get / task.create ------------------------------------------------
+
+
+def test_getting_an_unknown_task_is_a_404():
+    doc = apply(Document(), create("o:a", 100_000), 0)
+    _, _, reply, _ = step(doc, TaskGet("o:a"), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_getting_a_task_whose_promise_expired_reports_it_fulfilled():
+    _, _, reply, _ = step(with_targeted("o:a", 1_000), TaskGet("o:a"), 2_000)
+    assert reply.data == {"task": {"id": "o:a", "state": "fulfilled", "version": 0, "resumes": 0}}
+
+
+def task_create(id, timeout_at=100_000, ttl=5_000, tags=None):
+    return TaskCreate(PID, ttl, create(id, timeout_at, {"resonate:target": W, **(tags or {})}))
+
+
+def test_task_create_hands_back_an_already_acquired_task():
+    doc, sends, reply, fx = step(Document(), task_create("o:a"), 1_000)
+    t = doc.get("o:a").task
+    assert (t.state, t.version, t.pid, t.ttl, t.lease_at, t.retry_at) == (T_ACQUIRED, 1, PID, 5_000, 6_000, None)
+    assert sends == [], "the caller is the worker: no dispatch"
+    assert reply.data["task"]["version"] == 1 and reply.data["preload"] == []
+    assert fx[0] == SetTimeout(6_000)
+
+
+def test_task_create_past_the_deadline_hands_back_a_fulfilled_task():
+    doc, _, reply, _ = step(Document(), task_create("o:a", timeout_at=500), 900)
+    assert doc.get("o:a").task.state == T_FULFILLED
+    assert reply.data["promise"]["state"] == "rejected_timedout" and doc.timer_at is None
+
+
+def test_task_create_claims_a_pending_task_and_bumps_its_version():
+    doc = with_targeted("o:a", 100_000)
+    nxt, sends, reply, _ = step(doc, task_create("o:a"), 10)
+    t = nxt.get("o:a").task
+    assert (t.state, t.version, t.lease_at) == (T_ACQUIRED, 1, 5_010) and sends == []
+
+
+def test_task_create_on_a_claimed_task_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), task_create("o:a"), 10)
+    assert reply == Reply(409, "Already exists")
+
+
+def test_task_create_on_a_fulfilled_task_reports_it_without_preload():
+    doc = apply(with_acquired("o:a"), PromiseSettle("o:a", RESOLVED), 5)
+    _, _, reply, _ = step(doc, task_create("o:a"), 10)
+    assert reply.data["task"]["state"] == "fulfilled" and reply.data["preload"] == []
+
+
+def test_task_create_on_a_promise_without_a_task_is_a_422():
+    doc = apply(Document(), create("o:a", 100_000), 0)
+    _, _, reply, _ = step(doc, task_create("o:a"), 0)
+    assert reply == Reply(422, "The promise does not have a resonate:target tag")
+
+
+# --- task.acquire ----------------------------------------------------------
+
+
+def test_acquiring_an_unknown_task_is_a_404():
+    _, _, reply, _ = step(Document(), TaskAcquire("o:a", 0, PID, 5_000), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_acquiring_a_task_that_is_not_pending_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), TaskAcquire("o:a", 1, PID, 5_000), 0)
+    assert reply == Reply(409, "Task is not pending")
+
+
+def test_acquiring_at_the_wrong_version_is_a_conflict():
+    _, _, reply, _ = step(with_targeted("o:a", 100_000), TaskAcquire("o:a", 7, PID, 5_000), 0)
+    assert reply == Reply(409, "Version mismatch")
+
+
+def test_acquiring_takes_the_lease_and_drops_buffered_resumes():
+    doc = with_targeted("o:a", 100_000)
+    doc.get("o:a").task.resumes.add("o:x")
+    doc = apply(doc, create("o:x", 100_000), 0)
+    nxt, sends, reply, fx = step(doc, TaskAcquire("o:a", 0, PID, 5_000), 100)
+    t = nxt.get("o:a").task
+    assert (t.state, t.version, t.pid, t.ttl, t.resumes, t.lease_at, t.retry_at) == (
+        T_ACQUIRED, 1, PID, 5_000, set(), 5_100, None)
+    assert reply.data["task"] == {"id": "o:a", "state": "acquired", "version": 1, "resumes": 0, "ttl": 5_000, "pid": PID}
+    assert fx[0] == SetTimeout(5_100) and DelTimeout(30_000) in fx and sends == []
+
+
+# --- task.release ----------------------------------------------------------
+
+
+def test_releasing_an_unknown_task_is_a_404():
+    _, _, reply, _ = step(Document(), TaskRelease("o:a", 0), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_releasing_at_the_wrong_version_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), TaskRelease("o:a", 0), 0)
+    assert reply == Reply(409, "Task version mismatch or invalid state")
+
+
+def test_releasing_re_dispatches_at_the_same_version():
+    nxt, sends, reply, _ = step(with_acquired("o:a"), TaskRelease("o:a", 1), 100)
+    t = nxt.get("o:a").task
+    assert (t.state, t.version, t.pid, t.ttl, t.retry_at, t.lease_at) == (T_PENDING, 1, None, None, 30_100, None)
+    assert sends == [Send(W, Execute("o:a", 1))] and reply == Reply(200, {})
+
+
+# --- task.fulfill ----------------------------------------------------------
+
+
+def test_fulfilling_an_unknown_task_is_a_404():
+    _, _, reply, _ = step(Document(), TaskFulfill("o:a", 1, PromiseSettle("o:a", RESOLVED)), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_fulfilling_at_the_wrong_version_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), TaskFulfill("o:a", 2, PromiseSettle("o:a", RESOLVED)), 0)
+    assert reply == Reply(409, "Task version mismatch or invalid state")
+
+
+def test_fulfilling_settles_the_promise_and_runs_the_chain():
+    doc = apply(with_acquired("o:a"), PromiseRegisterListener("o:a", "http://l"), 0)
+    nxt, sends, reply, _ = step(doc, TaskFulfill("o:a", 1, PromiseSettle("o:a", RESOLVED, Value(data="v"))), 9)
+    assert reply.data["promise"]["state"] == "resolved" and reply.data["promise"]["settledAt"] == 9
+    assert nxt.get("o:a").task.state == T_FULFILLED
+    assert len(sends) == 1 and isinstance(sends[0].msg, Unblock)
+
+
+# --- task.suspend ----------------------------------------------------------
+
+
+def test_suspending_an_unknown_task_is_a_404():
+    _, _, reply, _ = step(Document(), TaskSuspend("o:a", 1, ("o:x",)), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_suspending_at_the_wrong_version_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), TaskSuspend("o:a", 0, ("o:x",)), 0)
+    assert reply == Reply(409, "Task is not acquired or version mismatch")
+
+
+def test_suspending_on_a_missing_promise_is_a_422():
+    _, _, reply, _ = step(with_acquired("o:a"), TaskSuspend("o:a", 1, ("o:x",)), 0)
+    assert reply == Reply(422, "Awaited promise not found")
+
+
+def test_suspending_on_an_internal_promise_is_a_422():
+    doc = apply(with_acquired("o:a"), create("o:x", 100_000), 0)
+    _, _, reply, _ = step(doc, TaskSuspend("o:a", 1, ("o:x",)), 0)
+    assert reply == Reply(422, "Awaited promise is not awaitable")
+
+
+def test_suspending_parks_the_task_and_registers_each_awaited_once():
+    doc = with_acquired("o:a")
+    for x in ("o:x", "o:y"):
+        doc = apply(doc, create(x, 100_000, {"resonate:target": W}), 0)
+    nxt, sends, reply, fx = step(doc, TaskSuspend("o:a", 1, ("o:x", "o:y")), 10)
+    t = nxt.get("o:a").task
+    assert (t.state, t.pid, t.ttl, t.retry_at, t.lease_at) == (T_SUSPENDED, None, None, None, None)
+    assert nxt.get("o:x").promise.callbacks == ["o:a"] and nxt.get("o:y").promise.callbacks == ["o:a"]
+    assert reply == Reply(200, {}) and sends == []
+    assert DelTimeout(5_000) in fx and nxt.timer_at == 30_000  # the awaited tasks' retries remain
+
+
+def test_suspending_on_an_already_settled_promise_tells_the_caller_to_carry_on():
+    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global", "resonate:branch": "o"}), 0)
+    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 1)
+    nxt, _, reply, _ = step(doc, TaskSuspend("o:a", 1, ("o:x",)), 2)
+    assert reply.status == 300 and reply.data == {"preload": []}
+    assert nxt.get("o:a").task.state == T_ACQUIRED, "the task keeps running"
+
+
+def test_suspending_drops_the_resumes_a_previous_run_buffered():
+    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
+    doc.get("o:a").task.resumes.add("o:x")
+    nxt, _, _, _ = step(doc, TaskSuspend("o:a", 1, ("o:x",)), 1)
+    assert nxt.get("o:a").task.resumes == set()
+
+
+# --- task.fence ------------------------------------------------------------
+
+
+def fence(action, version=1, corr="c1", id="o:a"):
+    return TaskFence(id, version, corr, action)
+
+
+def test_fencing_an_unknown_task_is_a_404():
+    _, _, reply, _ = step(Document(), fence(create("o:b", 100)), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_fencing_at_the_wrong_version_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), fence(create("o:b", 100), version=2), 0)
+    assert reply == Reply(409, "Version mismatch")
+
+
+def test_a_fenced_create_returns_a_nested_envelope():
+    nxt, sends, reply, _ = step(with_acquired("o:a"), fence(create("o:a:1", 100_000, {"resonate:target": W})), 3)
+    assert reply.status == 200
+    assert reply.data["action"]["kind"] == "promise.create"
+    assert reply.data["action"]["head"] == {"corrId": "c1", "status": 200, "version": "2026-04-01"}
+    assert reply.data["action"]["data"]["promise"]["id"] == "o:a:1"
+    assert reply.data["preload"] == []
+    assert nxt.get("o:a:1").task.state == T_PENDING and sends == [Send(W, Execute("o:a:1", 0))]
+
+
+def test_a_fenced_create_with_a_bad_target_is_a_top_level_400():
+    _, _, reply, _ = step(with_acquired("o:a"), fence(create("o:a:1", 100, {"resonate:target": "nope"})), 3)
+    assert reply == Reply(400, "Invalid resonate:target address")
+
+
+def test_a_fenced_settle_of_a_missing_promise_reports_404_inside_a_200():
+    _, _, reply, _ = step(with_acquired("o:a"), fence(PromiseSettle("o:zz", RESOLVED)), 3)
+    assert reply.status == 200
+    assert reply.data["action"]["head"]["status"] == 404
+    assert reply.data["action"]["data"] == "Promise not found"
+
+
+def test_a_fenced_settle_runs_the_settlement_chain():
+    doc = apply(with_acquired("o:a"), create("o:a:1", 100_000, {"resonate:target": W}), 0)
+    doc = apply(doc, PromiseRegisterListener("o:a:1", "http://l"), 0)
+    nxt, sends, reply, _ = step(doc, fence(PromiseSettle("o:a:1", RESOLVED)), 4)
+    assert reply.data["action"]["data"]["promise"]["state"] == "resolved"
+    assert nxt.get("o:a:1").task.state == T_FULFILLED
+    assert len(sends) == 1 and isinstance(sends[0].msg, Unblock)
+
+
+# --- task.heartbeat --------------------------------------------------------
+
+
+def test_a_heartbeat_extends_the_lease_of_a_task_the_caller_owns():
+    nxt, _, reply, fx = step(with_acquired("o:a"), TaskHeartbeat(PID, (("o:a", 1),)), 3_000)
+    assert nxt.get("o:a").task.lease_at == 8_000 and reply == Reply(200, {})
+    assert fx[0] == SetTimeout(8_000) and DelTimeout(5_000) in fx
+
+
+def test_a_heartbeat_from_another_process_changes_nothing():
+    doc = with_acquired("o:a")
+    nxt, _, _, fx = step(doc, TaskHeartbeat("someone-else", (("o:a", 1),)), 3_000)
+    assert nxt == doc and fx == [SetDocument(doc)]
+
+
+def test_a_heartbeat_at_a_stale_version_changes_nothing():
+    doc = with_acquired("o:a")
+    nxt, _, _, _ = step(doc, TaskHeartbeat(PID, (("o:a", 0),)), 3_000)
+    assert nxt == doc
+
+
+def test_a_heartbeat_for_an_unknown_task_is_still_a_200():
+    _, _, reply, _ = step(Document(), TaskHeartbeat(PID, (("o:a", 1),)), 0)
+    assert reply == Reply(200, {})
+
+
+# --- task.halt / task.continue ---------------------------------------------
+
+
+def test_halting_an_unknown_task_is_a_404():
+    _, _, reply, _ = step(Document(), TaskHalt("o:a"), 0)
+    assert reply == Reply(404, "Task not found")
+
+
+def test_halting_disarms_the_task():
+    nxt, _, reply, fx = step(with_acquired("o:a"), TaskHalt("o:a"), 0)
+    t = nxt.get("o:a").task
+    assert (t.state, t.pid, t.ttl, t.retry_at, t.lease_at) == (T_HALTED, None, None, None, None)
+    assert reply == Reply(200, {}) and DelTimeout(5_000) in fx
+
+
+def test_halting_twice_is_idempotent():
+    doc = apply(with_acquired("o:a"), TaskHalt("o:a"), 0)
+    nxt, _, reply, fx = step(doc, TaskHalt("o:a"), 1)
+    assert reply == Reply(200, {}) and nxt == doc and fx == [SetDocument(doc)]
+
+
+def test_halting_a_finished_task_is_a_conflict():
+    doc = apply(with_acquired("o:a"), PromiseSettle("o:a", RESOLVED), 1)
+    _, _, reply, _ = step(doc, TaskHalt("o:a"), 2)
+    assert reply == Reply(409, "Task is fulfilled")
+
+
+def test_continuing_a_task_that_is_not_halted_is_a_conflict():
+    _, _, reply, _ = step(with_acquired("o:a"), TaskContinue("o:a"), 0)
+    assert reply == Reply(409, "Task is not halted")
+
+
+def test_continuing_re_dispatches_a_halted_task():
+    doc = apply(with_acquired("o:a"), TaskHalt("o:a"), 0)
+    nxt, sends, reply, fx = step(doc, TaskContinue("o:a"), 50)
+    t = nxt.get("o:a").task
+    assert (t.state, t.version, t.retry_at) == (T_PENDING, 1, 30_050)
+    assert sends == [Send(W, Execute("o:a", 1))] and fx[0] == SetTimeout(30_050)
+
+
+# --- preload ---------------------------------------------------------------
+
+
+def test_preload_is_the_rest_of_the_branch_in_dewey_order():
+    doc = Document()
+    for id in ("o:a:10", "o:a:2", "o:a:1"):
+        doc = apply(doc, create(id, 100_000, {"resonate:branch": "o:a"}), 0)
+    doc = apply(doc, create("o:b", 100_000, {"resonate:branch": "o:b"}), 0)
+    doc = apply(doc, create("o:a", 100_000, {"resonate:target": W, "resonate:branch": "o:a"}), 0)
+    _, _, reply, _ = step(doc, TaskAcquire("o:a", 0, PID, 5_000), 1)
+    assert [p["id"] for p in reply.data["preload"]] == ["o:a:1", "o:a:2", "o:a:10"]
+
+
+def test_preload_is_truncated_at_the_limit():
+    doc = Document()
+    for i in range(1, 15):
+        doc = apply(doc, create(f"o:a:{i}", 100_000, {"resonate:branch": "o:a"}), 0)
+    doc = apply(doc, create("o:a", 100_000, {"resonate:target": W, "resonate:branch": "o:a"}), 0)
+    _, _, reply, _ = step(doc, TaskAcquire("o:a", 0, PID, 5_000), 1)
+    assert len(reply.data["preload"]) == CFG.preload_limit == 10
+
+
+def test_a_promise_without_a_branch_preloads_nothing():
+    _, _, reply, _ = step(with_targeted("o:a", 100_000), TaskAcquire("o:a", 0, PID, 5_000), 1)
+    assert reply.data["preload"] == []
+
+
+# --- the whole loop --------------------------------------------------------
+
+
+def test_a_remote_call_end_to_end():
+    """Post 002: create here, settle over there, resume, run from the top."""
+    doc = with_targeted("run", 100_000)                                   # the run itself
+    doc = apply(doc, TaskAcquire("run", 0, "w1", 5_000), 1)                # a worker claims it
+    doc = apply(doc, fence(create("run:1", 100_000, {"resonate:target": W}), corr="c", id="run"), 2)  # durable() creates the rpc's promise
+    doc = apply(doc, TaskSuspend("run", 1, ("run:1",)), 3)                # Blocked: unwind, park
+    assert doc.get("run").task.state == T_SUSPENDED and doc.timer_at == 30_002
+    doc = apply(doc, TaskAcquire("run:1", 0, "w2", 5_000), 4)              # another worker takes the callee
+    nxt, sends, _, _ = step(doc, TaskFulfill("run:1", 1, PromiseSettle("run:1", RESOLVED, Value(data="42"))), 5)
+    assert sends == [Send(W, Execute("run", 1))]                          # the settle wakes the caller
+    t = nxt.get("run").task
+    assert (t.state, t.version, t.resumes) == (T_PENDING, 1, {"run:1"})
+    doc = apply(nxt, TaskAcquire("run", 1, "w3", 5_000), 6)                # any worker resumes it
+    _, _, reply, _ = step(doc, fence(create("run:1", 0), version=2, corr="c", id="run"), 7)  # replay: create is a read
+    assert reply.data["action"]["data"]["promise"]["value"] == {"data": "42"}
+    nxt, _, _, _ = step(doc, TaskFulfill("run", 2, PromiseSettle("run", RESOLVED, Value(data="done"))), 8)
+    assert nxt.get("run").promise.state == RESOLVED and nxt.timer_at is None
+
+
+def test_settling_after_the_lease_expired_reclaims_the_task_first():
+    # The sweep runs before the request: a lease past due hands the task back
+    # and re-dispatches it, and only then does the settle fulfil it.
+    doc = with_acquired("o:a")  # lease at 5_000
+    nxt, sends, _, _ = step(doc, PromiseSettle("o:a", RESOLVED), 7_000)
+    assert sends == [Send(W, Execute("o:a", 1))]
+    assert nxt.get("o:a").task.state == T_FULFILLED
