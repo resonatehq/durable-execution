@@ -437,32 +437,30 @@ def test_registering_twice_registers_once():
     assert reply.status == 200 and nxt.get("o:x").promise.callbacks == ["o:a"] and nxt == doc
 
 
-def test_registering_against_a_settled_promise_resumes_a_suspended_awaiter():
-    doc = with_suspended("o:a", "o:x")
-    doc.get("o:x").promise.callbacks = []  # forget the registration, keep the parked task
-    doc, _, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 5, legal_pre=False)
-    assert doc.get("o:a").task.state == T_SUSPENDED
-    nxt, sends, reply, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6, legal_pre=False)
+def test_registering_against_a_settled_promise_registers_nothing():
+    """The specification's branch (external.lean:78-83): the caller gets the
+    settled record and the store does not change. Not a wake: a suspended task
+    always holds a rung on a pending promise, so there is nothing stranded to
+    rescue, and a wake here would consume no callback."""
+    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
+    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
+    nxt, sends, reply, fx = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
     assert reply.data["promise"]["state"] == "resolved"
     t = nxt.get("o:a").task
-    assert (t.state, t.resumes, t.retry_at) == (T_PENDING, {"o:x"}, 30_006)
+    assert (t.state, t.resumes) == (T_ACQUIRED, set())
+    assert nxt == doc and sends == [] and fx == [SetDocument(doc)]
+
+
+def test_a_suspended_task_always_holds_a_rung_on_a_pending_promise():
+    """Why the branch above can do nothing. Suspension requires every awaited
+    promise to be pending, and a settlement drains the callbacks it holds and
+    wakes their awaiters, so the two together leave no suspended task waiting
+    on something already settled."""
+    doc = with_suspended("o:a", "o:x")
+    assert doc.get("o:x").promise.callbacks == ["o:a"]
+    nxt, sends, _, _ = step(doc, PromiseSettle("o:x", RESOLVED), 5)
+    assert nxt.get("o:a").task.state == T_PENDING, "the settle woke it"
     assert sends == [Send(W, Execute("o:a", 1))]
-
-
-def test_registering_against_a_settled_promise_records_a_resume_for_a_running_task():
-    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
-    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
-    nxt, sends, _, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
-    t = nxt.get("o:a").task
-    assert (t.state, t.resumes) == (T_ACQUIRED, {"o:x"}) and sends == []
-
-
-def test_a_halted_awaiter_registering_after_the_fact_buffers_nothing():
-    doc = apply(with_acquired("o:a"), create("o:x", 100_000, {"resonate:scope": "global"}), 0)
-    doc = apply(doc, TaskHalt("o:a"), 0)
-    doc = apply(doc, PromiseSettle("o:x", RESOLVED), 5)
-    nxt, _, _, _ = step(doc, PromiseRegisterCallback("o:x", "o:a"), 6)
-    assert nxt.get("o:a").task.resumes == set()
 
 
 # --- register_listener -----------------------------------------------------

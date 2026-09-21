@@ -20,6 +20,7 @@ import argparse
 import sys
 import time
 from collections import deque
+from dataclasses import dataclass
 from itertools import combinations
 
 import properties as P
@@ -35,11 +36,40 @@ from kernel import (
 W = "http://w"
 CFG = KernelCfg(retry_timeout=100)
 
-IDS = ["o", "o:1", "o:2"]
-TAGS = [{"resonate:target": W}, {"resonate:scope": "global"}, {"resonate:timer": "true"},
-        {"resonate:target": W, "resonate:delay": "60"}]
-TIMEOUTS = [50, 1_000]
-CLOCK = [5, 100, 1_000]
+
+@dataclass(frozen=True)
+class Alphabet:
+    """What the search may say. Breadth and depth trade against each other,
+    so there are two: `BROAD` says many things a few steps deep, `NARROW`
+    says few things far enough to reach the long chains (acquire, suspend,
+    settle, wake, halt, continue), which no broad search gets to."""
+
+    ids: tuple
+    tags: tuple
+    timeouts: tuple
+    clock: tuple
+    #: Whether a deadline is `now + timeout` or the timeout itself. Absolute
+    #: deadlines fall into the past as the clock advances, which is how the
+    #: born-dead and expiry shapes are reached; relative ones outlive the
+    #: script, which is what a long chain needs.
+    relative: bool = False
+
+
+BROAD = Alphabet(
+    ids=("o", "o:1", "o:2"),
+    tags=({"resonate:target": W}, {"resonate:scope": "global"}, {"resonate:timer": "true"},
+          {"resonate:target": W, "resonate:delay": "60"}),
+    timeouts=(50, 1_000),
+    clock=(5, 100, 1_000),
+)
+
+NARROW = Alphabet(
+    ids=("o", "o:1"),
+    tags=({"resonate:target": W}, {"resonate:scope": "global"}),
+    timeouts=(100_000,),
+    clock=(100,),
+    relative=True,
+)
 
 
 class Timeout:
@@ -61,16 +91,16 @@ class Advance:
         return f"Advance({self.by})"
 
 
-def actions(now, doc):
+def actions(now, doc, ab=BROAD):
     """Every action the alphabet allows from this document. Requests that
     can only be refused (a wrong version, an id with no task) are left out:
     they lead back to the same state and the walk already knocks on doors."""
-    out = [Timeout()] + [Advance(d) for d in CLOCK]
-    for id in IDS:
-        for tags in TAGS:
-            for to in TIMEOUTS:
-                out.append(PromiseCreate(id, to, Value(), dict(tags)))
-        out.append(TaskCreate("p1", 10, PromiseCreate(id, 1_000, Value(), {"resonate:target": W})))
+    out = [Timeout()] + [Advance(d) for d in ab.clock]
+    for id in ab.ids:
+        for tags in ab.tags:
+            for to in ab.timeouts:
+                out.append(PromiseCreate(id, now + to if ab.relative else to, Value(), dict(tags)))
+        out.append(TaskCreate("p1", 10, PromiseCreate(id, now + 1_000 if ab.relative else 1_000, Value(), {"resonate:target": W})))
     for o in doc.objects:
         p, t, id = o.promise, o.task, o.id
         out.append(PromiseGet(id))
@@ -97,9 +127,9 @@ def actions(now, doc):
             for k in (1, 2):
                 for sub in combinations(others, k):
                     out.append(TaskSuspend(id, t.version, sub))
-            for other in IDS:
+            for other in ab.ids:
                 if other != id:
-                    out.append(TaskFence(id, t.version, "c", PromiseCreate(other, 1_000, Value(), {"resonate:target": W})))
+                    out.append(TaskFence(id, t.version, "c", PromiseCreate(other, now + 1_000 if ab.relative else 1_000, Value(), {"resonate:target": W})))
                     out.append(TaskFence(id, t.version, "c", PromiseSettle(other, RESOLVED)))
         if t.state == T_SUSPENDED:
             out.append(TaskHalt(id))
@@ -127,7 +157,7 @@ class Violation(Exception):
     pass
 
 
-def step(now, s, action, tally):
+def step(now, s, action, tally, ab=BROAD):
     """One edge, checked. Returns (now', state') or raises Violation."""
     if isinstance(action, Advance):
         return now + action.by, s
@@ -182,7 +212,7 @@ def tally_edge(a, b, sends, reply, tally, internal):
     tally["execute"] += sum(isinstance(e.msg, Execute) for e in sends)
 
 
-def explore(depth, limit=None, log=None):
+def explore(depth, limit=None, log=None, ab=BROAD):
     """Breadth-first to `depth`. Returns (states per depth, edges, tally)."""
     start = (0, P.State(Document(), retry_timeout=CFG.retry_timeout))
     seen = {key(*start): 0}
@@ -195,10 +225,10 @@ def explore(depth, limit=None, log=None):
         nxt = deque()
         while frontier:
             (now, s), path = frontier.popleft()
-            for action in actions(now, s.doc):
+            for action in actions(now, s.doc, ab):
                 edges += 1
                 try:
-                    now2, s2 = step(now, s, action, tally)
+                    now2, s2 = step(now, s, action, tally, ab)
                 except Violation as v:
                     raise Violation((v.args[0], path + [action])) from None
                 k = key(now2, s2)
@@ -220,9 +250,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--depth", type=int, default=4)
     ap.add_argument("--limit", type=int, default=None, help="stop after this many states")
+    ap.add_argument("--alphabet", choices=["broad", "narrow"], default="broad")
     args = ap.parse_args()
     t0 = time.time()
-    per_depth, edges, tally = explore(args.depth, args.limit, log=lambda m: print(m, file=sys.stderr))
+    per_depth, edges, tally = explore(args.depth, args.limit, log=lambda m: print(m, file=sys.stderr),
+                                      ab={"broad": BROAD, "narrow": NARROW}[args.alphabet])
     print(f"{sum(per_depth)} states, {edges} edges, {time.time() - t0:.1f}s")
     for k, v in tally.items():
         print(f"  {k:14} {v}")

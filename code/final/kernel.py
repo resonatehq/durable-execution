@@ -613,24 +613,25 @@ def promise_register_callback(tx: Tx, r: PromiseRegisterCallback, now: int, cfg:
         return Reply.err(422, "Awaited promise is not awaitable")
     record = awaited.promise.to_record(r.awaited)
 
-    awaited_pending = awaited.promise.state == PENDING
-    awaiter_pending = awaiter.promise.state == PENDING
-    if awaited_pending and awaiter_pending:
+    # Registering against a promise that has already settled does nothing: the
+    # caller learns the outcome from the record it gets back. It is not a wake,
+    # and the reason is an invariant rather than a preference. A task suspends
+    # only on promises that are pending at the time (`task.suspend` answers 300
+    # otherwise), and a settlement drains every callback it holds, so a
+    # suspended task always has a rung on a pending promise. Waking one here
+    # would be a transition out of `suspended` that consumed no callback, which
+    # `consistent_wake_follows_callback_consumption` forbids — and the state it
+    # defends against is one the catalogue says is unreachable.
+    #
+    # (The Rust kernel does wake, following its SQL backend, where the
+    # registration inserts a *ready callback* that a later step drains. The
+    # coalesced machine has no later step, and the specification's
+    # `promiseRegisterCallback` accordingly does nothing here:
+    # `spec/02-abstract/external.lean:78-83`. Found by the Hypothesis machine.)
+    if awaited.promise.state == PENDING and awaiter.promise.state == PENDING:
         # Registration order is protocol-visible; the pair is unique.
         if r.awaiter not in awaited.promise.callbacks:
             awaited.promise.callbacks.append(r.awaiter)
-    elif not awaited_pending and awaiter_pending and awaiter.task is not None:
-        # The awaited promise is already settled, so there is nothing to wait
-        # for: wake the awaiter now instead of registering. A halted awaiter
-        # registering after the fact buffers nothing.
-        t = awaiter.task
-        if t.state == T_SUSPENDED:
-            t.state = T_PENDING
-            t.resumes = {r.awaited}
-            t.arm_retry(now + cfg.retry_timeout)
-            send_execute(tx, r.awaiter, t.version)
-        elif t.state in (T_PENDING, T_ACQUIRED):
-            t.resumes.add(r.awaited)
     return Reply.ok({"promise": record})
 
 

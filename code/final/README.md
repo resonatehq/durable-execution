@@ -5,6 +5,63 @@ what we learned from the two posts, from `resonatehq/resonate`, and from the
 design chat, and how the pieces fit end to end. Every non-obvious decision
 below should grow an entry in `notes/` as it gets implemented.
 
+## 0. What exists
+
+The kernel, and the evidence for it. Everything below this section is still
+the plan.
+
+| file | |
+|---|---|
+| `kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
+| `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
+| `explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
+| `test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
+| `test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
+| `test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
+| `test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
+
+The kernel has no dependencies. The tests need `pytest` and `hypothesis`
+(`requirements-dev.txt`); `python -m pytest` runs in about 45 seconds.
+
+Four layers of evidence, each answering something the others cannot:
+
+- **The unit tests** pin each operation's branches against the Rust kernel's
+  own test suite, which we transcribed from.
+- **The catalogue** runs on every step of every test. A kernel step is two
+  abstract steps, the sweep and the operation, so each is checked on its own
+  and the fused result is held equal to their composition.
+- **The exhaustive search** proves reachability. 70 869 states and 270 994
+  edges at depth 4 on the broad alphabet; 11 579 states at depth 5 on the
+  narrow one, which is where the long chains live.
+- **The Hypothesis machine** goes further than any bound, and shrinks what it
+  finds.
+
+Three entries in the catalogue are adapted to our shape and marked in the
+source, with the specification's own form kept beside them: two because we
+fuse the wake and its dispatch into one step, one because the specification
+samples it on scripts too short to reach a re-suspension.
+
+### What the search found
+
+The Hypothesis machine found a real divergence. Registering a callback
+against a promise that has already settled: the Rust kernel wakes a suspended
+awaiter, following its SQL backend, where the registration inserts a *ready
+callback* that a later step drains. The coalesced machine has no later step,
+so waking there is a transition out of `suspended` that consumed no callback,
+which `consistent_wake_follows_callback_consumption` forbids. The
+specification does nothing in that branch
+(`spec/02-abstract/external.lean:78-83`), and neither do we now. Nothing is
+stranded by the change: a task suspends only on promises that are pending at
+the time, and a settlement drains every callback it holds, so a suspended
+task always has a rung on a pending promise.
+
+A second finding, reported here rather than fixed: the specification's
+`consistent_suspension_registers_callback` demands a callback that is new in
+the step, but a task that suspends, is halted, continued, re-acquired and
+suspends on the same promise again registers nothing new, because
+registration is idempotent in the specification's own `taskSuspend`. Its
+corpus is scripts of length three, which cannot reach that path.
+
 ## 1. What we are building on
 
 **The programming model (posts 001 and 002 in `design/content/writing`).**
