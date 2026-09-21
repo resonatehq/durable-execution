@@ -15,6 +15,7 @@ have in-memory twins, the HTTP routes, and the SDK.
 |---|---|
 | `kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
 | `engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send. The only method, and the only place that does I/O |
+| `spec.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
 | `codec.py` | the document's canonical byte form, and the key it lives under |
 | `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
 | `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
@@ -24,6 +25,7 @@ have in-memory twins, the HTTP routes, and the SDK.
 | `test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
 | `test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
 | `test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
+| `test_spec.py` | our engine run through the conformance suite, and two broken engines the suite has to reject |
 
 The kernel has no dependencies. The tests need `pytest` and `hypothesis`
 (`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.
@@ -126,6 +128,53 @@ the world does, retrying the request and firing the deadlines, and requires
 the run to reach the promises and tasks a clean run reached. It also covers
 the window nothing can close over a network: a commit that landed and whose
 answer was lost.
+
+### The specification of an engine
+
+`spec.py` names three things, because three things need naming and they are
+not the same:
+
+```python
+class EngineP(Protocol):        # an engine, once it exists
+    def process(self, msg: Msg, now: int) -> Reply: ...
+
+class EngineC(Protocol):        # how one is made
+    def __call__(self, store: Store, timers: Timers, transport: Transport,
+                 cfg: KernelCfg = ..., prefix: str = ...) -> EngineP: ...
+
+class EngineM(Protocol):        # a module that offers one
+    Engine: EngineC
+```
+
+The module is the useful layer. A conformance suite cannot be handed a
+class, because an implementation may want to choose its class at import
+time, and it cannot be handed an instance, because the suite has to supply
+the world the engine runs in. It is handed the module and reaches for
+`Engine`. The ports are constructor arguments for the same reason: that seam
+is what lets one engine run over a bucket in production and over a dict in a
+simulation, which is what makes a simulated run a real run.
+
+`EngineP` has one member and no name, no identity and no lifecycle.
+Everything an engine knows is in the bucket, so two of them are
+interchangeable.
+
+The types say nothing about behaviour. `conformance(module)` is the part
+that does: it drives an engine through a standard script and returns
+everything it broke. Four checks, independent of each other:
+
+- every document committed is a state the catalogue admits, and every
+  consecutive pair a transition it admits;
+- a `Timeout` step is held additionally to the sweeper properties, which are
+  strictly stronger than the general edge tables;
+- the effect order, arm then commit then disarm then send, because that is
+  what the crash windows rest on;
+- the write law, restated in `spec.py` rather than imported from the engine,
+  since a specification that borrowed the implementation's comparison would
+  only be checking that the implementation agrees with itself.
+
+Two deliberately broken engines are in `test_spec.py`, one that writes on a
+read and one that sends before it commits, because a conformance suite
+nothing has ever failed proves as little as one nothing has ever passed.
 
 ### What the search found
 
