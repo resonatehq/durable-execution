@@ -19,6 +19,7 @@ have in-memory twins, the HTTP routes, and the SDK.
 | `codec.py` | the document's canonical byte form, and the key it lives under |
 | `ports.py` | the three things the engine needs from the world — a store, timers, a transport — with in-memory twins and a fault injector |
 | `blob.py` | the bucket, as the four operations a real one offers, with a simulated bucket and the adapter that narrows it to the engine's store |
+| `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
 | `explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
 | `test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
@@ -28,6 +29,7 @@ have in-memory twins, the HTTP routes, and the SDK.
 | `test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
 | `test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
 | `test_blob.py` | the bucket's four operations, and the adapter |
+| `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 
 The kernel has no dependencies. The tests need `pytest` and `hypothesis`
 (`requirements-dev.txt`); `python -m pytest` runs in about 50 seconds.

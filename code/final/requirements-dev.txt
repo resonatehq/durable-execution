@@ -1,5 +1,6 @@
 pytest
 hypothesis
+jsonschema
 
 # Optional: the overnight instrument. `hypothesis fuzz -- -k TestKernelMachine`
 # runs the same state machine as a coverage-guided campaign, forever, using

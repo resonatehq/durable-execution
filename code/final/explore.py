@@ -212,10 +212,17 @@ def tally_edge(a, b, sends, reply, tally, internal):
     tally["execute"] += sum(isinstance(e.msg, Execute) for e in sends)
 
 
-def explore(depth, limit=None, log=None, ab=BROAD):
-    """Breadth-first to `depth`. Returns (states per depth, edges, tally)."""
+def explore(depth, limit=None, log=None, ab=BROAD, visit=None):
+    """Breadth-first to `depth`. Returns (states per depth, edges, tally).
+
+    `visit(now, doc)` is called once per state first reached, which is how
+    something other than the catalogue — the line schema, say — gets handed
+    every document the kernel can produce rather than the few a script
+    happens to build."""
     start = (0, P.State(Document(), retry_timeout=CFG.retry_timeout))
     seen = {key(*start): 0}
+    if visit is not None:
+        visit(*(start[0], start[1].doc))
     frontier = deque([(start, [])])
     per_depth = [1]
     edges = 0
@@ -234,6 +241,8 @@ def explore(depth, limit=None, log=None, ab=BROAD):
                 k = key(now2, s2)
                 if k not in seen:
                     seen[k] = d + 1
+                    if visit is not None:
+                        visit(now2, s2.doc)
                     nxt.append(((now2, s2), path + [action]))
                     if limit and len(seen) >= limit:
                         frontier = nxt

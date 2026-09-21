@@ -123,6 +123,11 @@ class Engine:
         for e in fx:
             if isinstance(e, SetTimeout):
                 new.timer_name = self.timers.arm(origin, e.at)
+        if new.timer_at is None:
+            # The name names the armed deadline. With nothing armed there is
+            # nothing to name, and a leftover name is a handle on something
+            # that no longer exists. Found by the line schema.
+            new.timer_name = None
         self.store.commit(key, encode(new, origin), generation)
         for e in fx:
             # By name, never by coordinates: the deadline being removed is the
