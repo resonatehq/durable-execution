@@ -27,8 +27,10 @@ from kernel import (
     REJECTED, RESOLVED, Execute, PromiseCreate, PromiseSettle, TAG_TARGET,
     TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend, Unblock, Value,
 )
+from ports import Conflict, Unavailable
 from sdk import (
-    _FRAME, _INVOCATION, REGISTRY, Blocked, Failed, Invocation, _Call, dumps, loads, route,
+    _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
+    loads, route,
 )
 
 
@@ -80,15 +82,20 @@ class Worker:
                     # it. Nothing to wait for, so carry on from the top.
                     continue
                 return "suspended"
-            except Failed as e:
-                self.engine.process(TaskFulfill(
-                    task_id, v, PromiseSettle(task_id, REJECTED, dumps(str(e)))), self.clock())
-                return "rejected"
-            except Exception:
-                # Not the function's answer: the worker could not produce one.
-                # Hand the task back at the same version so it is offered again.
+            except PLATFORM:
+                # Not the function's answer: this attempt could not produce
+                # one. Hand the task back at the same version so it is
+                # offered again, to this worker or another.
                 self.engine.process(TaskRelease(task_id, v), self.clock())
-                raise
+                return "released"
+            except Exception as e:
+                # The function's answer, and an unwelcome one. A rejection is
+                # a result: it is recorded, it wakes whoever was awaiting it,
+                # and replay reads it back rather than running again.
+                self.engine.process(TaskFulfill(
+                    task_id, v, PromiseSettle(task_id, REJECTED, dumps(describe(e)))),
+                    self.clock())
+                return "rejected"
             self.engine.process(TaskFulfill(
                 task_id, v, PromiseSettle(task_id, RESOLVED, dumps(result))), self.clock())
             return "done"

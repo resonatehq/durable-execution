@@ -28,7 +28,7 @@ from engine import Engine
 from kernel import KernelCfg, PromiseRegisterListener, Send
 from ports import Crash, Fault, MemoryTimers, MemoryTransport
 from runtime import Clock, Runtime, Worker
-from sdk import gather, resonate
+from sdk import Failed, gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)
 AGENT, SEARCH = "worker://agent", "worker://search"
@@ -237,3 +237,139 @@ def test_killing_the_worker_at_any_write_still_finishes_the_run(k):
 
     extra = sum((Counter(CALLS) - clean).values())
     assert extra <= 1, f"more than the in-flight call was repeated: {CALLS} vs {clean}"
+
+
+# --- the rest of the programming model -------------------------------------
+
+@resonate
+def double(x: int):
+    CALLS["double"] += 1
+    return x * 2
+
+
+@resonate
+async def middle(x: int):
+    return await double(x) + 1
+
+
+@resonate
+async def three_deep(x: int):
+    return await middle(x) + await middle(x + 10)
+
+
+@resonate
+async def fan_out_locally(n: int):
+    return await gather(double(i) for i in range(n))
+
+
+@resonate
+def on_fire(x: int):
+    CALLS["on_fire"] += 1
+    raise ValueError("the index is on fire")
+
+
+@resonate
+async def calls_something_broken(x: int):
+    return await on_fire(x)
+
+
+@resonate
+async def survives_a_broken_call(x: int):
+    try:
+        return await on_fire(x)
+    except Failed as e:
+        return f"carried on after {e}"
+
+
+def run(fn, id, *args, extra=()):
+    rt, blob, engine, clock = world()
+    rt.serve(AGENT, Worker(engine, clock, "w"), fn, *extra)
+    rt.start(id, fn, *args)
+    rt.drain()
+    return decode(blob.get(doc_key(id))[0].encode(), id)
+
+
+def test_a_durable_call_can_contain_one():
+    """Three levels, and the ids say so: a call made from inside `:1` is
+    `:1.1`, which sorts under it and nowhere else."""
+    doc = run(three_deep, "nest.1", 5, extra=(middle, double))
+    assert json.loads(doc.get("nest.1").promise.value.data) == 42
+    assert [o.id for o in doc.objects] == [
+        "nest.1", "nest.1:1", "nest.1:1.1", "nest.1:2", "nest.1:2.1"]
+
+
+def test_gather_works_over_local_calls_too():
+    doc = run(fan_out_locally, "local.1", 3, extra=(double,))
+    assert json.loads(doc.get("local.1").promise.value.data) == [0, 2, 4]
+    assert [o.id for o in doc.objects] == ["local.1", "local.1:1", "local.1:2", "local.1:3"]
+
+
+def test_a_call_that_raises_is_a_rejection_not_a_crash():
+    """Post 001: an exception settles the promise, it does not escape. The
+    rejection carries what went wrong, and it propagates to the caller as
+    the caller's own rejection."""
+    doc = run(calls_something_broken, "boom.1", 1, extra=(on_fire,))
+    leaf, root = doc.get("boom.1:1").promise, doc.get("boom.1").promise
+    assert leaf.state == "rejected"
+    assert json.loads(leaf.value.data) == {
+        "type": "ValueError", "message": "the index is on fire"}
+    assert root.state == "rejected"
+    assert "the index is on fire" in json.loads(root.value.data)["message"]
+
+
+def test_a_rejection_can_be_caught_and_carried_on_from():
+    """Which is the point of recording it as a result rather than throwing
+    it away: the caller decides what a failure means."""
+    doc = run(survives_a_broken_call, "saga.1", 1, extra=(on_fire,))
+    root = doc.get("saga.1").promise
+    assert root.state == "resolved"
+    assert "the index is on fire" in json.loads(root.value.data)
+
+
+def test_a_rejection_is_read_back_rather_than_re_raised_by_running_again():
+    """The expensive half of the claim. A call that failed is not called a
+    second time to discover that it fails; the rejection is the result, and
+    replay reads results."""
+    fault = Fault()
+    rt, blob, engine, clock = world(fault)
+    rt.serve(AGENT, Worker(engine, clock, "w"), calls_something_broken, on_fire)
+    rt.start("boom.2", calls_something_broken, 1)
+    # Stop after the rejection is committed but before the run settles.
+    fault.crash_after(6)
+    try:
+        rt.drain()
+    except Crash:
+        pass
+    called_once = CALLS["on_fire"]
+    fault.heal()
+    for _ in range(6):
+        clock.advance(40_000)
+        rt.drain()
+    doc = decode(blob.get(doc_key("boom.2"))[0].encode(), "boom.2")
+    assert doc.get("boom.2").promise.state == "rejected"
+    assert CALLS["on_fire"] == called_once, "the failing call was made again"
+
+
+def test_another_worker_finishes_what_a_dead_one_started():
+    """A run is not a process. The lease expires, the task is offered again,
+    and whoever takes it runs the function from the top over the promises
+    the first worker managed to settle."""
+    want, _ = clean_run()
+    fault = Fault()
+    rt, blob, engine, clock = world(fault)
+    rt.start(ORIGIN, research, QUESTION)
+    fault.crash_after(6)
+    try:
+        rt.drain()
+    except Crash:
+        pass
+    first = rt.workers[AGENT]
+    fault.heal()
+    second = Worker(engine, clock, "agent-2")
+    rt.serve(AGENT, second, research, agent)
+    for _ in range(6):
+        clock.advance(40_000)
+        rt.drain()
+    assert answer(blob) == want
+    assert second.ran, "the second worker never picked anything up"
+    assert second is not first

@@ -65,6 +65,7 @@ from kernel import (
     PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
     TaskFence, Value,
 )
+from ports import Conflict, Unavailable
 
 #: How long a promise this SDK creates has to settle before it times out.
 DEFAULT_TIMEOUT = 24 * 60 * 60 * 1_000
@@ -81,7 +82,24 @@ class Blocked(Exception):
 
 class Failed(Exception):
     """A durable call recorded as rejected. Raised on the run that made it
-    and on every replay after, because the rejection is the result."""
+    and on every replay after, because the rejection *is* the result, and a
+    result is the one thing replay must not change."""
+
+
+class LeaseLost(Exception):
+    """A write was refused because this worker no longer holds the task.
+
+    Not the function's answer: nothing was decided, somebody else is doing
+    the work, and this attempt should stop rather than record anything.
+    """
+
+
+#: What the worker and the SDK must not mistake for an answer. Everything
+#: else a durable function raises is its result, recorded as a rejection —
+#: post 001's `except Exception: settle(id, REJECTED, e)`. These three mean
+#: the attempt could not produce a result at all, so the task goes back and
+#: somebody tries again.
+PLATFORM = (LeaseLost, Conflict, Unavailable)
 
 
 @dataclass
@@ -122,7 +140,7 @@ class Invocation:
         reply = self.engine.process(
             TaskFence(self.task_id, self.version, f"c{self.corr}", action), self.now())
         if reply.status != 200:
-            raise Failed(f"fence refused: {reply.status} {reply.data}")
+            raise LeaseLost(f"{self.task_id} at version {self.version}: {reply.data}")
         inner = reply.data["action"]
         return inner["head"]["status"], inner["data"]
 
@@ -156,11 +174,18 @@ def loads(v: dict) -> Any:
     return None if data is None else json.loads(data)
 
 
+def describe(e: BaseException) -> dict:
+    """A rejection, as something that survives a round trip through JSON and
+    still says what went wrong."""
+    return {"type": type(e).__name__, "message": str(e)}
+
+
 def read_back(record: dict) -> Any:
     """What a settled promise returns to the code that awaited it."""
     if record["state"] == RESOLVED:
         return loads(record["value"])
-    raise Failed(f"{record['id']}: {loads(record['value'])}")
+    why = loads(record["value"]) or {}
+    raise Failed(f"{record['id']}: {why.get('type', 'rejected')}: {why.get('message', '')}")
 
 
 # ---------------------------------------------------------------------------
@@ -199,8 +224,13 @@ class Durable:
         token = _FRAME.set(_Call(id))
         try:
             value, state = dumps(await self.invoke(*args)), RESOLVED
-        except Failed as e:
-            value, state = dumps(str(e)), REJECTED
+        except (Blocked, *PLATFORM):
+            # Not an answer. Nothing is recorded, and the attempt unwinds.
+            raise
+        except Exception as e:
+            # An answer, and an unwelcome one. Recorded, so the next run
+            # reads the same rejection rather than calling again.
+            value, state = dumps(describe(e)), REJECTED
         finally:
             _FRAME.reset(token)
         # Settle from what the store returns, never from the local result: if

@@ -28,8 +28,14 @@ class Unavailable(Exception):
     """No answer. Nothing is known about whether the write landed."""
 
 
-class Crash(Exception):
-    """Injected: the process stopped here. Not something production raises."""
+class Crash(BaseException):
+    """Injected: the process stopped here. Not something production raises.
+
+    A `BaseException` on purpose. A power cut is not an error the program
+    gets to handle, and if it were an `Exception` the engine's own error
+    handling would catch it and turn a dead process into a rejected promise,
+    which is the opposite of what happened.
+    """
 
 
 class Fault:
