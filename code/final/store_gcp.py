@@ -16,21 +16,47 @@ is idempotent.
 
 ## The one number to design around
 
-GCS allows roughly one write per second to a single object. Every promise
-and task of one run lives in one object, so that is the ceiling on a single
-run's transitions, not on the system. A run that needs more than that is a
-run whose fan-out should be its own origin. Under many writers it surfaces
-as `PreconditionFailed`, which the caller retries, so the failure mode is
-latency rather than loss.
+Every promise and task of one run lives in one object, so a single object's
+write rate is the ceiling on a single run's transitions, not on the system.
+A run that needs more than that is a run whose fan-out should be its own
+origin. Under many writers the contention surfaces as `PreconditionFailed`,
+which the caller retries, so the failure mode is latency rather than loss.
 
-## What is not verified
+Measured against a real bucket on 2026-09-22, rather than assumed:
 
-This file has never been run against Google Cloud Storage. It is written
-against the library's documented behaviour and against `store.conformance`,
-which the simulated store passes and which this will pass or fail the moment
-someone sets `GCS_BUCKET` (see `test_conformance.py`). Until then, "it works
-on GCS" rests on the documentation, and saying so is better than implying
-otherwise.
+    30 sequential conditional writes to one object   2.1 writes/sec
+      latency p50 432 ms, p95 1253 ms, max 1526 ms
+      throttled 0, lost 0
+
+    8 concurrent writers x 5 read-modify-write        2.0 writes/sec
+      final counter 40 of 40, LOST UPDATES 0
+      412 conflicts 106, i.e. 2.6 retries per success
+      throttled 0
+
+Two things in there are worth more than the headline. Eight writers moved
+the counter no faster than one did: the object serialises, and the extra
+concurrency turned into 106 retries rather than throughput, which is the
+argument for making fan-out its own origin, now measured. And nothing was
+ever throttled -- 146 write attempts to one object drew no 429 -- so at this
+scale the ceiling is round-trip latency, not a quota. Documentation that
+quotes "about one write per second per object" describes a limit we did not
+reach; we were slower than it for a simpler reason.
+
+## What is verified, and what is not
+
+`store.conformance` passes against a real bucket: all eleven claims, which
+is what `spec.check` prints when `GCS_BUCKET` is set, and what
+`test_conformance.py::...[gcs]` runs. Generation preconditions behave as
+this file reads them -- `if_generation_match=0` creates exactly once, and a
+matched generation replaces exactly what was read.
+
+Still resting on documentation: everything about a bucket this code never
+asked for. The measurements above are one bucket, one region, one day, from
+one machine; the region is not recorded here because the credential used
+could not read the bucket's own metadata. Cross-region latency, behaviour
+under sustained load far above this, and the queue side (Cloud Tasks) are
+unverified -- `spec.check` still prints `skip` for `queue_gcp`, and saying
+so is better than implying otherwise.
 """
 
 from __future__ import annotations

@@ -91,10 +91,15 @@ over a double that raises the libraries' own exceptions, and — only when
 `GCS_BUCKET` names a bucket this machine can reach — against Google Cloud
 Storage itself.
 
-Which means the honest status is: **nothing here has run on GCP.** The
-contract says what the adapters must do, the fake client says they do it when
-the library behaves as documented, and the third run is the one that would
-settle it. It is skipped, so a green suite never implies a live one.
+Which means the honest status is: **the store has run on GCP; nothing else
+has.** On 2026-09-22 all eleven store claims passed against a real bucket, so
+generation preconditions do behave as `store_gcp.py` reads them, and the
+measurements that run produced — what one object's write rate actually is,
+and what happens to eight writers racing for it — are recorded in that file's
+docstring. The queue has not: `queue_gcp` still reports a skip, and so does
+Cloud Run. For those two the contract still only says what the adapter must
+do and the fake client still only says they do it when the library behaves as
+documented, so a green suite still does not imply a live one.
 
 The program the tests run is the one from this repository's README:
 
