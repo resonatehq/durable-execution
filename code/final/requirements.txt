@@ -1,0 +1,17 @@
+# What the container needs, and nothing else.
+#
+# Google's Python buildpack installs from this file, not from
+# `requirements-dev.txt`, so a dependency that is only named there is a
+# dependency the deployed service does not have. The split is the same one
+# `requirements-dev.txt` describes: the kernel, the engine, the codec, the
+# simulators and the SDK import none of these, and each import below happens
+# inside the method that needs it, so the suite still runs without them.
+#
+# Nothing here is a test tool. If pytest, hypothesis, jsonschema or mypy ever
+# appears in this file, something that runs in production has started
+# importing one of them, and that is the bug rather than the missing line.
+
+google-cloud-storage
+google-cloud-tasks
+google-auth
+functions-framework

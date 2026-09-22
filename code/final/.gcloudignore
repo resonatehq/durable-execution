@@ -1,0 +1,11 @@
+# What the build does not need. The suite, its fixtures and its caches are
+# not part of the service, and uploading them makes a slower build and a
+# larger image for no benefit.
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+test/
+requirements-dev.txt
