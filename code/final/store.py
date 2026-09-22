@@ -119,22 +119,35 @@ class StoreP(Protocol):
 
 
 class StoreC(Protocol):
-    """How a store is made.
+    """How a store is made — and the one layer that cannot be pinned down.
 
-    Configuration is keywords rather than a fixed signature because there
-    is nothing in common to fix: the simulated store needs nothing, and the
-    real one needs a bucket, a client and a prefix. What *is* fixed is that
-    whoever runs the contract supplies it, which is the same seam that lets
-    one engine run over a bucket in production and a dict in a simulation.
+    `spec.EngineC` names its arguments, and means it: every engine takes
+    the same three ports, because ports are an interface. A store's
+    arguments are not an interface, they are a deployment — the simulated
+    one needs nothing, the real one needs a bucket, a client and a prefix,
+    and no third implementation will need those either. Forcing a shape on
+    them would only mean writing the differences somewhere less honest,
+    like a dict.
+
+    So this says the one thing that is true of both: a store is made by
+    calling something. Who calls it with what is the caller's business —
+    the contract below is handed the configuration, and `app.py` reads it
+    from the environment.
     """
 
-    def __call__(self, **config: Any) -> StoreP: ...
+    def __call__(self, *config: Any, **keywords: Any) -> StoreP: ...
 
 
 class StoreM(Protocol):
-    """A module that offers a store."""
+    """A module that offers a store.
 
-    Store: StoreC
+    A read-only property rather than a plain attribute: a protocol's
+    mutable attribute is invariant, and `Store: StoreC` is a claim no class
+    can satisfy. See `spec.py`, and `test_types.py`, which checks it.
+    """
+
+    @property
+    def Store(self) -> StoreC: ...
 
 
 # ---------------------------------------------------------------------------

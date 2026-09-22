@@ -81,17 +81,19 @@ class TimerP(Protocol):
 
 
 class TimerC(Protocol):
-    """How a timer is made. Keywords, for the reason `store.StoreC` gives:
-    there is nothing in common to fix, and the caller is the one that
-    knows."""
+    """How a timer is made. Unpinned, for the reason `store.StoreC` gives
+    at length: the arguments are a deployment rather than an interface, and
+    the caller is the one that knows them."""
 
-    def __call__(self, **config: Any) -> TimerP: ...
+    def __call__(self, *config: Any, **keywords: Any) -> TimerP: ...
 
 
 class TimerM(Protocol):
-    """A module that offers a timer."""
+    """A module that offers a timer. A property rather than an attribute,
+    for the reason `store.StoreM` gives."""
 
-    Timer: TimerC
+    @property
+    def Timer(self) -> TimerC: ...
 
 
 # ---------------------------------------------------------------------------

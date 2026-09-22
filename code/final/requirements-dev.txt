@@ -10,6 +10,11 @@ pytest
 hypothesis
 jsonschema
 
+# The module specs in spec.py, store.py and timer.py are claims in the type
+# system, and no test can check a type-system claim. `test_types.py` runs
+# mypy over them and skips itself when mypy is absent.
+mypy
+
 # -- to run on Google Cloud -------------------------------------------------
 # Only gcs.py, cloudtasks.py and app.py's entry point import these, and each
 # import is inside the method that needs it, so the rest of the suite runs

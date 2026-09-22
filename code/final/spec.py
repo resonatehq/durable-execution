@@ -12,10 +12,13 @@ because a real implementation may want to choose its class at import time,
 and it cannot be handed an instance, because the suite has to supply the
 world the engine runs in. It is handed the module, and reaches for `Engine`.
 
-`EngineM.Engine` is an attribute rather than a method for the same reason
-`math.pi` is: a module protocol describes what a module *has*. A class
-satisfies `EngineC` by being callable with the right arguments, so
-`Engine: EngineC` is satisfied by `class Engine:` with no adapter.
+`EngineM.Engine` is a read-only property rather than a plain attribute, and
+that is not a style choice: a protocol's mutable attribute is invariant, so
+`Engine: EngineC` demands a value that is *exactly* `EngineC` and a type
+checker rejects `class Engine:` for it. A property is covariant, and a class
+object satisfies it by being callable with the right arguments, with no
+adapter. `test_types.py` is what says so; the earlier, plainer form passed
+every test in this project and was still wrong.
 
 The types alone say nothing about behaviour. The rest of this file is the
 part that does: `conformance` drives an engine through a script and holds
@@ -118,11 +121,16 @@ class EngineC(Protocol):
     def __call__(self, store: StoreP, timers: Timers, transport: Transport,
                  cfg: KernelCfg = ..., prefix: str = ...) -> EngineP: ...
 
+    # This signature is real: every engine takes the same three ports,
+    # because they are an interface rather than a configuration. `StoreC`
+    # and `TimerC` cannot say as much, and say so.
+
 
 class EngineM(Protocol):
     """A module that offers an engine."""
 
-    Engine: EngineC
+    @property
+    def Engine(self) -> EngineC: ...
 
 
 # ---------------------------------------------------------------------------

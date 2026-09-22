@@ -1,0 +1,59 @@
+"""The module specs, checked by something that is not us.
+
+`spec.EngineM`, `store.StoreM` and `timer.TimerM` are claims in the type
+system, and nothing in this project had ever asked the type system whether
+they hold. Every test passed with `Engine: EngineC` — a form mypy rejects,
+because a protocol's mutable attribute is invariant and no class object is
+*exactly* a callback protocol. The tests could not have caught it. A type
+checker is an oracle in the same sense the line schema is: it is not ours,
+it does not know what we meant, and it says no for reasons of its own.
+
+The claims are below, in a block that only a type checker reads. The test
+runs mypy over this file and fails on anything it says about it. Errors in
+other files are silenced rather than followed, because this file is about
+the specs, not about annotating a codebase that has no annotations to
+speak of.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+HERE = Path(__file__).parent
+
+if TYPE_CHECKING:
+    import engine
+    import spec
+    import store
+    import store_gcp
+    import store_mem
+    import timer
+    import timer_gcp
+    import timer_mem
+
+    # A module offers what its spec says it offers.
+    an_engine: spec.EngineM = engine
+    a_simulated_store: store.StoreM = store_mem
+    a_real_store: store.StoreM = store_gcp
+    a_simulated_timer: timer.TimerM = timer_mem
+    a_real_timer: timer.TimerM = timer_gcp
+
+    # And the engine's constructor really is pinned to those three ports,
+    # which is the claim `StoreC` and `TimerC` deliberately do not make.
+    a_constructor: spec.EngineC = engine.Engine
+
+
+def test_the_module_specs_hold():
+    if shutil.which("mypy") is None:  # pragma: no cover - mypy is optional
+        pytest.skip("mypy is not installed")
+    done = subprocess.run(
+        [sys.executable, "-m", "mypy", "--no-error-summary",
+         "--follow-imports=silent", "test_types.py"],
+        cwd=HERE, capture_output=True, text=True, env={"MYPYPATH": str(HERE), "PATH": ""})
+    assert done.stdout == "" and done.returncode == 0, done.stdout or done.stderr

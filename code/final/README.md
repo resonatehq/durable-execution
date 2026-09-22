@@ -27,6 +27,22 @@ an implementation may choose its class at import time, and it cannot be
 handed an instance, because only the caller knows how to configure one. It
 is handed the module.
 
+Only one of the three `…C` layers pins a signature down, and the asymmetry
+is the interesting part. `EngineC` names its arguments and means it: every
+engine takes the same three ports, because a port is an interface.
+`StoreC` and `TimerC` name nothing, because their arguments are not an
+interface but a deployment — the simulated store needs nothing, the bucket
+needs a bucket, a client and a prefix, and no third implementation will
+need those either. A common shape forced over that would only move the
+differences somewhere less honest, like a dict, so what they say instead is
+the one thing that is true of both: a store is made by calling something.
+
+`test_types.py` is what holds the three specs to that, by running a type
+checker over them — an oracle in the same sense the line schema is. It
+found one: `Engine: EngineC` had been a plain attribute, which is
+invariant, so no class object could ever satisfy it. Every test in this
+project passed with it, and none of them could have caught it.
+
 Which is why the contract lives in the interface's own module rather than
 beside an implementation: a suite that shipped with the simulator would be
 grading the bucket against a rival instead of against a contract.
@@ -130,6 +146,7 @@ should not have to pretend.
 | `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 | `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
 | `test_timer.py` | the simulated timer on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
+| `test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
 | `test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test_app.py` | the service through its own surface: methods, paths, status codes, who may knock, and the whole research agent over nothing but HTTP |
 
@@ -139,7 +156,7 @@ made of: `engine.py`, `codec.py`, `ports.py`, `store.py`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `timer_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 277 tests in about a minute.
+separately; `python -m pytest` runs 278 tests in about a minute.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
 
