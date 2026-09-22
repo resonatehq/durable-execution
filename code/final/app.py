@@ -37,9 +37,21 @@ buildpack insists on; it imports `handler` from here.
 This has never run on Cloud Run. What *is* verified is more than it was:
 `test_app.py` drives the router directly, and `test_http.py` drives this
 file's `handler` through a real Flask app built the way Cloud Run builds
-it, including a whole research agent over nothing but HTTP. What remains
-untested is the OIDC acceptance path, which needs Google to answer, and
-the deployment itself.
+it, including a whole research agent over nothing but HTTP.
+
+On 2026-09-22 the same entry point was driven over a bound socket with
+Google Cloud Storage underneath rather than the in-memory store, by a pump
+POSTing what Cloud Tasks would: the agent ran to a correct answer in five
+deliveries, and again in six when the first dispatch was thrown away
+unexecuted -- there the deadline armed in the document fired as
+`/sweep/<origin>`, the run recovered, and every unit of work was still
+done exactly once. So the composition root, the routes, the JSON, the
+status codes and the recovery path do work against real storage.
+
+What remains untested is the OIDC acceptance path, which needs Google to
+answer; Cloud Tasks itself, which `queue_gcp.py` has still never spoken to;
+and the deployment -- the buildpack, `main.py`, cold start, and what
+concurrent instances do to one origin's object.
 """
 
 from __future__ import annotations
