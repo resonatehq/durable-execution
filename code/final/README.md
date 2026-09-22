@@ -200,9 +200,10 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 317 tests in about ninety seconds. The
-tests live in `test/`; `conftest.py` at the root is what puts the code on
-their path.
+separately; `python -m pytest` runs 317 tests in about ninety seconds, and
+320 in about two and a quarter minutes when `GCS_BUCKET` names a bucket,
+those three being the ones that need one. The tests live in `test/`;
+`conftest.py` at the root is what puts the code on their path.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
 
