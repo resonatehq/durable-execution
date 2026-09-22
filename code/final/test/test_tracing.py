@@ -35,12 +35,14 @@ import pytest
 import queue_mem
 import store_mem
 import tracing
-from engine import Engine
-from kernel import KernelCfg, PromiseGet
-from runtime import Clock, Runtime, Worker
+from app import Routes
+from kernel import KernelCfg, TAG_TARGET
+from runtime import Clock
+from sdk import dumps, route
 from spec import queue as queue_spec
 from spec import store as store_spec
-from test_e2e import AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, agent, research, search
+from spec.queue import SWEEP
+from test_e2e import CALLS, ORIGIN, QUESTION, agent, research, search
 
 #: Where the code is, and where the tests are: a subprocess needs both
 #: on its path to re-run one of these from outside pytest.
@@ -56,37 +58,69 @@ GOLDEN = HERE / "research.trace"
 #: is a different kind of claim and worth keeping beside the other.
 DIAGRAM = HERE / "research.mmd"
 
-#: Every call is 208 arrows and nobody reads that. One level down from the
-#: shell is the story: workers, transitions, and the ports the engine
-#: reaches directly.
-DIAGRAM_DEPTH = 1
+#: Every call in the run is hundreds of arrows and nobody reads that. Two
+#: levels under the route is the story: the worker, its two halves, and
+#: the transitions they ask for.
+DIAGRAM_DEPTH = 2
+
+#: What calls `Routes.handle` in production, whoever sent the request. The
+#: note above each arrow says which route it was.
+CALLER = "CloudRun"
+
+#: Where this deployment answers. One service runs every function, which is
+#: the smallest shape that is still the real one.
+WORKER = "https://svc-abc.a.run.app/execute"
 CFG = KernelCfg(retry_timeout=30_000)
 
 
 def world():
-    """A lease shorter than the retry timeout, so the deadline actually
-    moves during the run and the arm/disarm path is in the trace. With
-    them equal — the old fixture — every deadline coincides and the timer
-    is armed once for the whole run."""
+    """One container, as it is deployed: `Routes` over the two simulated
+    ports, reached the way production reaches it.
+
+    Driving `Runtime` instead would be shorter and would record a path
+    that does not exist — it calls the worker directly, so `Routes` never
+    appears and the reviewed trace would be of the test harness rather
+    than of the service.
+
+    The lease is shorter than the retry timeout on purpose. With them
+    equal every deadline in the run coincides, `old != new` is never true,
+    and the arm/disarm path never happens at all.
+    """
     CALLS.clear()
     clock = Clock()
     store = tracing.watch(store_mem.Store(), store_spec.StoreP, "store")
     queue = tracing.watch(queue_mem.Queue(), queue_spec.QueueP, "queue")
-    engine = Engine(store, queue, CFG)
-    rt = Runtime(engine, queue, clock)
-    rt.serve(AGENT, Worker(engine, clock, "agent-1", ttl=20_000), research, agent)
-    rt.serve(SEARCH, Worker(engine, clock, "search-1", ttl=20_000), search)
-    return rt, clock
+    for fn in (research, agent, search):
+        route(fn, WORKER)
+    routes = Routes(store, queue, CFG, pid="rev-1", ttl=20_000, clock=clock)
+    return routes, queue, clock
+
+
+def deliver(routes, queue, clock, budget: int = 2_000) -> int:
+    """Cloud Tasks, as the only thing it is: a POST to a URL."""
+    for did in range(budget):
+        d = queue.take(clock())
+        if d is None:
+            return did
+        path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
+        body, status = routes.handle("POST", path, d.body)
+        assert status == 200, (path, status, body)
+        queue.ack(d, clock())
+    raise AssertionError("the queue never ran out of eligible work")
 
 
 def run() -> tracing.Trace:
-    rt, clock = world()
+    routes, queue, clock = world()
     with tracing.recording() as t:
-        rt.start(ORIGIN, research, QUESTION)
+        routes.handle("POST", "/", {
+            "kind": "promise.create",
+            "data": {"id": ORIGIN, "timeoutAt": 10 ** 12,
+                     "param": {"data": dumps({"f": "research", "a": [QUESTION]}).data},
+                     "tags": {TAG_TARGET: WORKER}}})
         for _ in range(12):
-            rt.drain()
+            deliver(routes, queue, clock)
             clock.advance(40_000)
-        rt.drain()
+        deliver(routes, queue, clock)
     return t
 
 
@@ -94,9 +128,9 @@ def run() -> tracing.Trace:
 
 
 def test_nothing_is_recorded_unless_someone_is_recording():
-    rt, clock = world()
-    rt.start(ORIGIN, research, QUESTION)
-    rt.drain()
+    routes, queue, clock = world()
+    routes.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
+    deliver(routes, queue, clock)
     with tracing.recording() as t:
         pass
     assert t.calls == [], "a recording that began after the run saw the run"
@@ -137,7 +171,7 @@ def test_the_log_is_in_call_order_not_return_order():
     the order a stack unwinds and the opposite of what happened."""
     t = run()
     first = t.calls[0]
-    assert first.depth == 0 and first.name == "Engine.process"
+    assert first.depth == 0 and first.name == "Routes.handle"
     assert t.calls[1].depth == 1, "the parent's first call comes after the parent"
 
 
@@ -231,7 +265,7 @@ def test_the_path_through_the_system_is_the_one_we_reviewed():
     got = t.tree()
     if os.environ.get("UPDATE_TRACE"):  # pragma: no cover - a person, deliberately
         GOLDEN.write_text(got + "\n")
-        DIAGRAM.write_text(t.sequence(depth=DIAGRAM_DEPTH) + "\n")
+        DIAGRAM.write_text(t.sequence(depth=DIAGRAM_DEPTH, caller=CALLER) + "\n")
         pytest.skip(f"rewrote {GOLDEN.name} and {DIAGRAM.name}; "
                     "read the diff before committing it")
     want = GOLDEN.read_text().rstrip("\n")
@@ -250,8 +284,8 @@ def test_the_reviewed_path_says_what_we_think_it_says():
     want = GOLDEN.read_text()
     assert want.count("\u2192 ") == want.count("\u2190 "), \
         "every call came back, or the trace is lying about something"
-    assert want.count("queue.create(url='worker://search'") == 3, \
-        "the fan-out dispatches three searches"
+    assert want.count("url='https://svc-abc") == 5, \
+        "five dispatches: the run, three searches, and the run again"
     assert want.count("= !Blocked") == 2, "and then blocks, out through both halves"
     assert want.count(", 'v15')") == 5 and want.count("if_match='v15'") == 1, \
         "the replay reads five promises back at one version and writes once"
@@ -262,19 +296,21 @@ def test_the_reviewed_path_says_what_we_think_it_says():
 def test_the_diagram_is_drawn_from_the_same_run():
     """Two renderings of one recording, so they cannot drift: if the path
     changes and only the text is regenerated, this says so."""
-    assert DIAGRAM.read_text().rstrip("\n") == run().sequence(depth=DIAGRAM_DEPTH)
+    assert DIAGRAM.read_text().rstrip("\n") == run().sequence(
+        depth=DIAGRAM_DEPTH, caller=CALLER)
 
 
 def test_every_delivery_says_what_caused_it():
-    """Five outer calls, five causes — and the three searches are three
-    deliveries even though they share a URL, so the heading prints per
-    delivery rather than per distinct cause."""
+    """Six arrivals: one client request and five queue deliveries. They
+    are separate arrivals even though five share a route, so the heading
+    prints per arrival rather than per distinct route."""
     trace = GOLDEN.read_text()
-    assert trace.count("[worker://search]") == 3
-    assert trace.count("[worker://agent]") == 2 and trace.count("[POST /]") == 1
+    assert trace.count("[POST /]") == 1, "the client starting the run"
+    assert trace.count("[POST /execute]") == 5, "and five deliveries from the queue"
+    assert "[POST /sweep" not in trace, "no deadline fired; nothing ran late"
     mmd = DIAGRAM.read_text()
-    assert mmd.count("Note over Runtime:") == 6, \
-        "the leftmost participant is a name the renderer chose; the cause is recorded"
+    assert mmd.count("Routes: handle(method='POST'") == 6, \
+        "and the diagram says which route each arrival was"
 
 
 def test_the_diagram_is_a_diagram():
@@ -290,7 +326,7 @@ def test_participants_are_ordered_by_who_calls_whom():
     only ever reaches through the engine."""
     order = [line.split()[-1] for line in DIAGRAM.read_text().split("\n")
              if line.strip().startswith("participant ")]
-    assert order == ["Runtime", "Worker", "Engine", "store", "queue"], order
+    assert order == ["CloudRun", "Routes", "Worker", "Engine", "store", "queue"], order
 
 
 def test_cutting_the_diagram_off_never_leaves_a_dangling_arrow():
@@ -329,7 +365,7 @@ def test_the_fingerprint_is_the_same_in_any_process(seed):
 def test_a_different_run_has_a_different_fingerprint():
     """A fingerprint that never moves is not a fingerprint."""
     one = run()
-    rt, clock = world()
+    routes, _, _ = world()
     with tracing.recording() as two:
-        rt.engine.process(PromiseGet("nothing"), 0)
+        routes.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
     assert one.fingerprint() != two.fingerprint()

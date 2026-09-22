@@ -216,8 +216,11 @@ class Trace:
             method = c.name.split(".", 1)[1] if "." in c.name else c.name
             if kind == "call":
                 if c.where and len(stack) == 1:
-                    # What caused this one. The leftmost participant is a
-                    # name the renderer chose; this is recorded.
+                    # A cause worth naming: a trace whose outermost frame
+                    # is not the route — one recorded from inside, say —
+                    # would otherwise not say what asked for the work. When
+                    # the route *is* the outermost frame its own arrow
+                    # already says it, and nothing is emitted here.
                     out.append(f"    Note over {caller}: {label(c.where, 40)}")
                 out.append(f"    {stack[-1]}->>+{who(c)}: {label(method + '(' + c.args + ')')}")
                 stack.append(who(c))

@@ -165,7 +165,7 @@ should not have to pretend.
 | `local.py` | the simulated world as a module, so `SIMULATED=1` runs the whole service on a laptop |
 | `tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
 | `test/research.trace` | the path one run takes through the system — every call in and every call out — reviewed and checked in. A change to it is a diff somebody has to accept |
-| `test/research.mmd` | the same run as a sequence diagram, generated rather than drawn. `SEQUENCE.md` says what the design means; this says what the code did |
+| `test/research.mmd` | the same run as a sequence diagram, generated rather than drawn, starting at `Routes.handle` because that is where a request arrives. `SEQUENCE.md` says what the design means; this says what the code did |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `runtime.py` | a worker, as post 002's two halves under its own names — `execute_until_blocked_outer` claims and decides, `execute_until_blocked_inner` runs the function — and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
