@@ -24,7 +24,7 @@ anything.
 
 A worker being an object rather than a process is the part worth pausing
 on. Cloud Tasks is push-only, so nothing here polls for work; a delivery
-arrives as an HTTP request, the handler hands it to `Worker.execute`, and
+arrives as an HTTP request, the handler hands it to the outer half, and
 the worker's whole life is that one call. Two "workers" running at once
 are two containers, each with its own `Service`, sharing nothing but the
 bucket.
