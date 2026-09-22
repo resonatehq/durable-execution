@@ -4,6 +4,31 @@ Four routes, one engine, and one rule about the order effects happen in.
 Everything below is what `app.py`, `engine.py` and `runtime.py` actually
 do; where a diagram says a name, it is the name in the code.
 
+## Who is who
+
+Only two of these lifelines are somewhere else. Everything in a shaded box
+is an object inside **one Cloud Run container**, drawn on its own line
+because it is worth seeing separately, not because a message to it crosses
+anything.
+
+| lifeline | what it actually is |
+|---|---|
+| **Cloud Tasks** | the queue, and the only thing that calls `/execute` and `/sweep`. A deadline and a dispatch are both tasks in it |
+| **GCS** | one object per origin, at `wf/{origin}`. The whole state of a run |
+| `handler` / `Service` | `app.py`. The HTTP entry point, and one `Service` built per container at import |
+| `Worker` | `runtime.Worker` — **an object, not a service**. `Service.worker`, built beside the engine in the same container and called in-process. It is post 002's outer half: acquire the task, run the function, then fulfil, suspend or release |
+| `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._run`. Ordinary async Python that mentions no promise, task or lease |
+| `Engine.process` | `engine.Engine`, in the same container again. The only thing that does I/O |
+| `kernel` | `handle_external` / `handle_internal`. A pure function: a document in, effects out |
+| `store_gcp`, `timer_gcp` | the two adapters, in-process clients for the two services that are not |
+
+A worker being an object rather than a process is the part worth pausing
+on. Cloud Tasks is push-only, so nothing here polls for work; a delivery
+arrives as an HTTP request, the handler hands it to `Worker.execute`, and
+the worker's whole life is that one call. Two "workers" running at once
+are two containers, each with its own `Service`, sharing nothing but the
+bucket.
+
 ---
 
 ## 1. What the function is
@@ -52,11 +77,13 @@ state, so the send goes last.
 sequenceDiagram
     autonumber
     actor C as Caller
-    participant H as handler / Service
-    participant E as Engine.process
-    participant K as kernel (pure)
-    participant S as store_gcp
-    participant T as timer_gcp
+    box rgba(128,128,128,0.08) one Cloud Run container
+        participant H as handler / Service
+        participant E as Engine.process
+        participant K as kernel (pure)
+    end
+    participant S as GCS<br/>via store_gcp
+    participant T as Cloud Tasks<br/>via timer_gcp
 
     C->>+H: POST /, {kind, data}
     H->>H: verify() — OIDC, for the queue's routes
@@ -92,7 +119,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant E as Engine.process
-    participant S as store_gcp
+    participant S as GCS<br/>via store_gcp
     actor C as Caller
 
     E->>S: put(..., if_match=generation)
@@ -124,10 +151,12 @@ the promise each call creates at its own position.
 sequenceDiagram
     autonumber
     participant Q as Cloud Tasks
-    participant H as handler
-    participant W as Worker
-    participant Fn as @resonate research
-    participant E as Engine
+    box rgba(128,128,128,0.08) one Cloud Run container — every arrow inside is a Python call
+        participant H as handler
+        participant W as Worker
+        participant Fn as @resonate research
+        participant E as Engine
+    end
 
     Q->>+H: POST /execute {task: {id, version}}
     H->>+W: execute(task_id, version)
@@ -190,22 +219,27 @@ due and the write law stops it writing.
 sequenceDiagram
     autonumber
     participant Q as Cloud Tasks
-    participant H as handler
-    participant E as Engine.process
-    participant K as kernel
-    participant T as timer_gcp
+    box rgba(128,128,128,0.08) one Cloud Run container
+        participant H as handler
+        participant E as Engine.process
+        participant K as kernel
+    end
+    participant S as GCS
 
     Q->>+H: POST /sweep/{origin}
     H->>+E: process(Timeout(origin), now)
+    E->>S: get("wf/{origin}")
     E->>+K: handle_internal(doc, now, cfg)
     Note over K: expire leases → re-pend those tasks<br/>reject promises past their timeout<br/>resolve the ones tagged as timers<br/>re-arm to the next deadline
     K-->>-E: effects
 
     alt nothing was due
-        Note over E: no write, no message, nothing
+        Note over E,S: no write, no message, nothing
     else something expired
-        E->>T: arm the next deadline
-        E->>T: commit, disarm, and dispatch what was re-pended
+        E->>Q: arm the next deadline
+        E->>S: put(if_match) — one write for the whole sweep
+        E->>Q: disarm the old deadline
+        E->>Q: dispatch whatever was re-pended
     end
     E-->>-H: Reply
     H-->>-Q: 200 {swept}
