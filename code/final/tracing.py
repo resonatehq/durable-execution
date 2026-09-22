@@ -189,9 +189,19 @@ class Trace:
             return call.name.split(".")[0]
 
         def clean(text: str) -> str:
-            """Quotes break Mermaid's parser and a newline breaks its
-            statement; a line separator survives to become a `<br/>`."""
-            return text.replace('"', "'").replace("\n", " \u2028")
+            """Three characters Mermaid will not take in a label.
+
+            A double quote closes a string, a newline ends a statement,
+            and a **semicolon** also ends a statement — so a label
+            containing one is read as a label plus whatever nonsense
+            follows. Found the hard way: a banner that said "left out;
+            research.trace has them" parsed as far as the semicolon and
+            then failed. Everything else that looked dangerous — `#`,
+            `%%`, `<`, `{`, `|`, `:`, even `->>` — turned out to be fine
+            inside a label, which is why the list is this short and no
+            shorter.
+            """
+            return text.replace('"', "'").replace("\n", " ").replace(";", ",")
 
         def label(text: str, room: int = 58) -> str:
             """An arrow has a width. Trim to it, and say so with an
@@ -240,11 +250,11 @@ class Trace:
         out += [f"    participant {p}" for p in order]
         if preamble is not None and order:
             # Not trimmed: the caller wrote it, and a note that says half
-            # of what it meant to is worse than no note. Mermaid clips a
-            # long note rather than wrapping it, so the caller's line
-            # breaks are kept as its own.
-            wrapped = clean(preamble.strip()).replace(" \u2028", "<br/>")
-            out.append(f"    Note over {caller},{order[-1]}: {wrapped}")
+            # of what it meant to is worse than no note. One note per
+            # line, because Mermaid clips a long one rather than wrapping
+            # it and rejects `<br/>` outright.
+            for line in preamble.strip().split("\n"):
+                out.append(f"    Note over {caller},{order[-1]}: {clean(line)}")
         stack = [caller]
         for kind, c in shown:
             method = c.name.split(".", 1)[1] if "." in c.name else c.name

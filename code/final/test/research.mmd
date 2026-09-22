@@ -5,7 +5,9 @@ sequenceDiagram
     participant Worker
     participant Durable
     participant Engine
-    Note over CloudRun,Engine: the store and the queue are left out; research.trace has all 65 calls to them<br/>a task created on the queue arrives later as a new request, delivered by<br/>Cloud Tasks from another process — that hop is in neither
+    Note over CloudRun,Engine: the store and the queue are left out, research.trace has all 65 calls to them
+    Note over CloudRun,Engine: a task created on the queue arrives later as a new request, delivered by
+    Note over CloudRun,Engine: Cloud Tasks from another process — that hop is in neither
     CloudRun->>+Routes: handle(method='POST', path='/', body={'kind': 'promise.cr…
     Routes->>+Engine: process(msg=PromiseCreate(id='research.1', ...), now=0)
     Engine-->>-Routes: Reply(status=200, ...)

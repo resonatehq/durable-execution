@@ -25,9 +25,12 @@ behaviour, which is what `sorted(t.resumes)` in the codec exists to stop.
 from __future__ import annotations
 
 import difflib
+import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -347,6 +350,38 @@ def test_the_diagram_names_the_hop_it_cannot_show():
     assert "Note over CloudRun,Engine:" in mmd
     assert "another process" in mmd
     assert "handle(method='POST', path='/execute'" in mmd
+
+
+def test_mermaid_can_actually_read_the_diagram():
+    """The one check that is not me marking my own homework.
+
+    Everything else here asks whether the file obeys rules this project
+    invented — arrows balance, participants ordered, ports absent. None of
+    them notice a file Mermaid refuses. A banner containing a semicolon
+    once shipped broken because I had been rendering by hand after every
+    change and, the one time I did not, nothing failed.
+
+    Skipped where `npx` is unavailable, so it costs an offline machine
+    nothing and a machine with a network the truth.
+    """
+    if shutil.which("npx") is None:  # pragma: no cover - no node here
+        pytest.skip("needs npx to run mermaid")
+    with tempfile.TemporaryDirectory() as tmp:
+        # mermaid-cli drives a headless browser, which refuses to start as
+        # root without this. Not a security decision: it renders one local
+        # file we just wrote.
+        config = Path(tmp) / "puppeteer.json"
+        config.write_text(json.dumps({"args": ["--no-sandbox"]}))
+        done = subprocess.run(
+            ["npx", "-y", "@mermaid-js/mermaid-cli@11", "-p", str(config),
+             "-i", str(DIAGRAM), "-o", str(Path(tmp) / "check.svg")],
+            capture_output=True, text=True, timeout=600)
+    if "Parse error" in done.stdout + done.stderr:
+        pytest.fail("mermaid cannot read the generated diagram:\n"
+                    + (done.stdout + done.stderr).split("Expecting")[0])
+    if done.returncode != 0 and "Failed to launch" in done.stdout + done.stderr:
+        pytest.skip("mermaid is installed but cannot start a browser here")
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 def test_the_diagram_is_a_diagram():
