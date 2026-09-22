@@ -19,16 +19,39 @@ from kernel import (
     Value,
     check_invariants,
 )
-from ports import Conflict, Crash, Fault, MemoryTimers, MemoryTransport
+from ports import Conflict, Crash, Fault
+from queue_mem import Queue
+from queues import SWEEP
 from store_mem import Store
+from wire import decode_message
 
 W = "http://w"
 CFG = KernelCfg(retry_timeout=30_000)
 
 
 def build(fault=None):
-    store, timers, transport = Store(fault), MemoryTimers(fault), MemoryTransport(fault)
-    return Engine(store, timers, transport, CFG), store, timers, transport
+    store, queue = Store(fault), Queue(fault=fault)
+    return Engine(store, queue, CFG), store, queue
+
+
+def armed(q):
+    """The deadlines the queue is holding, by name.
+
+    A deadline and a dispatch are the same kind of task, so what tells them
+    apart here is what tells them apart in production: where the task is
+    addressed. `sweep/{origin}` comes back to this service.
+    """
+    return {n: (e.url[len(SWEEP):], e.not_before)
+            for n, e in q.entries.items() if e.url.startswith(SWEEP)}
+
+
+def sent(q):
+    """The dispatches, decoded, and taken off the queue."""
+    out = [(e.url, decode_message(e.body)) for e in q.entries.values()
+           if not e.url.startswith(SWEEP)]
+    for n in [n for n, e in q.entries.items() if not e.url.startswith(SWEEP)]:
+        q.entries.pop(n)
+    return out
 
 
 def create(id, to=100_000, tags=None):
@@ -51,7 +74,7 @@ def substance(doc):
 
 
 def test_a_document_round_trips_and_its_bytes_are_stable():
-    e, store, _, _ = build()
+    e, store, q = build()
     e.process(create("o:a"), 0)
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 10)
     e.process(PromiseRegisterListener("o:a", "http://l"), 20)
@@ -95,7 +118,7 @@ def test_the_origin_is_read_off_whichever_id_the_message_carries():
 
 
 def test_a_read_that_changes_nothing_writes_nothing():
-    e, store, _, _ = build()
+    e, store, q = build()
     e.process(create("o:a"), 0)
     before = store.objects[doc_key("o")]
     assert e.process(PromiseGet("o:a"), 1).status == 200
@@ -103,7 +126,7 @@ def test_a_read_that_changes_nothing_writes_nothing():
 
 
 def test_a_read_past_a_deadline_does_write_because_it_settles():
-    e, store, _, _ = build()
+    e, store, q = build()
     e.process(create("o:a", to=1_000), 0)
     version = store.objects[doc_key("o")][1]
     assert e.process(PromiseGet("o:a"), 5_000).data["promise"]["state"] == "rejected_timedout"
@@ -111,7 +134,7 @@ def test_a_read_past_a_deadline_does_write_because_it_settles():
 
 
 def test_the_clock_alone_is_not_worth_a_write():
-    e, store, _, _ = build()
+    e, store, q = build()
     e.process(create("o:a"), 0)
     before = store.objects[doc_key("o")]
     e.process(PromiseGet("o:a"), 999)
@@ -119,7 +142,7 @@ def test_the_clock_alone_is_not_worth_a_write():
 
 
 def test_a_regressed_clock_cannot_un_expire_anything():
-    e, store, _, _ = build()
+    e, store, q = build()
     e.process(create("o:a", to=1_000), 0)
     e.process(PromiseGet("o:a"), 5_000)  # settles it, and folds the clock to 5_000
     assert read(store).clock == 5_000
@@ -132,33 +155,35 @@ def test_a_regressed_clock_cannot_un_expire_anything():
 
 def test_the_effects_go_in_the_order_every_crash_window_survives():
     fault = Fault()
-    e, store, timers, transport = build(fault)
+    e, store, q = build(fault)
     e.process(create("o:a"), 0)
-    assert fault.log == ["arm o at 30000", f"commit {doc_key('o')}", "send to http://w"]
+    # An arm and a send are the same call to the same port, told apart the
+    # way the deployment tells them apart: by where the task is addressed.
+    assert fault.log == ["create sweep/o", f"commit {doc_key('o')}", "create http://w"]
 
     fault.log = []
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 100)
     # The lease is armed before the commit, and the retry it replaces is only
     # removed once the commit that owned it is gone.
-    assert fault.log == ["arm o at 5100", f"commit {doc_key('o')}", "disarm timer-1"]
-    assert list(timers.armed.values()) == [("o", 5_100)], "one deadline per origin"
+    assert fault.log == ["create sweep/o", f"commit {doc_key('o')}", "delete task-1"]
+    assert list(armed(q).values()) == [("o", 5_100)], "one deadline per origin"
 
 
 def test_a_disarm_names_the_deadline_its_own_predecessor_armed():
-    e, store, timers, _ = build()
+    e, store, q = build()
     e.process(create("o:a"), 0)
     first = read(store).timer_name
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 100)
-    assert first not in timers.armed and read(store).timer_name in timers.armed
+    assert first not in armed(q) and read(store).timer_name in armed(q)
 
 
 # --- losing a race ---------------------------------------------------------
 
 
 def test_a_second_writer_on_a_stale_generation_is_refused():
-    store, timers, transport = Store(), MemoryTimers(), MemoryTransport()
-    a = Engine(store, timers, transport, CFG)
-    b = Engine(store, timers, transport, CFG)
+    store, queue = Store(), Queue()
+    a = Engine(store, queue, CFG)
+    b = Engine(store, queue, CFG)
     a.process(create("o:a"), 0)
     # Both read the same version; the first to write wins.
     body, version = store.get(doc_key("o"))
@@ -175,7 +200,7 @@ def test_a_conflict_reaches_the_caller_rather_than_being_retried_here():
         def put(self, key, body, **conditions):
             raise Conflict("someone else got there first")
 
-    e = Engine(Racing(), MemoryTimers(), MemoryTransport(), CFG)
+    e = Engine(Racing(), Queue(), CFG)
     with pytest.raises(Conflict):
         e.process(create("o:a"), 0)
 
@@ -197,41 +222,41 @@ def run_script(e, script):
         e.process(msg, now)
 
 
-def settle_down(e, timers, now, limit=20):
-    """Fire every deadline that is due, as a timer eventually would. Each
-    re-arm is strictly in the future, so this terminates."""
+def settle_down(e, q, now, limit=20):
+    """Deliver every deadline that is due, as the queue eventually would.
+    Each re-arm is strictly in the future, so this terminates."""
     for _ in range(limit):
-        due = timers.due(now)
+        due = [(n, o) for n, (o, at) in armed(q).items() if at <= now]
         if not due:
             return
         for name, origin in due:
-            timers.armed.pop(name, None)
+            q.entries.pop(name, None)
             e.process(Timeout(origin), now)
     raise AssertionError("the sweep did not settle down")
 
 
 def test_the_clean_run_is_what_a_crashed_one_must_reach():
-    e, store, timers, transport = build()
+    e, store, q = build()
     run_script(e, SCRIPT)
     doc = read(store)
     assert doc.get("o:a").promise.state == RESOLVED
     assert doc.get("o:a").task.state == T_FULFILLED
-    assert doc.timer_at is None and not timers.armed, "nothing left armed"
-    assert any(a == "http://l" for a, _ in transport.sent), "the listener heard"
+    assert doc.timer_at is None and not armed(q), "nothing left armed"
+    assert any(a == "http://l" for a, _ in sent(q)), "the listener heard"
 
 
 @pytest.mark.parametrize("k", range(12))
 def test_stopping_at_any_effect_leaves_something_that_repairs_itself(k):
     """Cut the power at the k-th write the engine attempts, anywhere across
-    the store, the timers and the transport. Then do what the world does: the
+    the store and the queue. Then do what the world does: the
     caller retries its request, and the deadlines fire. The run must reach the
     same promises and tasks as one that was never interrupted."""
-    clean_engine, clean_store, _, _ = build()
+    clean_engine, clean_store, _ = build()
     run_script(clean_engine, SCRIPT)
     want = substance(read(clean_store))
 
     fault = Fault()
-    e, store, timers, _ = build(fault)
+    e, store, q = build(fault)
     fault.crash_after(k)
     crashed_at = None
     for i, (msg, now) in enumerate(SCRIPT):
@@ -249,7 +274,7 @@ def test_stopping_at_any_effect_leaves_something_that_repairs_itself(k):
     fault.heal()
     for msg, now in SCRIPT[crashed_at:]:
         e.process(msg, now)
-    settle_down(e, timers, 10_000_000)
+    settle_down(e, q, 10_000_000)
     assert substance(read(store)) == want
 
 
@@ -259,7 +284,7 @@ def test_a_write_that_landed_but_reported_failure_is_recovered_by_a_retry():
     operation is idempotent — the retry reads the promise its own lost write
     created."""
     fault = Fault()
-    e, store, _, _ = build(fault)
+    e, store, q = build(fault)
     store.land_then_fail = True
     fault.crash_after(1)  # let the arm through, land the commit, then fail
     with pytest.raises(Crash):
@@ -273,11 +298,11 @@ def test_a_write_that_landed_but_reported_failure_is_recovered_by_a_retry():
 def test_an_orphan_deadline_fires_into_a_sweep_that_writes_nothing():
     """What is left when the power goes out between arming and committing."""
     fault = Fault()
-    e, store, timers, _ = build(fault)
+    e, store, q = build(fault)
     fault.crash_after(1)  # the arm lands, the commit does not
     with pytest.raises(Crash):
         e.process(create("o:a"), 0)
-    assert timers.armed and store.objects == {}, "a deadline nothing points at"
+    assert armed(q) and store.objects == {}, "a deadline nothing points at"
     fault.heal()
     e.process(Timeout("o"), 10_000_000)
     assert store.objects == {}, "the sweep found nothing due and wrote nothing"
@@ -289,18 +314,18 @@ def test_an_orphan_deadline_fires_into_a_sweep_that_writes_nothing():
 def test_a_remote_call_through_the_engine():
     """Post 002, over a bucket: the caller suspends, another worker settles
     the callee, and the settle is what dispatches the caller again."""
-    e, store, timers, transport = build()
+    e, store, q = build()
     e.process(create("run"), 0)
-    assert transport.take() == [(W, Execute("run", 0))], "the run is offered"
+    assert sent(q) == [(W, Execute("run", 0))], "the run is offered"
 
     e.process(TaskAcquire("run", 0, "w1", 5_000), 1)
     e.process(create("run:1"), 2)                                  # durable() creates the rpc
-    assert transport.take() == [(W, Execute("run:1", 0))]
+    assert sent(q) == [(W, Execute("run:1", 0))]
     e.process(TaskSuspend("run", 1, ("run:1",)), 3)                 # Blocked: park
 
     e.process(TaskAcquire("run:1", 0, "w2", 5_000), 4)             # another worker takes it
     e.process(TaskFulfill("run:1", 1, PromiseSettle("run:1", RESOLVED, Value(data="42"))), 5)
-    assert transport.take() == [(W, Execute("run", 1))], "the settle woke the caller"
+    assert sent(q) == [(W, Execute("run", 1))], "the settle woke the caller"
 
     e.process(TaskAcquire("run", 1, "w3", 5_000), 6)               # any worker resumes it
     replay = e.process(create("run:1"), 7)                         # replay: create is a read
@@ -309,4 +334,4 @@ def test_a_remote_call_through_the_engine():
 
     doc = read(store, "run")
     assert doc.get("run").promise.state == RESOLVED
-    assert doc.timer_at is None and not timers.armed
+    assert doc.timer_at is None and not armed(q)

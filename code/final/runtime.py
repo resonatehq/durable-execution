@@ -9,11 +9,11 @@
       + release-> task.suspend              it raised Blocked
     release    -> task.release              it raised something else
 
-`Runtime` is what a bucket, a queue and a clock add up to in one process: it
-hands execute messages to whichever worker serves the address, fires
-deadlines that have come due, and stops when there is nothing left to do.
-In production those three are Cloud Tasks and a timer; here they are a list
-and a heap, which is what makes a whole run a unit test.
+`Runtime` is what a store, a queue and a clock add up to in one process: it
+takes what the queue is willing to deliver, turns each URL back into the
+call the Cloud Run route would make, and acknowledges whatever answered. In
+production that loop is Cloud Tasks and those routes are HTTP; here they
+are a dict and a method call, which is what makes a whole run a unit test.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from kernel import (
     TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend, Unblock, Value,
 )
 from ports import Conflict, Unavailable
+from queues import SWEEP
 from sdk import (
     _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
     loads, route,
@@ -118,67 +119,7 @@ class Worker:
 
 @dataclass
 class Runtime:
-    engine: Any
-    timers: Any
-    transport: Any
-    clock: Clock
-    workers: dict[str, Worker] = field(default_factory=dict)
-    #: Everything an `unblock` delivered, by promise id. What a client that
-    #: registered a listener would have received.
-    notified: dict[str, dict] = field(default_factory=dict)
-
-    def serve(self, address: str, worker: Worker, *functions) -> None:
-        """Put a worker at an address, and say which functions run there.
-        The routing is deployment rather than definition: the same function
-        is a local call on one machine and a remote one seen from another."""
-        self.workers[address] = worker
-        for fn in functions:
-            route(fn, address)
-
-    def start(self, id: str, fn, *args, timeout: int = 10 ** 9) -> None:
-        """Create the run's own promise. It carries a target, so the engine
-        dispatches it and a worker picks it up on the next drain."""
-        from sdk import TARGETS
-        target = TARGETS.get(fn.name)
-        if target is None:
-            raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
-        self.engine.process(PromiseCreate(
-            id, self.clock() + timeout, dumps({"f": fn.name, "a": args}),
-            {TAG_TARGET: target}), self.clock())
-
-    def step(self) -> bool:
-        """One unit of work: deliver what is queued, or fire the nearest
-        deadline that is due. False when there is nothing to do."""
-        messages = self.transport.take()
-        if messages:
-            for address, msg in messages:
-                if isinstance(msg, Execute):
-                    worker = self.workers.get(address)
-                    if worker is not None:
-                        worker.execute(msg.task_id, msg.version)
-                elif isinstance(msg, Unblock):
-                    self.notified[msg.promise["id"]] = msg.promise
-            return True
-        due = self.timers.due(self.clock())
-        if not due:
-            return False
-        name, origin = due[0]
-        self.timers.armed.pop(name, None)
-        self.engine.process(Timeout(origin), self.clock())
-        return True
-
-    def drain(self, budget: int = 500) -> int:
-        """Step until there is nothing left. Returns how many steps it took,
-        so a test can tell the difference between quiet and stuck."""
-        for did in range(budget):
-            if not self.step():
-                return did
-        raise AssertionError("the runtime did not settle down")
-
-
-@dataclass
-class CloudRuntime:
-    """The same world, over one queue instead of two gadgets.
+    """One process playing the parts Cloud Run and Cloud Tasks play.
 
     Everything is a delivery to a URL, which is what Cloud Tasks does: a
     deadline is a POST to the sweep endpoint for an origin, a dispatch is a
@@ -187,6 +128,12 @@ class CloudRuntime:
 
     A handler that answers is acknowledged. One that cannot is not, and the
     queue decides whether to try again or give up, exactly as it would.
+
+    There used to be a second runtime here, carrying messages in a list and
+    firing deadlines from a heap. It existed only because the engine had
+    two ports and they had two well-behaved in-memory gadgets. The engine
+    has one port now, so there is one runtime, and it is the one whose
+    failures are real.
     """
 
     engine: Any
@@ -212,8 +159,6 @@ class CloudRuntime:
 
     def handle(self, delivery) -> bool:
         """What the URL means. Returns whether the handler answered."""
-        from timer import SWEEP
-
         if delivery.url.startswith(SWEEP):
             self.swept += 1
             self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())

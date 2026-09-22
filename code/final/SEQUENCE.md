@@ -20,7 +20,7 @@ anything.
 | `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._run`. Ordinary async Python that mentions no promise, task or lease |
 | `Engine.process` | `engine.Engine`, in the same container again. The only thing that does I/O |
 | `kernel` | `handle_external` / `handle_internal`. A pure function: a document in, effects out |
-| `store_gcp`, `timer_gcp` | the two adapters, in-process clients for the two services that are not |
+| `store_gcp`, `queue_gcp` | the two adapters, in-process clients for the two services that are not |
 
 A worker being an object rather than a process is the part worth pausing
 on. Cloud Tasks is push-only, so nothing here polls for work; a delivery
@@ -83,7 +83,7 @@ sequenceDiagram
         participant K as kernel (pure)
     end
     participant S as GCS<br/>via store_gcp
-    participant T as Cloud Tasks<br/>via timer_gcp
+    participant T as Cloud Tasks<br/>via queue_gcp
 
     C->>+H: POST /, {kind, data}
     H->>H: verify() — OIDC, for the queue's routes
@@ -249,7 +249,7 @@ A dropped `/execute` is recoverable: the task's retry deadline was
 committed before the message left. A dropped `/sweep` is not, because the
 deadline it carried is the only thing that was going to fire. A deployment
 owes this either a generous retry policy or a periodic sweep over the
-bucket that depends on no single queued task — `test_timer.py` demonstrates
+bucket that depends on no single queued task — `test_queue.py` demonstrates
 the hole and the remedy beside it.
 
 ---

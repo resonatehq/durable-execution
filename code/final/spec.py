@@ -46,8 +46,10 @@ from kernel import (
     PromiseSettle, Reply, Req, Send, TaskAcquire, TaskFulfill, TaskSuspend,
     Value, check_invariants,
 )
-from ports import Conflict, Fault, MemoryTimers, MemoryTransport, Timers, Transport, Violation
+from ports import Conflict, Fault, Violation
+from queues import SWEEP, QueueP
 from store import StoreP
+from wire import decode_message
 
 
 class _Recorded:
@@ -75,6 +77,31 @@ class _Recorded:
 
     def list(self, prefix, limit):
         return self.inner.list(prefix, limit)
+
+
+class _Watched:
+    """Any `QueueP`, with what it was asked to carry written down.
+
+    The catalogue reads an outbox of typed messages, and what actually goes
+    on a queue is JSON at a URL. Decoding it back is not a detour around
+    the seam, it is the seam being checked: what the engine really wrote
+    has to be what the specification is talking about.
+    """
+
+    def __init__(self, inner: QueueP) -> None:
+        self.inner, self.sent = inner, []
+
+    def create(self, url, body, *, not_before=0):
+        if not url.startswith(SWEEP):
+            self.sent.append(Send(url, decode_message(body)))
+        return self.inner.create(url, body, not_before=not_before)
+
+    def delete(self, name):
+        return self.inner.delete(name)
+
+    def take(self) -> list:
+        out, self.sent = self.sent, []
+        return out
 
 
 #: Everything an engine can be asked to do. A protocol request, which a
@@ -110,7 +137,7 @@ class EngineP(Protocol):
 
 
 class EngineC(Protocol):
-    """How an engine is made: the three ports, and the dials.
+    """How an engine is made: the two ports, and the dials.
 
     The ports are arguments rather than imports because the suite below has
     to supply them. That is not a testing convenience — it is the same seam
@@ -118,12 +145,12 @@ class EngineC(Protocol):
     a simulation, and it is why a simulated run is a real run.
     """
 
-    def __call__(self, store: StoreP, timers: Timers, transport: Transport,
+    def __call__(self, store: StoreP, queue: QueueP,
                  cfg: KernelCfg = ..., prefix: str = ...) -> EngineP: ...
 
-    # This signature is real: every engine takes the same three ports,
-    # because they are an interface rather than a configuration. `StoreC`
-    # and `TimerC` cannot say as much, and say so.
+    # This signature is real: every engine takes the same two ports,
+    # because a port is an interface rather than a configuration. `StoreC`
+    # and `QueueC` cannot say as much, and say so.
 
 
 class EngineM(Protocol):
@@ -190,6 +217,23 @@ def _substance(doc: Document) -> tuple:
     return ([(o.id, o.promise, o.task) for o in doc.objects], doc.timer_at)
 
 
+def _kind(write: str) -> str:
+    """What a line of the write log was.
+
+    An arm and a send are the same call to the same port — `create` — so
+    they are told apart the way the deployment tells them apart: by where
+    the task is addressed. That is a better question than which method the
+    engine reached for, because it is what the queue will actually see.
+    """
+    if write.startswith("commit "):
+        return "commit"
+    if write.startswith("delete "):
+        return "disarm"
+    if write.startswith("create "):
+        return "arm" if write[len("create "):].startswith(SWEEP) else "send"
+    return "?"
+
+
 def _effect_order(segment: list[str]) -> str | None:
     """Arm, commit, disarm, send, and nothing out of place.
 
@@ -198,19 +242,20 @@ def _effect_order(segment: list[str]) -> str | None:
     committed nothing owes nothing: no deadline armed for a document that did
     not change, and no message for a transition that did not happen.
     """
-    commits = [i for i, w in enumerate(segment) if w.startswith("commit")]
+    kinds = [_kind(w) for w in segment]
+    commits = [i for i, k in enumerate(kinds) if k == "commit"]
     if len(commits) > 1:
         return f"{len(commits)} writes for one message; a transition is one commit"
     if not commits:
         return None if not segment else f"effects without a commit: {segment}"
-    before, after = segment[: commits[0]], segment[commits[0] + 1:]
-    if not all(w.startswith("arm") for w in before):
-        return f"something other than an arm before the commit: {before}"
+    before, after = kinds[: commits[0]], kinds[commits[0] + 1:]
+    if any(k != "arm" for k in before):
+        return f"something other than an arm before the commit: {segment}"
     i = 0
-    while i < len(after) and after[i].startswith("disarm"):
+    while i < len(after) and after[i] == "disarm":
         i += 1
-    if not all(w.startswith("send") for w in after[i:]):
-        return f"a disarm after a send, or worse: {after}"
+    if any(k != "send" for k in after[i:]):
+        return f"a disarm after a send, or worse: {segment}"
     return None
 
 
@@ -236,13 +281,14 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
     one; hand it `store_gcp.Store` and the same suite grades the same engine
     through the seam it will really run on.
     """
+    import queue_mem
     import store_mem  # here, so `store.py` may import this module's Violation
 
     script = STANDARD_SCRIPT if script is None else script
     fault = Fault()  # not injecting: used here only as the log of what was written
     store = _Recorded(store_mem.Store() if store is None else store, fault)
-    timers, transport = MemoryTimers(fault), MemoryTransport(fault)
-    engine = module.Engine(store, timers, transport, cfg)
+    queue = _Watched(queue_mem.Queue(fault=fault))
+    engine = module.Engine(store, queue, cfg)
     out: list[Violation] = []
     state = P.State(Document(), retry_timeout=cfg.retry_timeout)
     key = doc_key(origin)
@@ -268,9 +314,7 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
 
         if (bad := check_invariants(doc)) is not None:
             out.append(Violation(step, label, f"committed a document that is not well formed: {bad}"))
-        # The transport carries (address, message); the catalogue reads the
-        # outbox the kernel emitted, so the pairs go back into `Send`.
-        nxt = state.after(doc, [Send(a, m) for a, m in transport.take()])
+        nxt = state.after(doc, queue.take())
         for bad in P.state_failures(now, nxt):
             out.append(Violation(step, label, bad))
         for bad in P.trans_failures(now, state, nxt):

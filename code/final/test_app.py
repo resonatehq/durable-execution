@@ -26,8 +26,8 @@ from runtime import Clock
 from sdk import dumps, route
 from store_mem import Store
 from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
-from timer import SWEEP
-from timer_mem import Timer
+from queue_mem import Queue
+from queues import SWEEP
 
 CFG = KernelCfg(retry_timeout=30_000)
 
@@ -38,16 +38,16 @@ WORKER = "https://svc-abc.a.run.app/execute"
 
 
 def service(**knobs):
-    """One container instance, one store, one timer."""
+    """One container instance, one store, one queue."""
     CALLS.clear()
-    store, timer, clock = Store(), Timer(**knobs), Clock()
-    svc = Service(store, timer, CFG, pid="rev-1", ttl=60_000, clock=clock)
+    store, queue, clock = Store(), Queue(**knobs), Clock()
+    svc = Service(store, queue, CFG, pid="rev-1", ttl=60_000, clock=clock)
     for fn in (research, agent, search):
         route(fn, WORKER)
-    return svc, store, timer, clock
+    return svc, store, queue, clock
 
 
-def deliver(svc: Service, timer: Timer, clock: Clock, budget: int = 2_000) -> int:
+def deliver(svc: Service, queue: Queue, clock: Clock, budget: int = 2_000) -> int:
     """Cloud Tasks, as the only thing it is: a POST to a URL.
 
     A delivery's url is either this service's `/execute` or the sweep path
@@ -55,21 +55,21 @@ def deliver(svc: Service, timer: Timer, clock: Clock, budget: int = 2_000) -> in
     does in production and all it does.
     """
     for did in range(budget):
-        d = timer.take(clock())
+        d = queue.take(clock())
         if d is None:
             return did
         path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
         body, status = svc.handle("POST", path, d.body)
         assert status == 200, (path, status, body)
-        timer.ack(d, clock())
+        queue.ack(d, clock())
     raise AssertionError("the queue never ran out of eligible work")
 
 
-def settle(svc, timer, clock, rounds: int = 12) -> None:
+def settle(svc, queue, clock, rounds: int = 12) -> None:
     for _ in range(rounds):
-        deliver(svc, timer, clock)
+        deliver(svc, queue, clock)
         clock.advance(40_000)
-    deliver(svc, timer, clock)
+    deliver(svc, queue, clock)
 
 
 def post(svc: Service, kind: str, **data):
@@ -201,11 +201,11 @@ def test_a_duplicate_dispatch_is_answered_rather_than_retried():
     """At-least-once means the same `execute` arrives twice. The second
     finds the task claimed at a version it does not hold, and that refusal
     is a 200: delivering it a third time would not change anything."""
-    svc, _, timer, clock = service()
+    svc, _, queue, clock = service()
     post(svc, "promise.create", id="w.1", timeoutAt=clock() + 1_000_000,
          param={"data": json.dumps({"f": "search", "a": ["sagas"]})},
          tags={TAG_TARGET: WORKER})
-    dispatch = timer.take(clock())
+    dispatch = queue.take(clock())
     assert dispatch is not None and dispatch.url == WORKER
 
     first, status = svc.handle("POST", "/execute", dispatch.body)
@@ -256,9 +256,9 @@ def start(svc, clock, question: str = QUESTION) -> None:
 
 
 def test_the_research_agent_runs_end_to_end_through_the_service():
-    svc, store, timer, clock = service()
+    svc, store, queue, clock = service()
     start(svc, clock)
-    settle(svc, timer, clock)
+    settle(svc, queue, clock)
     settled = root(store)
     assert settled.state == "resolved", settled.state
     assert json.loads(settled.value.data) == EXPECTED
@@ -266,30 +266,30 @@ def test_the_research_agent_runs_end_to_end_through_the_service():
 
 
 def test_it_still_runs_when_every_delivery_happens_twice():
-    svc, store, timer, clock = service(duplicate=1.0, backoff=100)
+    svc, store, queue, clock = service(duplicate=1.0, backoff=100)
     start(svc, clock)
-    settle(svc, timer, clock, rounds=30)
+    settle(svc, queue, clock, rounds=30)
     assert json.loads(root(store).value.data) == EXPECTED
     assert dict(CALLS) == DONE, "something was paid for twice"
-    assert timer.delivered > 12, "the duplicates did not happen"
+    assert queue.delivered > 12, "the duplicates did not happen"
 
 
 @pytest.mark.parametrize("seed", range(4))
 def test_it_still_runs_over_a_queue_that_is_late_out_of_order_and_lossy(seed):
-    svc, store, timer, clock = service(
+    svc, store, queue, clock = service(
         seed=seed, duplicate=0.4, shuffle=True, lateness=500, lose=0.3, backoff=100)
     start(svc, clock)
     for _ in range(40):
         while True:
-            d = timer.take(clock())
+            d = queue.take(clock())
             if d is None:
                 break
-            if timer.loses_this_one():
-                timer.nack(d, clock())
+            if queue.loses_this_one():
+                queue.nack(d, clock())
                 continue
             path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
             assert svc.handle("POST", path, d.body)[1] == 200
-            timer.ack(d, clock())
+            queue.ack(d, clock())
         clock.advance(40_000)
     assert json.loads(root(store).value.data) == EXPECTED
     assert dict(CALLS) == DONE

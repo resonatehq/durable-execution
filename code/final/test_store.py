@@ -80,7 +80,7 @@ def test_every_write_is_counted_once():
     fault.crash_after(10)
     s.put("wf/o", "one", if_absent=True)
     s.delete("wf/o")
-    assert fault.log == ["commit wf/o", "delete wf/o"]
+    assert fault.log == ["commit wf/o", "remove wf/o"]
 
 
 def test_a_store_with_no_fault_never_faults():

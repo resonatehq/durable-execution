@@ -1,4 +1,4 @@
-"""The simulated timer, and the research agent run over an unkind one.
+"""The simulated queue, and the research agent run over an unkind one.
 
 A store that refuses a write is one failure. A queue has four, and they are
 the ones the protocol's fencing and idempotence were built for: the same
@@ -12,40 +12,40 @@ import json
 
 import pytest
 
-import timer as timer_spec
-import timer_mem
+import queue_mem
+import queues as queue_spec
 from codec import decode, doc_key
 from engine import Engine
 from kernel import KernelCfg
-from runtime import CloudRuntime, Clock, Worker
+from queue_mem import Delivery, Queue
+from queues import SWEEP
+from runtime import Clock, Runtime, Worker
 from store_mem import Store
 from test_e2e import (
     AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, agent, research, search,
 )
-from timer import SWEEP, Timers, Transport
-from timer_mem import Delivery, Timer
 
 CFG = KernelCfg(retry_timeout=30_000)
 
 
-# --- the timer on its own --------------------------------------------------
+# --- the queue on its own --------------------------------------------------
 
 
-def test_the_simulated_timer_satisfies_the_contract():
-    """The same claims `timer_gcp` is held to. Everything below is about
+def test_the_simulated_queue_satisfies_the_contract():
+    """The same claims `queue_gcp` is held to. Everything below is about
     what a simulator can do that a real queue cannot be asked to."""
-    assert timer_spec.conformance(timer_mem) == []
+    assert queue_spec.conformance(queue_mem) == []
 
 
 def test_nothing_is_eligible_before_its_time():
-    q = Timer()
+    q = Queue()
     q.create("sweep/o", {}, not_before=500)
     assert q.take(499) is None
     assert q.take(500) is not None
 
 
 def test_an_acknowledged_task_is_gone():
-    q = Timer()
+    q = Queue()
     q.create("w", "hello")
     d = q.take(0)
     q.ack(d, 0)
@@ -55,7 +55,7 @@ def test_an_acknowledged_task_is_gone():
 def test_a_lost_acknowledgement_is_a_second_delivery():
     """At-least-once, stated as what actually happens: the handler ran, and
     the queue never found out."""
-    q = Timer(duplicate=1.0, backoff=10)
+    q = Queue(duplicate=1.0, backoff=10)
     q.create("w", "hello")
     first = q.take(0)
     q.ack(first, 0)
@@ -66,7 +66,7 @@ def test_a_lost_acknowledgement_is_a_second_delivery():
 
 
 def test_a_task_that_is_never_answered_is_eventually_dropped():
-    q = Timer(give_up_after=3, backoff=10)
+    q = Queue(give_up_after=3, backoff=10)
     q.create("w", "hello")
     now = 0
     for _ in range(3):
@@ -78,18 +78,18 @@ def test_a_task_that_is_never_answered_is_eventually_dropped():
 
 
 def test_deleting_cancels_a_deadline():
-    q = Timer()
+    q = Queue()
     name = q.create("sweep/o", {}, not_before=100)
     q.delete(name)
     assert q.take(1_000) is None
 
 
 def test_deleting_what_is_gone_succeeds():
-    Timer().delete("task-99")
+    Queue().delete("task-99")
 
 
 def test_the_order_is_nobody_s_promise():
-    q = Timer(seed=7, shuffle=True)
+    q = Queue(seed=7, shuffle=True)
     for i in range(6):
         q.create(f"w{i}", i)
     out = [q.take(0) for _ in range(6)]
@@ -104,13 +104,13 @@ def test_the_order_is_nobody_s_promise():
 def cloud(**knobs):
     CALLS.clear()
     store = Store()
-    timer = Timer(**knobs)
+    queue = Queue(**knobs)
     clock = Clock()
-    engine = Engine(store, Timers(timer), Transport(timer), CFG)
-    rt = CloudRuntime(engine, timer, clock)
+    engine = Engine(store, queue, CFG)
+    rt = Runtime(engine, queue, clock)
     rt.serve(AGENT, Worker(engine, clock, "agent-1"), research, agent)
     rt.serve(SEARCH, Worker(engine, clock, "search-1"), search)
-    return rt, store, timer, clock
+    return rt, store, queue, clock
 
 
 def settle(rt, clock, rounds: int = 12) -> None:
@@ -134,7 +134,7 @@ DONE = {"agent": 2, "search:durable execution": 1,
 
 
 def test_the_agent_runs_over_a_well_behaved_queue():
-    rt, store, timer, clock = cloud()
+    rt, store, queue, clock = cloud()
     rt.start(ORIGIN, research, QUESTION)
     settle(rt, clock)
     assert answer(store) == EXPECTED and dict(CALLS) == DONE
@@ -144,19 +144,19 @@ def test_every_message_twice_costs_nothing():
     """A duplicate `execute` finds the task already claimed, at a version it
     does not hold, and is refused. That refusal is the fence doing its job,
     and it is why at-least-once delivery is safe to build on."""
-    rt, store, timer, clock = cloud(duplicate=1.0)
+    rt, store, queue, clock = cloud(duplicate=1.0)
     rt.start(ORIGIN, research, QUESTION)
     settle(rt, clock)
     assert answer(store) == EXPECTED
     assert dict(CALLS) == DONE, "something was paid for twice"
-    assert timer.delivered > 12, "the duplicates did not happen"
+    assert queue.delivered > 12, "the duplicates did not happen"
 
 
 @pytest.mark.parametrize("seed", range(8))
 def test_out_of_order_and_late_and_sometimes_lost(seed):
     """All four at once, eight different ways. The run finishes, the answer
     is the same, and nothing is done twice."""
-    rt, store, timer, clock = cloud(
+    rt, store, queue, clock = cloud(
         seed=seed, duplicate=0.4, shuffle=True, lateness=500, lose=0.3, backoff=100)
     rt.start(ORIGIN, research, QUESTION)
     settle(rt, clock, rounds=30)
@@ -167,7 +167,7 @@ def test_out_of_order_and_late_and_sometimes_lost(seed):
 # --- the hole, demonstrated rather than hidden -----------------------------
 
 
-class DropsEverySweep(Timer):
+class DropsEverySweep(Queue):
     """A queue that gives up on the sweep endpoint and only on that."""
 
     def take(self, now):
@@ -188,9 +188,9 @@ def test_a_dropped_deadline_is_the_one_thing_nothing_repairs():
     to meet, and the remedy is below: a sweep that does not depend on any
     single queued task.
     """
-    rt, store, timer, clock = cloud()
-    rt.queue = timer = DropsEverySweep(seed=1)
-    rt.engine.timers.timer = rt.engine.transport.timer = timer
+    rt, store, queue, clock = cloud()
+    rt.queue = queue = DropsEverySweep(seed=1)
+    rt.engine.queue = queue
     rt.start(ORIGIN, research, QUESTION)
     settle(rt, clock)
     found = store.get(doc_key(ORIGIN))
@@ -204,9 +204,9 @@ def test_a_periodic_sweep_recovers_what_the_queue_lost():
     """The remedy. Something that walks the bucket on its own schedule, so a
     deadline that was only ever in a queued task is not the only way a task
     is offered again."""
-    rt, store, timer, clock = cloud()
-    rt.queue = timer = DropsEverySweep(seed=1)
-    rt.engine.timers.timer = rt.engine.transport.timer = timer
+    rt, store, queue, clock = cloud()
+    rt.queue = queue = DropsEverySweep(seed=1)
+    rt.engine.queue = queue
     rt.start(ORIGIN, research, QUESTION)
     for _ in range(12):
         rt.drain()
@@ -235,7 +235,7 @@ def test_the_deadline_is_scheduled_before_the_document_commits():
     """
     log: list[str] = []
 
-    class WatchedQueue(Timer):
+    class WatchedQueue(Queue):
         def create(self, url, body, *, not_before=0):
             name = super().create(url, body, not_before=not_before)
             log.append(f"schedule {url} at {not_before}")
@@ -251,9 +251,9 @@ def test_the_deadline_is_scheduled_before_the_document_commits():
             log.append("commit")
             return version
 
-    timer, store, clock = WatchedQueue(), WatchedBlob(), Clock()
-    engine = Engine(store, Timers(timer), Transport(timer), CFG)
-    rt = CloudRuntime(engine, timer, clock)
+    queue, store, clock = WatchedQueue(), WatchedBlob(), Clock()
+    engine = Engine(store, queue, CFG)
+    rt = Runtime(engine, queue, clock)
     rt.serve(AGENT, Worker(engine, clock, "w"), research, agent)
     rt.serve(SEARCH, Worker(engine, clock, "s"), search)
 
@@ -272,8 +272,8 @@ def test_only_deadlines_carry_a_schedule():
     deferred: anything that must wait — a durable sleep, a delay tag, a
     retry backoff — waits by having a deadline, and the deadline is what
     gets scheduled."""
-    rt, store, timer, clock = cloud()
+    rt, store, queue, clock = cloud()
     rt.start(ORIGIN, research, QUESTION)
     settle(rt, clock)
-    scheduled = [(e.url, e.not_before) for e in timer.entries.values()]
+    scheduled = [(e.url, e.not_before) for e in queue.entries.values()]
     assert all(not_before == 0 or url.startswith(SWEEP) for url, not_before in scheduled), scheduled

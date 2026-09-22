@@ -30,15 +30,15 @@ import pytest
 #: what the kernel and the simulators depend on, which is nothing.
 gcp = pytest.importorskip("google.api_core.exceptions")
 
+import queue_gcp
+import queue_mem
+import queues as queue_spec
 import store as store_spec
 import store_gcp
 import store_mem
-import timer as timer_spec
-import timer_gcp
-import timer_mem
 from ports import Unavailable
+from queue_gcp import HORIZON_MS
 from store_gcp import CONTENT_TYPE
-from timer_gcp import HORIZON_MS
 
 
 # ---------------------------------------------------------------------------
@@ -161,9 +161,9 @@ if os.environ.get("GCS_BUCKET"):  # pragma: no cover - only with credentials
         (store_gcp, {"bucket": os.environ["GCS_BUCKET"], "client": storage.Client(),
                      "prefix": f"contract/{os.getpid()}/"}), id="gcs"))
 
-TIMERS = [
-    pytest.param((timer_mem, {}), id="simulated"),
-    pytest.param((timer_gcp, {"project": "p", "location": "europe-west1",
+QUEUES = [
+    pytest.param((queue_mem, {}), id="simulated"),
+    pytest.param((queue_gcp, {"project": "p", "location": "europe-west1",
                               "queue": "execute", "base_url": "https://worker.example.com/",
                               "client": FakeTasksClient()}), id="adapter"),
 ]
@@ -175,10 +175,10 @@ def test_a_store_honours_its_contract(implementation):
     assert store_spec.conformance(module, **config) == []
 
 
-@pytest.mark.parametrize("implementation", TIMERS)
-def test_a_timer_honours_its_contract(implementation):
+@pytest.mark.parametrize("implementation", QUEUES)
+def test_a_queue_honours_its_contract(implementation):
     module, config = implementation
-    assert timer_spec.conformance(module, **config) == []
+    assert queue_spec.conformance(module, **config) == []
 
 
 @pytest.mark.parametrize("implementation", STORES)
@@ -188,11 +188,11 @@ def test_a_store_satisfies_the_interface_at_runtime(implementation):
     assert isinstance(m.Store(**config), store_spec.StoreP)
 
 
-@pytest.mark.parametrize("implementation", TIMERS)
-def test_a_timer_satisfies_the_interface_at_runtime(implementation):
+@pytest.mark.parametrize("implementation", QUEUES)
+def test_a_queue_satisfies_the_interface_at_runtime(implementation):
     module, config = implementation
-    m: timer_spec.TimerM = module
-    assert isinstance(m.Timer(**config), timer_spec.TimerP)
+    m: queue_spec.QueueM = module
+    assert isinstance(m.Queue(**config), queue_spec.QueueP)
 
 
 def test_the_contracts_can_fail():
@@ -202,13 +202,13 @@ def test_the_contracts_can_fail():
         def put(self, key, body, *, if_match=None, if_absent=False):
             return super().put(key, body)  # ignores every precondition
 
-    class BadTimer(timer_mem.Timer):
+    class BadQueue(queue_mem.Queue):
         def create(self, url, body, *, not_before=0):
             return "the-same-name-every-time"
 
     bad = store_spec.conformance(type("M", (), {"Store": BadStore}))
     assert bad and any("create" in v.msg for v in bad), bad
-    bad = timer_spec.conformance(type("M", (), {"Timer": BadTimer}))
+    bad = queue_spec.conformance(type("M", (), {"Queue": BadQueue}))
     assert bad and any("two creates" in v.msg for v in bad), bad
 
 
@@ -263,20 +263,20 @@ def test_the_store_adapter_creates_against_generation_zero():
 
 
 # ---------------------------------------------------------------------------
-# What only the real timer adapter can get wrong
+# What only the real queue adapter can get wrong
 # ---------------------------------------------------------------------------
 
 
-def faked_timer(now=0, service_account=None):
+def faked_queue(now=0, service_account=None):
     client = FakeTasksClient()
-    t = timer_gcp.Timer("p", "europe-west1", "execute", "https://worker.example.com/",
+    q = queue_gcp.Queue("p", "europe-west1", "execute", "https://worker.example.com/",
                         service_account=service_account, client=client, now=lambda: now)
-    return t, client
+    return q, client
 
 
 def test_a_dispatch_carries_no_schedule():
-    t, client = faked_timer()
-    t.create("execute", {"kind": "execute"})
+    q, client = faked_queue()
+    q.create("execute", {"kind": "execute"})
     task = client.created[0]
     assert "schedule_time" not in task
     assert task["http_request"]["url"] == "https://worker.example.com/execute"
@@ -284,8 +284,8 @@ def test_a_dispatch_carries_no_schedule():
 
 
 def test_a_deadline_carries_the_instant_it_is_for():
-    t, client = faked_timer(now=1_000)
-    t.create("sweep/o", {"origin": "o"}, not_before=61_000)
+    q, client = faked_queue(now=1_000)
+    q.create("sweep/o", {"origin": "o"}, not_before=61_000)
     assert client.created[0]["schedule_time"].timestamp() == pytest.approx(61.0)
 
 
@@ -294,14 +294,14 @@ def test_a_deadline_past_the_horizon_is_clamped_rather_than_refused():
     with a longer deadline is clamped here, and the sweep it triggers finds
     nothing due and re-arms. A bug in this line makes a promise never time
     out, which is why it has a test of its own."""
-    t, client = faked_timer(now=0)
-    t.create("sweep/o", {}, not_before=10 * HORIZON_MS)
+    q, client = faked_queue(now=0)
+    q.create("sweep/o", {}, not_before=10 * HORIZON_MS)
     assert client.created[0]["schedule_time"].timestamp() == pytest.approx(HORIZON_MS / 1_000)
 
 
 def test_oidc_is_attached_when_a_service_account_is_named():
-    t, client = faked_timer(service_account="worker@p.iam.gserviceaccount.com")
-    t.create("execute", {})
+    q, client = faked_queue(service_account="worker@p.iam.gserviceaccount.com")
+    q.create("execute", {})
     assert client.created[0]["http_request"]["oidc_token"] == {
         "service_account_email": "worker@p.iam.gserviceaccount.com"}
 
@@ -309,25 +309,25 @@ def test_oidc_is_attached_when_a_service_account_is_named():
 def test_without_a_service_account_nothing_is_signed():
     """Then the handler has to be unreachable from outside, and a
     deployment has to say which of the two it relies on."""
-    t, client = faked_timer()
-    t.create("execute", {})
+    q, client = faked_queue()
+    q.create("execute", {})
     assert "oidc_token" not in client.created[0]["http_request"]
 
 
 def test_throttling_a_create_is_unavailable():
-    t, client = faked_timer()
+    q, client = faked_queue()
     client.raises = gcp.ServiceUnavailable("try later")
     with pytest.raises(Unavailable):
-        t.create("execute", {})
+        q.create("execute", {})
 
 
 def test_a_worker_somewhere_else_is_reached_at_its_own_url():
     """A sweep is a path on this service. A worker is wherever it is, which
     on Cloud Run is a different service with a different hostname, and the
     address the kernel emitted already says so."""
-    t, client = faked_timer()
-    t.create("sweep/o", {})
-    t.create("https://search-abc.a.run.app/execute", {})
+    q, client = faked_queue()
+    q.create("sweep/o", {})
+    q.create("https://search-abc.a.run.app/execute", {})
     assert [task["http_request"]["url"] for task in client.created] == [
         "https://worker.example.com/sweep/o",
         "https://search-abc.a.run.app/execute",

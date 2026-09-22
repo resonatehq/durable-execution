@@ -57,7 +57,11 @@ class Store:
 
     def delete(self, key: str) -> None:
         if self.fault is not None:
-            self.fault.tick(f"delete {key}")
+            # "remove", not "delete": the write log is read by
+            # `spec._effect_order`, where a "delete" is a deadline being
+            # disarmed. The engine never removes a document, but a log
+            # nobody can misread is worth one word.
+            self.fault.tick(f"remove {key}")
         self.objects.pop(key, None)
 
     def list(self, prefix: str, limit: int) -> list[str]:

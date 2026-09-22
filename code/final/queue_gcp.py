@@ -1,6 +1,6 @@
-"""A timer, for real: Google Cloud Tasks.
+"""A queue, for real: Google Cloud Tasks.
 
-`timer_gcp.Timer` is `timer.TimerP` over a real queue. Two methods, because
+`queue_gcp.Queue` is `queues.QueueP` over a real queue. Two methods, because
 that is all the engine needs: put a task in, take one out again. There is
 no third method for receiving, and that is not an omission — Cloud Tasks is
 push-only. A task is delivered by an HTTP POST to the URL it carries, which
@@ -33,9 +33,9 @@ it has a test.
 ## What is not verified
 
 This file has never been run against Google Cloud Tasks. It is written
-against the documented API, and `timer_mem` is what the tests drive. The
+against the documented API, and `queue_mem` is what the tests drive. The
 two agree on the interface by construction and on the contract by
-`timer.conformance`, which both pass, and on nothing else until someone
+`queues.conformance`, which both pass, and on nothing else until someone
 points this at a project.
 """
 
@@ -51,7 +51,7 @@ from ports import Unavailable
 HORIZON_MS = 30 * 24 * 60 * 60 * 1_000
 
 
-class Timer:
+class Queue:
     """The two operations over a real queue.
 
     `service_account` turns on OIDC: Cloud Tasks signs each request with a

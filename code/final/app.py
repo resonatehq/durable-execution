@@ -37,13 +37,12 @@ import json
 import os
 from datetime import datetime, timezone
 
+import queue_gcp
 import store_gcp
-import timer_gcp
 from engine import Timeout
 from kernel import KernelCfg
 from ports import Conflict, Unavailable
 from runtime import Clock, Worker
-from timer import Timers, Transport
 from wire import Invalid, decode_message, encode_reply, parse_request
 
 
@@ -54,13 +53,13 @@ def wall_clock() -> int:
 class Service:
     """Everything one container instance needs, built once."""
 
-    def __init__(self, store, timer, cfg: KernelCfg, pid: str, ttl: int,
+    def __init__(self, store, queue, cfg: KernelCfg, pid: str, ttl: int,
                  clock=wall_clock) -> None:
         from engine import Engine
 
         self.clock = clock
-        self.store, self.timer = store, timer
-        self.engine = Engine(store, Timers(timer), Transport(timer), cfg)
+        self.store, self.queue = store, queue
+        self.engine = Engine(store, queue, cfg)
         self.worker = Worker(self.engine, Clock(), pid, ttl)
         # The worker's clock is the wall clock, not a test's.
         self.worker.clock = clock
@@ -139,7 +138,7 @@ def from_environment() -> Service:  # pragma: no cover - needs credentials
     deployment: `{"search": "https://search-abc.a.run.app/execute"}`.
     """
     store = store_gcp.Store(os.environ["BUCKET"])
-    timer = timer_gcp.Timer(
+    queue = queue_gcp.Queue(
         project=os.environ["PROJECT"],
         location=os.environ["LOCATION"],
         queue=os.environ["QUEUE"],
@@ -151,7 +150,7 @@ def from_environment() -> Service:  # pragma: no cover - needs credentials
 
         TARGETS[name] = url
     return Service(
-        store, timer,
+        store, queue,
         KernelCfg(retry_timeout=int(os.environ.get("RETRY_TIMEOUT", 30_000))),
         pid=os.environ.get("K_REVISION", "local"),
         ttl=int(os.environ.get("LEASE", 60_000)),

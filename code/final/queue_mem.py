@@ -1,4 +1,4 @@
-"""A timer in a dict, with the parts that bite.
+"""A queue in a dict, with the parts that bite.
 
 What a real queue does that a list does not:
 
@@ -17,7 +17,7 @@ Every one of those is a knob, off by default so a test can turn on one at a
 time and say which one it is about. Deterministic under a seed, so a run
 that finds something can be run again and find it again.
 
-`take`, `ack` and `nack` are not part of `timer.TimerP` and could not be:
+`take`, `ack` and `nack` are not part of `queues.QueueP` and could not be:
 Cloud Tasks is push-only, and taking delivery belongs to whatever is being
 delivered to. They are here because something has to play the queue's own
 side in a test.
@@ -29,7 +29,7 @@ before the message left, so the sweep offers it again. A dropped *sweep* is
 not recoverable by anything in this design — the deadline it carried is the
 only thing that was going to fire. A deployment needs either a retry policy
 generous enough that this does not happen, or a periodic sweep over the
-bucket that does not depend on any single queued task. `test_timer.py`
+bucket that does not depend on any single queued task. `test_queue.py`
 demonstrates the hole rather than pretending it is not there.
 """
 
@@ -38,6 +38,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from typing import Any
+
+from ports import Fault
 
 
 @dataclass(frozen=True)
@@ -59,7 +61,7 @@ class _Entry:
 
 
 @dataclass
-class Timer:
+class Queue:
     seed: int = 0
     #: Chance that an acknowledgement is lost, so the task is delivered
     #: again after the handler has already acted on it.
@@ -75,7 +77,16 @@ class Timer:
     #: How long a failed attempt waits before the next one.
     backoff: int = 1_000
 
+    #: Where the power goes out. Half the engine's effects land here — the
+    #: arm before the commit, the disarm and the sends after it — so the
+    #: crash-window tests need this as much as the store does.
+    fault: Fault | None = None
+
     entries: dict[str, _Entry] = field(default_factory=dict)
+    #: Every task ever created, in order, kept after delivery. A test that
+    #: asks what was sent is asking about the whole run, not about what
+    #: happens to be waiting now.
+    created: list[tuple[str, Any]] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
     delivered: int = 0
     _n: int = 0
@@ -87,13 +98,18 @@ class Timer:
     # -- the caller's side --------------------------------------------------
 
     def create(self, url: str, body: Any, *, not_before: int = 0) -> str:
+        if self.fault is not None:
+            self.fault.tick(f"create {url}")
         self._n += 1
+        self.created.append((url, body))
         name = f"task-{self._n}"
         late = self._rng.randint(0, self.lateness) if self.lateness else 0
         self.entries[name] = _Entry(url, body, not_before + late)
         return name
 
     def delete(self, name: str) -> None:
+        if self.fault is not None:
+            self.fault.tick(f"delete {name}")
         self.entries.pop(name, None)
 
     # -- the queue's side ---------------------------------------------------

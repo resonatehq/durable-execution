@@ -22,12 +22,15 @@ import jsonschema
 import pytest
 
 import properties as P
-from store_mem import Store
 from codec import decode, doc_key
 from engine import Engine
 from kernel import KernelCfg, PromiseRegisterListener, Send
-from ports import Crash, Fault, MemoryTimers, MemoryTransport
+from ports import Crash, Fault
+from queue_mem import Queue
+from queues import SWEEP
 from runtime import Clock, Runtime, Worker
+from store_mem import Store
+from wire import decode_message
 from sdk import Failed, gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)
@@ -75,16 +78,22 @@ ORIGIN = "research.1"
 
 
 def world(fault: Fault | None = None):
-    """One bucket, one queue, one clock, two workers."""
+    """One store, one queue, one clock, two workers."""
     CALLS.clear()
-    store = Store(fault)
-    timers, transport = MemoryTimers(fault), MemoryTransport(fault)
-    clock = Clock()
-    engine = Engine(store, timers, transport, CFG)
-    rt = Runtime(engine, timers, transport, clock)
+    store, queue, clock = Store(fault), Queue(fault=fault), Clock()
+    engine = Engine(store, queue, CFG)
+    rt = Runtime(engine, queue, clock)
     rt.serve(AGENT, Worker(engine, clock, "agent-1"), research, agent)
     rt.serve(SEARCH, Worker(engine, clock, "search-1"), search)
     return rt, store, engine, clock
+
+
+def dispatched(rt) -> list[Send]:
+    """Every message the run put on the queue, decoded. A deadline is a
+    task too, and it is not one of these: what tells them apart is where
+    they are addressed."""
+    return [Send(url, decode_message(body)) for url, body in rt.queue.created
+            if not url.startswith(SWEEP)]
 
 
 def document(store: Store, origin: str = ORIGIN):
@@ -187,7 +196,7 @@ def test_every_state_the_run_passes_through_is_one_the_catalogue_admits():
     steps = 0
     while rt.step():
         steps += 1
-        seen = seen.after(document(store), [Send(a, m) for a, m in rt.transport.sent])
+        seen = seen.after(document(store), dispatched(rt))
         assert P.state_failures(clock(), seen) == [], P.state_failures(clock(), seen)
     assert steps >= 3 and answer(store) == EXPECTED
 

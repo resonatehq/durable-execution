@@ -54,8 +54,9 @@ from kernel import (
     TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
     handle_external, handle_internal, origin_of,
 )
-from ports import Timers, Transport
+from queues import SWEEP, QueueP
 from store import StoreP
+from wire import encode_message
 
 
 @dataclass(frozen=True)
@@ -95,9 +96,17 @@ def _substance(doc: Document) -> tuple:
 
 
 class Engine:
-    def __init__(self, store: StoreP, timers: Timers, transport: Transport,
+    """Two ports and two dials.
+
+    A deadline and a dispatch both go to the queue, because in production
+    they are the same object: a task with an HTTP target and a time before
+    which it must not be delivered. What keeps them apart is not two ports
+    but the kernel's own effects, and the order they are performed in.
+    """
+
+    def __init__(self, store: StoreP, queue: QueueP,
                  cfg: KernelCfg = KernelCfg(), prefix: str = "") -> None:
-        self.store, self.timers, self.transport = store, timers, transport
+        self.store, self.queue = store, queue
         self.cfg, self.prefix = cfg, prefix
 
     def process(self, msg: Req | Timeout, now: int) -> Reply:
@@ -128,7 +137,11 @@ class Engine:
         new.clock, new.gen = now, doc.gen + 1
         for e in fx:
             if isinstance(e, SetTimeout):
-                new.timer_name = self.timers.arm(origin, e.at)
+                # A deadline is a task addressed to this service's own sweep
+                # route, and the name it comes back with is the only handle
+                # anyone will ever have on it.
+                new.timer_name = self.queue.create(
+                    f"{SWEEP}{origin}", {"origin": origin}, not_before=e.at)
         if new.timer_at is None:
             # The name names the armed deadline. With nothing armed there is
             # nothing to name, and a leftover name is a handle on something
@@ -145,8 +158,12 @@ class Engine:
             # the nearest one again would otherwise be removed by someone
             # else's disarm.
             if isinstance(e, DelTimeout) and doc.timer_name is not None:
-                self.timers.disarm(doc.timer_name)
+                self.queue.delete(doc.timer_name)
         for e in fx:
             if isinstance(e, Send):
-                self.transport.send(e.address, e.msg)
+                # No schedule: deliver as soon as you can, which is what an
+                # immediate dispatch is. Its name is dropped, because a
+                # dispatch is never cancelled — that is the whole of the
+                # difference between it and the arm above.
+                self.queue.create(e.address, encode_message(e.msg))
         return reply

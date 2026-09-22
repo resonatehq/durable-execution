@@ -12,7 +12,7 @@ from __future__ import annotations
 import engine as engine_module
 import spec
 from kernel import Execute, KernelCfg, PromiseCreate, PromiseGet, Reply, Value
-from ports import MemoryTimers, MemoryTransport
+from queue_mem import Queue
 from spec import EngineP, conformance
 from store_mem import Store
 
@@ -22,13 +22,13 @@ def test_the_engine_conforms():
 
 
 def test_the_engine_satisfies_the_protocol_at_runtime():
-    e = engine_module.Engine(Store(), MemoryTimers(), MemoryTransport())
+    e = engine_module.Engine(Store(), Queue())
     assert isinstance(e, EngineP)
 
 
 def test_the_module_offers_a_constructor_under_the_agreed_name():
     m: spec.EngineM = engine_module
-    e = m.Engine(Store(), MemoryTimers(), MemoryTransport(), KernelCfg())
+    e = m.Engine(Store(), Queue(), KernelCfg())
     assert isinstance(e.process(PromiseCreate("o:a", 10, Value(), {}), 0), Reply)
 
 
@@ -58,7 +58,8 @@ def test_the_suite_rejects_an_engine_that_sends_before_it_commits():
     committed state, never of an intention."""
     class Eager(engine_module.Engine):
         def process(self, msg, now):
-            self.transport.send("http://w", Execute("run", 0))
+            from wire import encode_message
+            self.queue.create("http://w", encode_message(Execute("run", 0)))
             return super().process(msg, now)
 
     class Module:
@@ -73,10 +74,10 @@ def test_the_standard_script_exercises_what_it_claims_to():
     """A conformance script that never suspends a task, never expires a
     lease and never settles a timer grades nothing."""
     from codec import decode, doc_key
-    from ports import MemoryTimers, MemoryTransport
+    from queue_mem import Queue
     from store_mem import Store
-    store, timers, transport = Store(), MemoryTimers(), MemoryTransport()
-    e = engine_module.Engine(store, timers, transport, spec.CFG)
+    store = Store()
+    e = engine_module.Engine(store, Queue(), spec.CFG)
     seen = set()
     for msg, now in spec.STANDARD_SCRIPT:
         e.process(msg, now)

@@ -81,11 +81,11 @@ def test_the_engine_writes_lines_the_schema_accepts():
     import spec
     from codec import decode, doc_key
     from engine import Engine
-    from ports import MemoryTimers, MemoryTransport
+    from queue_mem import Queue
     from store_mem import Store
 
     store = Store()
-    e = Engine(store, MemoryTimers(), MemoryTransport(), spec.CFG)
+    e = Engine(store, Queue(), spec.CFG)
     bad = []
     for msg, now in spec.STANDARD_SCRIPT:
         e.process(msg, now)
