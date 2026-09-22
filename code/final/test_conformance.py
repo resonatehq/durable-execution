@@ -32,8 +32,8 @@ gcp = pytest.importorskip("google.api_core.exceptions")
 
 import queue_gcp
 import queue_mem
-import queues as queue_spec
-import store as store_spec
+from spec import queue as queue_spec
+from spec import store as store_spec
 import store_gcp
 import store_mem
 from ports import Unavailable

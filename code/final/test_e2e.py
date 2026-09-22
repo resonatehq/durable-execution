@@ -27,7 +27,7 @@ from engine import Engine
 from kernel import KernelCfg, PromiseRegisterListener, Send
 from ports import Crash, Fault
 from queue_mem import Queue
-from queues import SWEEP
+from spec.queue import SWEEP
 from runtime import Clock, Runtime, Worker
 from store_mem import Store
 from wire import decode_message

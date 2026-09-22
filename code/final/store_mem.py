@@ -13,7 +13,7 @@ neither does this.
 from __future__ import annotations
 
 from ports import Fault
-from store import PreconditionFailed
+from spec.store import PreconditionFailed
 
 
 class Store:

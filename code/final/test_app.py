@@ -27,7 +27,7 @@ from sdk import dumps, route
 from store_mem import Store
 from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
 from queue_mem import Queue
-from queues import SWEEP
+from spec.queue import SWEEP
 
 CFG = KernelCfg(retry_timeout=30_000)
 

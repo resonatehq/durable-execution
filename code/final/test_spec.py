@@ -10,10 +10,11 @@ ever passed is a wish.
 from __future__ import annotations
 
 import engine as engine_module
-import spec
+# The engine's spec, under the name the rest of this file uses for it.
+from spec import engine as spec
 from kernel import Execute, KernelCfg, PromiseCreate, PromiseGet, Reply, Value
 from queue_mem import Queue
-from spec import EngineP, conformance
+from spec.engine import EngineP, conformance
 from store_mem import Store
 
 

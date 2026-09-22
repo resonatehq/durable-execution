@@ -13,7 +13,7 @@ be handed an instance, because two implementations are configured
 differently and only the caller knows how. It is handed the module, and
 reaches for `Store`.
 
-    from store import conformance
+    from spec.store import conformance
     import store_mem, store_gcp
 
     assert conformance(store_mem) == []

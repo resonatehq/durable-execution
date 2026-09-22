@@ -54,8 +54,8 @@ from kernel import (
     TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
     handle_external, handle_internal, origin_of,
 )
-from queues import SWEEP, QueueP
-from store import StoreP
+from spec.queue import SWEEP, QueueP
+from spec.store import StoreP
 from wire import encode_message
 
 

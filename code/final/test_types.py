@@ -1,6 +1,6 @@
 """The module specs, checked by something that is not us.
 
-`spec.EngineM`, `store.StoreM` and `queues.QueueM` are claims in the type
+`spec.engine.EngineM`, `spec.store.StoreM` and `spec.queue.QueueM` are claims in the type
 system, and nothing in this project had ever asked the type system whether
 they hold. Every test passed with `Engine: EngineC` — a form mypy rejects,
 because a protocol's mutable attribute is invariant and no class object is
@@ -29,20 +29,20 @@ HERE = Path(__file__).parent
 
 if TYPE_CHECKING:
     import engine
-    import spec
-    import store
     import queue_gcp
     import queue_mem
-    import queues
     import store_gcp
     import store_mem
+    from spec import engine as spec
+    from spec import queue as queue_spec
+    from spec import store as store_spec
 
     # A module offers what its spec says it offers.
     an_engine: spec.EngineM = engine
-    a_simulated_store: store.StoreM = store_mem
-    a_real_store: store.StoreM = store_gcp
-    a_simulated_queue: queues.QueueM = queue_mem
-    a_real_queue: queues.QueueM = queue_gcp
+    a_simulated_store: store_spec.StoreM = store_mem
+    a_real_store: store_spec.StoreM = store_gcp
+    a_simulated_queue: queue_spec.QueueM = queue_mem
+    a_real_queue: queue_spec.QueueM = queue_gcp
 
     # And the engine's constructor really is pinned to those two ports,
     # which is the claim `StoreC` and `QueueC` deliberately do not make.

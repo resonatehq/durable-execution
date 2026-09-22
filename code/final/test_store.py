@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import pytest
 
-import store as store_spec
+from spec import store as store_spec
 import store_mem
 from ports import Crash, Fault
-from store import PreconditionFailed
+from spec.store import PreconditionFailed
 from store_mem import Store
 
 

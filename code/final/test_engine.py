@@ -21,7 +21,7 @@ from kernel import (
 )
 from ports import Conflict, Crash, Fault
 from queue_mem import Queue
-from queues import SWEEP
+from spec.queue import SWEEP
 from store_mem import Store
 from wire import decode_message
 

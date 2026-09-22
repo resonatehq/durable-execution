@@ -28,7 +28,7 @@ from kernel import (
     TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend, Unblock, Value,
 )
 from ports import Conflict, Unavailable
-from queues import SWEEP
+from spec.queue import SWEEP
 from sdk import (
     _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
     loads, route,

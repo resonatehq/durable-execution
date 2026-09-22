@@ -47,8 +47,8 @@ from kernel import (
     Value, check_invariants,
 )
 from ports import Conflict, Fault, Violation
-from queues import SWEEP, QueueP
-from store import StoreP
+from spec.queue import SWEEP, QueueP
+from spec.store import StoreP
 from wire import decode_message
 
 

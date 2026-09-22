@@ -7,7 +7,7 @@ around a store:
     QueueC   how one is made: its configuration in, a queue out
     QueueM   a module that offers one, under the name `Queue`
 
-    from queues import conformance
+    from spec.queue import conformance
     import queue_mem, queue_gcp
 
     assert conformance(queue_mem) == []

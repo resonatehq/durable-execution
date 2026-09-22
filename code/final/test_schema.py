@@ -78,8 +78,8 @@ def test_the_engine_writes_lines_the_schema_accepts():
     """The kernel's documents pass above. This is the shell's header, which
     the kernel never touches: the generation, the armed deadline and the name
     the shell gave it."""
-    import spec
     from codec import decode, doc_key
+    from spec import engine as spec
     from engine import Engine
     from queue_mem import Queue
     from store_mem import Store

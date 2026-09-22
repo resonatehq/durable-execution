@@ -13,12 +13,12 @@ import json
 import pytest
 
 import queue_mem
-import queues as queue_spec
+from spec import queue as queue_spec
 from codec import decode, doc_key
 from engine import Engine
 from kernel import KernelCfg
 from queue_mem import Delivery, Queue
-from queues import SWEEP
+from spec.queue import SWEEP
 from runtime import Clock, Runtime, Worker
 from store_mem import Store
 from test_e2e import (

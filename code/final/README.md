@@ -15,10 +15,19 @@ Three interfaces, and each one is a module that says what it is, beside two
 modules that are it:
 
 ```
-spec.py    EngineP  EngineC  EngineM      engine.py
-store.py   StoreP   StoreC   StoreM       store_mem.py   store_gcp.py
-queues.py  QueueP   QueueC   QueueM       queue_mem.py   queue_gcp.py
+spec/engine.py   EngineP  EngineC  EngineM    engine.py
+spec/store.py    StoreP   StoreC   StoreM     store_mem.py   store_gcp.py
+spec/queue.py    QueueP   QueueC   QueueM     queue_mem.py   queue_gcp.py
 ```
+
+```
+python -m spec.check
+```
+
+walks all three, top to bottom, and for each implementation asks three
+questions in order: does the module offer what its spec names, does the
+thing have the operations, does it behave. What it cannot answer without
+credentials it reports as a skip rather than a pass.
 
 Two ports, and the engine takes exactly those two:
 
@@ -35,9 +44,10 @@ keeps a deadline and a dispatch apart is not two ports but the kernel's
 effects (`SetTimeout`, `DelTimeout`, `Send`) and the order they are
 performed in.
 
-The file is `queues.py` and the concept is `queue`, because `queue.py`
-shadows the standard library's own and breaks anything that imports the
-real one.
+The interface files live in `spec/`, one per interface, which also fixes a
+wart: a top-level `queue.py` shadows the standard library's own and breaks
+anything that imports the real one, but `spec/queue.py` is only ever
+reachable as `spec.queue`, so the name is free again.
 
 The same three layers each time. `…P` is the thing once it exists, `…C` is
 how one is made, and `…M` is a module that offers one under an agreed name
@@ -139,11 +149,12 @@ should not have to pretend.
 |---|---|
 | `kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
 | `engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send. The only method, and the only place that does I/O |
-| `spec.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
-| `store.py` | the same three protocols for a store, the four operations, and the eleven claims every store is held to |
+| `spec/engine.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
+| `spec/store.py` | the same three protocols for a store, the four operations, and the eleven claims every store is held to |
 | `store_mem.py` | a store in a dict, with a power cut |
 | `store_gcp.py` | a store in Google Cloud Storage, with generation preconditions and the two failures mapped |
-| `queues.py` | the same three protocols for a queue, the two operations, and the eight claims every queue is held to |
+| `spec/queue.py` | the same three protocols for a queue, the two operations, and the eight claims every queue is held to |
+| `spec/check.py` | every interface against every implementation, top to bottom, in one command |
 | `queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
 | `queue_gcp.py` | a queue in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
 | `codec.py` | the document's canonical byte form, and the key it lives under |
@@ -169,17 +180,18 @@ should not have to pretend.
 | `test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
 | `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
 | `test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
+| `test_check.py` | that `spec.check` sees all five implementations, admits what it skipped, and can say no |
 | `test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Service.handle` |
 | `test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
-made of: `engine.py`, `codec.py`, `ports.py`, `store.py`, `store_mem.py`,
-`queues.py`, `queue_mem.py`, `sdk.py` and `runtime.py` import nothing but the
+made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
+`queue_mem.py`, `sdk.py` and `runtime.py` import nothing but the
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 286 tests in about ninety seconds.
+separately; `python -m pytest` runs 292 tests in about ninety seconds.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
 

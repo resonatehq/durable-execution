@@ -36,7 +36,7 @@ import pytest
 import local
 from codec import decode, doc_key
 from kernel import TAG_TARGET
-from queues import SWEEP
+from spec.queue import SWEEP
 from sdk import dumps, route
 from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
 
