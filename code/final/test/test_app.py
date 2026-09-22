@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from app import Service
+from app import Routes
 from codec import doc_key
 from kernel import KernelCfg, TAG_TARGET
 from ports import Conflict, Unavailable
@@ -41,13 +41,13 @@ def service(**knobs):
     """One container instance, one store, one queue."""
     CALLS.clear()
     store, queue, clock = Store(), Queue(**knobs), Clock()
-    svc = Service(store, queue, CFG, pid="rev-1", ttl=60_000, clock=clock)
+    svc = Routes(store, queue, CFG, pid="rev-1", ttl=60_000, clock=clock)
     for fn in (research, agent, search):
         route(fn, WORKER)
     return svc, store, queue, clock
 
 
-def deliver(svc: Service, queue: Queue, clock: Clock, budget: int = 2_000) -> int:
+def deliver(svc: Routes, queue: Queue, clock: Clock, budget: int = 2_000) -> int:
     """Cloud Tasks, as the only thing it is: a POST to a URL.
 
     A delivery's url is either this service's `/execute` or the sweep path
@@ -72,7 +72,7 @@ def settle(svc, queue, clock, rounds: int = 12) -> None:
     deliver(svc, queue, clock)
 
 
-def post(svc: Service, kind: str, **data):
+def post(svc: Routes, kind: str, **data):
     return svc.handle("POST", "/", {"kind": kind, "data": data})
 
 

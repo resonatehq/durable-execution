@@ -202,17 +202,25 @@ def test_every_call_knows_the_request_that_caused_it():
     assert [c.where for c in t.calls] == ["POST /execute"]
 
 
-def test_the_service_labels_a_trace_with_the_route(monkeypatch):
+def test_the_entry_point_is_where_a_trace_starts(monkeypatch):
+    """`Routes.handle` is morally the entry point, so it is the outermost
+    frame — and the only one with no cause of its own, because it is the
+    cause. Everything under it carries the route."""
     import app
 
     monkeypatch.setenv("SIMULATED", "1")
     import local
     local.reset()
-    service = app.from_environment()
+    routes = app.from_environment()
     with tracing.recording() as t:
-        service.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
-    assert t.calls and all(c.where == "POST /" for c in t.calls)
+        routes.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
+
+    first, rest = t.calls[0], t.calls[1:]
+    assert first.name == "Routes.handle" and first.depth == 0
+    assert first.where == "", "the entry point is caused by nothing inside this system"
+    assert rest and all(c.where == "POST /" for c in rest)
     assert t.of("Engine.process")[0].result.startswith("Reply(status=404")
+    assert "[POST /]" in t.tree(), "and the trace says so out loud"
 
 
 # --- the path, as reviewed -------------------------------------------------
@@ -255,6 +263,18 @@ def test_the_diagram_is_drawn_from_the_same_run():
     """Two renderings of one recording, so they cannot drift: if the path
     changes and only the text is regenerated, this says so."""
     assert DIAGRAM.read_text().rstrip("\n") == run().sequence(depth=DIAGRAM_DEPTH)
+
+
+def test_every_delivery_says_what_caused_it():
+    """Five outer calls, five causes — and the three searches are three
+    deliveries even though they share a URL, so the heading prints per
+    delivery rather than per distinct cause."""
+    trace = GOLDEN.read_text()
+    assert trace.count("[worker://search]") == 3
+    assert trace.count("[worker://agent]") == 2 and trace.count("[POST /]") == 1
+    mmd = DIAGRAM.read_text()
+    assert mmd.count("Note over Runtime:") == 6, \
+        "the leftmost participant is a name the renderer chose; the cause is recorded"
 
 
 def test_the_diagram_is_a_diagram():

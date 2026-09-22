@@ -36,7 +36,7 @@ instead of a hundred lines. The hundred lines are the artifact.
 A worker runs a durable function under `asyncio.run`, and the branches of
 a `gather` are separate tasks. `contextvars` is the one mechanism that
 survives both: `asyncio` copies the current context into each task it
-creates, so a request id set in `Service.handle` reaches every store call
+creates, so a request id set in `Routes.handle` reaches every store call
 made by every branch, without threading an argument through the kernel.
 It is the same mechanism the SDK already uses for `_INVOCATION` and
 `_FRAME`, for the same reason.
@@ -126,11 +126,27 @@ class Trace:
         return [c for kind, c in self.events if kind == "call"]
 
     def tree(self, where: str | None = None) -> str:
-        """Indented by nesting, arrowed by direction."""
-        return "\n".join(
-            (c.entered() if kind == "call" else c.returned())
-            for kind, c in self.events
-            if where is None or c.where == where)
+        """Indented by nesting, arrowed by direction, and headed by cause.
+
+        A run is a sequence of things that were each asked for by
+        something: a request, a delivery. Printing that heading when it
+        changes is what makes a trace readable from the top rather than
+        from the middle — it answers "why is this happening" before the
+        reader has to ask.
+        """
+        out, last = [], None
+        for kind, c in self.events:
+            if where is not None and c.where != where:
+                continue
+            # Once per cause, and once per outermost call even when two in
+            # a row share a cause: three deliveries to the same worker are
+            # three deliveries, and a heading that printed once would say
+            # they were one.
+            if c.where and (c.where != last or (kind == "call" and c.depth == 0)):
+                out.append(f"[{c.where}]")
+            last = c.where
+            out.append(c.entered() if kind == "call" else c.returned())
+        return "\n".join(out)
 
     def of(self, name: str) -> list[Call]:
         return [c for c in self.calls if c.name == name]
@@ -199,6 +215,10 @@ class Trace:
         for kind, c in shown:
             method = c.name.split(".", 1)[1] if "." in c.name else c.name
             if kind == "call":
+                if c.where and len(stack) == 1:
+                    # What caused this one. The leftmost participant is a
+                    # name the renderer chose; this is recorded.
+                    out.append(f"    Note over {caller}: {label(c.where, 40)}")
                 out.append(f"    {stack[-1]}->>+{who(c)}: {label(method + '(' + c.args + ')')}")
                 stack.append(who(c))
             else:

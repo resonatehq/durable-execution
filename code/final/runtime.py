@@ -44,7 +44,7 @@ from kernel import (
 )
 from ports import Conflict, Unavailable
 from spec.queue import SWEEP
-from tracing import trace
+from tracing import because, trace
 from sdk import (
     _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
     loads, route,
@@ -182,16 +182,30 @@ class Runtime:
             route(fn, address)
 
     def start(self, id: str, fn, *args, timeout: int = 10 ** 9) -> None:
+        """What a client does to begin a run: create a promise with a
+        target. Named as the route it would arrive on, because that is
+        what it is."""
         from sdk import TARGETS
         target = TARGETS.get(fn.name)
         if target is None:
             raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
-        self.engine.process(PromiseCreate(
-            id, self.clock() + timeout, dumps({"f": fn.name, "a": args}),
-            {TAG_TARGET: target}), self.clock())
+        with because("POST /"):
+            self.engine.process(PromiseCreate(
+                id, self.clock() + timeout, dumps({"f": fn.name, "a": args}),
+                {TAG_TARGET: target}), self.clock())
 
     def handle(self, delivery) -> bool:
-        """What the URL means. Returns whether the handler answered."""
+        """What the URL means. Returns whether the handler answered.
+
+        The URL is named in the trace rather than left to be inferred,
+        because in production this is a route on a service and the thing
+        that caused the work is the delivery. `Routes.handle` does the
+        same for a real request.
+        """
+        with because(delivery.url):
+            return self._handle(delivery)
+
+    def _handle(self, delivery) -> bool:
         if delivery.url.startswith(SWEEP):
             self.swept += 1
             self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())

@@ -1,3 +1,4 @@
+[POST /]
 → Engine.process(msg=PromiseCreate(id='research.1', ...), now=0)
   → store.get(key='wf/research.1')
   ← store.get = None
@@ -8,6 +9,7 @@
   → queue.create(url='worker://agent', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
   ← queue.create = 'task-2'
 ← Engine.process = Reply(status=200, ...)
+[worker://agent]
 → Worker.execute_until_blocked_outer(task_id='research.1', version=0)
   → Engine.process(msg=TaskAcquire(id='research.1', version=0, pid='agent-1', ttl=20000), now=0)
     → store.get(key='wf/research.1')
@@ -72,6 +74,7 @@
     ← queue.delete = None
   ← Engine.process = Reply(status=200, data={})
 ← Worker.execute_until_blocked_outer = 'suspended'
+[worker://search]
 → Worker.execute_until_blocked_outer(task_id='research.1:2', version=0)
   → Engine.process(msg=TaskAcquire(id='research.1:2', version=0, pid='search-1', ttl=20000), now=0)
     → store.get(key='wf/research.1')
@@ -100,6 +103,7 @@
     ← queue.create = 'task-10'
   ← Engine.process = Reply(status=200, ...)
 ← Worker.execute_until_blocked_outer = 'done'
+[worker://search]
 → Worker.execute_until_blocked_outer(task_id='research.1:3', version=0)
   → Engine.process(msg=TaskAcquire(id='research.1:3', version=0, pid='search-1', ttl=20000), now=0)
     → store.get(key='wf/research.1')
@@ -126,6 +130,7 @@
     ← queue.delete = None
   ← Engine.process = Reply(status=200, ...)
 ← Worker.execute_until_blocked_outer = 'done'
+[worker://search]
 → Worker.execute_until_blocked_outer(task_id='research.1:4', version=0)
   → Engine.process(msg=TaskAcquire(id='research.1:4', version=0, pid='search-1', ttl=20000), now=0)
     → store.get(key='wf/research.1')
@@ -152,6 +157,7 @@
     ← queue.delete = None
   ← Engine.process = Reply(status=200, ...)
 ← Worker.execute_until_blocked_outer = 'done'
+[worker://agent]
 → Worker.execute_until_blocked_outer(task_id='research.1', version=1)
   → Engine.process(msg=TaskAcquire(id='research.1', version=1, pid='agent-1', ttl=20000), now=0)
     → store.get(key='wf/research.1')

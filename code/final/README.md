@@ -160,7 +160,7 @@ should not have to pretend.
 | `codec.py` | the document's canonical byte form, and the key it lives under |
 | `ports.py` | the vocabulary the two ports share: the two failures, the fault injector that cuts power between two effects, and the violation all three contracts report |
 | `wire.py` | the two JSON seams: the protocol's request envelope in, and the messages a queue carries out |
-| `app.py` | the service: `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, and one engine built per container |
+| `app.py` | `Routes`: the four routes and the composition root — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, one engine per container — with `handler` the ten lines of HTTP above it |
 | `main.py` | one line, because Google's buildpack looks for `main.py` and nothing else |
 | `local.py` | the simulated world as a module, so `SIMULATED=1` runs the whole service on a laptop |
 | `tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
@@ -186,7 +186,7 @@ should not have to pretend.
 | `test/test_tracing.py` | that the path is still the reviewed path, and that a trace is faithful (a raise is a raise), cheap (nothing when off) and repeatable (the same fingerprint in any process) |
 | `test/test_check.py` | that `spec.check` sees all five implementations, admits what it skipped, and can say no |
 | `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
-| `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Service.handle` |
+| `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Routes.handle` |
 | `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
@@ -195,7 +195,7 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 313 tests in about ninety seconds. The
+separately; `python -m pytest` runs 314 tests in about ninety seconds. The
 tests live in `test/`; `conftest.py` at the root is what puts the code on
 their path.
 
@@ -633,7 +633,7 @@ PROJECT          \
 LOCATION          | the queue both timers and dispatches go through
 QUEUE            /
 BASE_URL         where this service answers, so a sweep can be addressed
-SERVICE_ACCOUNT  whose OIDC token the queue signs with, and /execute and
+ROUTES_ACCOUNT  whose OIDC token the queue signs with, and /execute and
                  /sweep verify. Unset says the network is the protection,
                  and a deployment had better mean it
 WORKERS          {"search": "https://search-xyz.a.run.app/execute"} — the

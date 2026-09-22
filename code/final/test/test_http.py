@@ -1,6 +1,6 @@
 """The service as an HTTP service, through the entry point Cloud Run calls.
 
-`test_app.py` stops one layer short: it calls `Service.handle(method, path,
+`test_app.py` stops one layer short: it calls `Routes.handle(method, path,
 body, authorized)`, which is a Python method. Everything between an HTTP
 request and that call — `handler`, `from_environment`, `verify`, the JSON
 in and out, the status code, the path Flask hands over — was untested, and
@@ -58,7 +58,7 @@ def client(monkeypatch):
     monkeypatch.setenv("SIMULATED", "1")
     monkeypatch.setenv("WORKERS", json.dumps(
         {"research": WORKER, "agent": WORKER, "search": WORKER}))
-    monkeypatch.delenv("SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("ROUTES_ACCOUNT", raising=False)
     local.reset()
     CALLS.clear()
     for fn in (research, agent, search):
@@ -118,7 +118,7 @@ def test_the_queue_routes_refuse_an_unsigned_request(client, monkeypatch):
     """With a service account named, `verify` rejects anything without a
     bearer token before it ever calls Google — so the refusal is testable
     even though the acceptance is not."""
-    monkeypatch.setenv("SERVICE_ACCOUNT", "worker@p.iam.gserviceaccount.com")
+    monkeypatch.setenv("ROUTES_ACCOUNT", "worker@p.iam.gserviceaccount.com")
     assert client.post("/execute", json={}).status_code == 401
     assert client.post("/sweep/o", json={}).status_code == 401
     # The client route is not the queue's to sign.

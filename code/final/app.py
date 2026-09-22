@@ -20,7 +20,7 @@ queue, which account, and where the other workers live are all deployment.
 Cloud Tasks signs each delivery with an OIDC token for the service account
 it was told to use, and `/execute` and `/sweep` verify it. `/` is a client
 endpoint and is not signed by anything here, so it must be protected by
-whatever fronts the service. A deployment that leaves `SERVICE_ACCOUNT`
+whatever fronts the service. A deployment that leaves `ROUTES_ACCOUNT`
 unset is saying the service is unreachable except from inside its network,
 and had better mean it.
 
@@ -54,7 +54,7 @@ from engine import Timeout
 from kernel import KernelCfg
 from ports import Conflict, Unavailable
 from runtime import Clock, Worker
-from tracing import because
+from tracing import because, trace
 from wire import Invalid, decode_message, encode_reply, parse_request
 
 
@@ -62,8 +62,25 @@ def wall_clock() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1_000)
 
 
-class Service:
-    """Everything one container instance needs, built once."""
+class Routes:
+    """The four routes, and everything one container needs to serve them.
+
+    Two jobs in one object, on purpose. It is the **composition root**:
+    `__init__` builds the engine and the worker, once per container rather
+    than once per request, out of whatever the environment named. And it
+    is the **router**: method and path in, body and status out.
+
+    What it is not is the HTTP layer. It takes plain values and returns
+    plain values — no request object, no headers, no socket, no
+    serialisation. That is `handler`, ten lines at the bottom of this
+    file, and the separation is what lets `test_app.py` drive every route
+    and a whole research agent without Flask.
+
+    It does speak HTTP, though, which is worth admitting: 409 for a
+    `Conflict`, 503 for an `Unavailable`, 400 for a request that was never
+    a request. Those are this layer's vocabulary even though the transport
+    is somebody else's.
+    """
 
     def __init__(self, store, queue, cfg: KernelCfg, pid: str, ttl: int,
                  clock=wall_clock) -> None:
@@ -109,8 +126,15 @@ class Service:
 
     # -- what the routes have in common ------------------------------------
 
+    @trace
     def handle(self, method: str, path: str, body: dict | None,
                authorized: bool = True) -> tuple[dict, int]:
+        """Morally the entry point, so it is where a trace starts.
+
+        `handler` above it is transport and nothing else; everything that
+        makes this system what it is happens under this call. A trace that
+        began at the worker would not say what caused the worker.
+        """
         with because(f"{method} {path}"):
             return self._handle(method, path, body, authorized)
 
@@ -148,7 +172,7 @@ class Service:
 # ---------------------------------------------------------------------------
 
 
-def from_environment() -> Service:
+def from_environment() -> Routes:
     """What a container is told at boot.
 
     `SIMULATED=1` swaps the two ports for the in-memory ones and nothing
@@ -162,7 +186,7 @@ def from_environment() -> Service:
         import local
 
         _route()
-        return Service(local.STORE, local.QUEUE, _cfg(),
+        return Routes(local.STORE, local.QUEUE, _cfg(),
                        pid=os.environ.get("K_REVISION", "local"),
                        ttl=int(os.environ.get("LEASE", 60_000)),
                        clock=local.CLOCK)
@@ -183,17 +207,17 @@ def _route() -> None:
         TARGETS[name] = url
 
 
-def _from_gcp() -> Service:  # pragma: no cover - needs credentials
+def _from_gcp() -> Routes:  # pragma: no cover - needs credentials
     store = store_gcp.Store(os.environ["BUCKET"])
     queue = queue_gcp.Queue(
         project=os.environ["PROJECT"],
         location=os.environ["LOCATION"],
         queue=os.environ["QUEUE"],
         base_url=os.environ["BASE_URL"],
-        service_account=os.environ.get("SERVICE_ACCOUNT"),
+        service_account=os.environ.get("ROUTES_ACCOUNT"),
     )
     _route()
-    return Service(
+    return Routes(
         store, queue, _cfg(),
         pid=os.environ.get("K_REVISION", "local"),
         ttl=int(os.environ.get("LEASE", 60_000)),
@@ -204,7 +228,7 @@ def verify(request) -> bool:
     """Whether Cloud Tasks signed this. Unset means the deployment is
     relying on the network instead, which is a choice it has to make out
     loud."""
-    account = os.environ.get("SERVICE_ACCOUNT")
+    account = os.environ.get("ROUTES_ACCOUNT")
     if account is None:
         return True
     header = request.headers.get("Authorization", "")
@@ -224,7 +248,7 @@ def verify(request) -> bool:
     return claims.get("email") == account and claims.get("email_verified", False)
 
 
-SERVICE: Service | None = None
+ROUTES: Routes | None = None
 
 
 def handler(request):
@@ -232,9 +256,9 @@ def handler(request):
 
         gcloud run deploy engine --source . --function handler
     """
-    global SERVICE
-    if SERVICE is None:
-        SERVICE = from_environment()
-    body, status = SERVICE.handle(
+    global ROUTES
+    if ROUTES is None:
+        ROUTES = from_environment()
+    body, status = ROUTES.handle(
         request.method, request.path, request.get_json(silent=True), verify(request))
     return json.dumps(body), status, {"Content-Type": "application/json"}
