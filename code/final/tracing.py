@@ -152,7 +152,8 @@ class Trace:
         return [c for c in self.calls if c.name == name]
 
     def sequence(self, where: str | None = None, depth: int | None = None,
-                 caller: str = "Runtime", preamble: str | None = None) -> str:
+                 caller: str = "Runtime", preamble: str | None = None,
+                 omit: tuple[str, ...] = ()) -> str:
         """The same events as a Mermaid sequence diagram.
 
         A trace already is one: the name before the dot is the participant,
@@ -161,10 +162,22 @@ class Trace:
         point — `SEQUENCE.md` was drawn by hand from what the code was
         believed to do, and this is drawn from what it did.
 
-        `depth` cuts the diagram off below a level, because every call in
-        this run is hundreds of arrows and no one reads that. Both events
-        of a call carry the same depth, so cutting never leaves an arrow
-        that does not come back.
+        Something has to come out, because a whole run is hundreds of
+        arrows and no one reads that. There are two ways, and which one
+        you want depends on what you are hiding.
+
+        `omit` drops participants. It is the honest cut when a participant
+        is a **leaf**: nothing is orphaned, and the lifeline disappears
+        rather than standing there idle inviting the reader to conclude
+        that nothing happened on it. That is what the ports want. They are
+        called from depth 2, 3 and 5 in one run of the agent, so a depth
+        cut shows some of them and hides others, which is worse than
+        hiding all of them.
+
+        `depth` cuts below a level. Use it when the deep calls are a
+        detail rather than a different participant. Both events of a call
+        carry the same depth, so cutting never leaves an arrow that does
+        not come back.
 
         `preamble` is a note drawn across the top. A trace records one
         process, so anything that happens between two processes is a gap
@@ -175,8 +188,15 @@ class Trace:
         def who(call: Call) -> str:
             return call.name.split(".")[0]
 
+        def clean(text: str) -> str:
+            """Quotes break Mermaid's parser and a newline breaks its
+            statement; a line separator survives to become a `<br/>`."""
+            return text.replace('"', "'").replace("\n", " \u2028")
+
         def label(text: str, room: int = 58) -> str:
-            text = text.replace('"', "'").replace("\n", " ")
+            """An arrow has a width. Trim to it, and say so with an
+            ellipsis rather than silently."""
+            text = clean(text)
             return text if len(text) <= room else text[:room - 1] + "\u2026"
 
         # Participants left to right by who calls whom, so an arrow points
@@ -186,7 +206,8 @@ class Trace:
         # believe.
         shown = [(kind, c) for kind, c in self.events
                  if (where is None or c.where == where)
-                 and (depth is None or c.depth <= depth)]
+                 and (depth is None or c.depth <= depth)
+                 and who(c) not in omit]
         calls_whom: dict[str, set[str]] = {}
         first, stack = [], [caller]
         for kind, c in shown:
@@ -218,7 +239,12 @@ class Trace:
                f"    participant {caller}"]
         out += [f"    participant {p}" for p in order]
         if preamble is not None and order:
-            out.append(f"    Note over {caller},{order[-1]}: {label(preamble, 200)}")
+            # Not trimmed: the caller wrote it, and a note that says half
+            # of what it meant to is worse than no note. Mermaid clips a
+            # long note rather than wrapping it, so the caller's line
+            # breaks are kept as its own.
+            wrapped = clean(preamble.strip()).replace(" \u2028", "<br/>")
+            out.append(f"    Note over {caller},{order[-1]}: {wrapped}")
         stack = [caller]
         for kind, c in shown:
             method = c.name.split(".", 1)[1] if "." in c.name else c.name

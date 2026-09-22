@@ -58,10 +58,13 @@ GOLDEN = HERE / "research.trace"
 #: is a different kind of claim and worth keeping beside the other.
 DIAGRAM = HERE / "research.mmd"
 
-#: Every call in the run is hundreds of arrows and nobody reads that. Two
-#: levels under the route is the story: the worker, its two halves, and
-#: the transitions they ask for.
-DIAGRAM_DEPTH = 2
+#: What comes out of the picture, and why it is the ports rather than a
+#: depth. The engine reaches them from depth 2, 3 and 5 in one run, so any
+#: depth cut shows some port calls and hides others — and a lifeline
+#: standing idle through five deliveries reads as "nothing happened here",
+#: which is the one thing that is not true. They are leaves, so dropping
+#: them orphans nothing, and `research.trace` has every one.
+DIAGRAM_OMIT = ("store", "queue")
 
 #: What calls `Routes.handle` in production, whoever sent the request. The
 #: note above each arrow says which route it was.
@@ -76,9 +79,9 @@ WORKER = "https://svc-abc.a.run.app/execute"
 #: process — so between a `queue.create` and the arrival it caused there is
 #: a gap with nothing in it. Better to name the gap than to draw an arrow
 #: nobody recorded, or to leave a reader joining two halves by eye.
-PREAMBLE = ("a task created on the queue arrives later as a new request: "
-            "Cloud Tasks delivers it from another process, so that hop is "
-            "not in this trace")
+PREAMBLE = """the store and the queue are left out; research.trace has all 65 calls to them
+a task created on the queue arrives later as a new request, delivered by
+Cloud Tasks from another process — that hop is in neither"""
 CFG = KernelCfg(retry_timeout=30_000)
 
 
@@ -274,7 +277,7 @@ def test_the_path_through_the_system_is_the_one_we_reviewed():
     got = t.tree()
     if os.environ.get("UPDATE_TRACE"):  # pragma: no cover - a person, deliberately
         GOLDEN.write_text(got + "\n")
-        DIAGRAM.write_text(t.sequence(depth=DIAGRAM_DEPTH, caller=CALLER, preamble=PREAMBLE) + "\n")
+        DIAGRAM.write_text(t.sequence(omit=DIAGRAM_OMIT, caller=CALLER, preamble=PREAMBLE) + "\n")
         pytest.skip(f"rewrote {GOLDEN.name} and {DIAGRAM.name}; "
                     "read the diff before committing it")
     want = GOLDEN.read_text().rstrip("\n")
@@ -306,7 +309,7 @@ def test_the_diagram_is_drawn_from_the_same_run():
     """Two renderings of one recording, so they cannot drift: if the path
     changes and only the text is regenerated, this says so."""
     assert DIAGRAM.read_text().rstrip("\n") == run().sequence(
-        depth=DIAGRAM_DEPTH, caller=CALLER, preamble=PREAMBLE)
+        omit=DIAGRAM_OMIT, caller=CALLER, preamble=PREAMBLE)
 
 
 def test_every_delivery_says_what_caused_it():
@@ -322,16 +325,27 @@ def test_every_delivery_says_what_caused_it():
         "and the diagram says which route each arrival was"
 
 
+def test_the_ports_are_left_out_rather_than_left_idle():
+    """They are reached from three different depths, so any depth cut
+    would show some and hide others — and a lifeline that sits idle
+    through five deliveries says nothing happened on it."""
+    mmd = DIAGRAM.read_text()
+    assert "participant store" not in mmd and "participant queue" not in mmd
+    assert "store" not in mmd.split("Note over")[-1].split("\n", 1)[1], \
+        "not a single arrow to a port"
+    # Dropping a leaf cannot orphan anything.
+    assert mmd.count("->>+") == mmd.count("-->>-")
+    assert "research.trace has all 65" in mmd, "and the banner says where they are"
+
+
 def test_the_diagram_names_the_hop_it_cannot_show():
     """Between `queue.create` and the arrival that task caused there is
     nothing, because Cloud Tasks delivers it from another process. A
     reader who joins those two halves by eye is guessing; the banner says
     what the gap is."""
     mmd = DIAGRAM.read_text()
-    assert "Note over CloudRun,queue:" in mmd
+    assert "Note over CloudRun,Engine:" in mmd
     assert "another process" in mmd
-    # And the halves really are both there, unjoined.
-    assert "create(url='https://svc-abc" in mmd
     assert "handle(method='POST', path='/execute'" in mmd
 
 
@@ -348,7 +362,7 @@ def test_participants_are_ordered_by_who_calls_whom():
     only ever reaches through the engine."""
     order = [line.split()[-1] for line in DIAGRAM.read_text().split("\n")
              if line.strip().startswith("participant ")]
-    assert order == ["CloudRun", "Routes", "Worker", "Engine", "store", "queue"], order
+    assert order == ["CloudRun", "Routes", "Worker", "Durable", "Engine"], order
 
 
 def test_cutting_the_diagram_off_never_leaves_a_dangling_arrow():

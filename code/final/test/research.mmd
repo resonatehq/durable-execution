@@ -3,20 +3,11 @@ sequenceDiagram
     participant CloudRun
     participant Routes
     participant Worker
+    participant Durable
     participant Engine
-    participant store
-    participant queue
-    Note over CloudRun,queue: a task created on the queue arrives later as a new request: Cloud Tasks delivers it from another process, so that hop is not in this trace
+    Note over CloudRun,Engine: the store and the queue are left out; research.trace has all 65 calls to them<br/>a task created on the queue arrives later as a new request, delivered by<br/>Cloud Tasks from another process — that hop is in neither
     CloudRun->>+Routes: handle(method='POST', path='/', body={'kind': 'promise.cr…
     Routes->>+Engine: process(msg=PromiseCreate(id='research.1', ...), now=0)
-    Engine->>+store: get(key='wf/research.1')
-    store-->>-Engine: None
-    Engine->>+queue: create(url='sweep/research.1', body={'origin': 'research.…
-    queue-->>-Engine: 'task-1'
-    Engine->>+store: put(key='wf/research.1', body=<e8b30bb0 322b>, if_absent=…
-    store-->>-Engine: 'v1'
-    Engine->>+queue: create(url='https://svc-abc.a.run.app/execute', body={'ki…
-    queue-->>-Engine: 'task-2'
     Engine-->>-Routes: Reply(status=200, ...)
     Routes-->>-CloudRun: ({'head': {'status': 200}, 'data': {'promise': {7 keys}}}…
     CloudRun->>+Routes: handle(method='POST', path='/execute', body={'kind': 'exe…
@@ -24,6 +15,20 @@ sequenceDiagram
     Worker->>+Engine: process(msg=TaskAcquire(id='research.1', version=0, pid='…
     Engine-->>-Worker: Reply(status=200, ...)
     Worker->>+Worker: execute_until_blocked_inner(fn=@resonate research, args=[…
+    Worker->>+Durable: invoke(args=('What is durable execution?'))
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Durable: invoke(args=(<1a6def33 49b>))
+    Durable-->>-Durable: ['durable execution', 'workflow recovery', 'sagas']
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable-->>-Worker: !Blocked
     Worker-->>-Worker: !Blocked
     Worker->>+Engine: process(msg=TaskSuspend(id='research.1', ...), now=0)
     Engine-->>-Worker: Reply(status=200, data={})
@@ -34,6 +39,8 @@ sequenceDiagram
     Worker->>+Engine: process(msg=TaskAcquire(id='research.1:2', version=0, pid…
     Engine-->>-Worker: Reply(status=200, ...)
     Worker->>+Worker: execute_until_blocked_inner(fn=@resonate search, args=['d…
+    Worker->>+Durable: invoke(args=('durable execution'))
+    Durable-->>-Worker: 'finding about durable execution'
     Worker-->>-Worker: 'finding about durable execution'
     Worker->>+Engine: process(msg=TaskFulfill(id='research.1:2', ...), now=0)
     Engine-->>-Worker: Reply(status=200, ...)
@@ -44,6 +51,8 @@ sequenceDiagram
     Worker->>+Engine: process(msg=TaskAcquire(id='research.1:3', version=0, pid…
     Engine-->>-Worker: Reply(status=200, ...)
     Worker->>+Worker: execute_until_blocked_inner(fn=@resonate search, args=['w…
+    Worker->>+Durable: invoke(args=('workflow recovery'))
+    Durable-->>-Worker: 'finding about workflow recovery'
     Worker-->>-Worker: 'finding about workflow recovery'
     Worker->>+Engine: process(msg=TaskFulfill(id='research.1:3', ...), now=0)
     Engine-->>-Worker: Reply(status=200, ...)
@@ -54,6 +63,8 @@ sequenceDiagram
     Worker->>+Engine: process(msg=TaskAcquire(id='research.1:4', version=0, pid…
     Engine-->>-Worker: Reply(status=200, ...)
     Worker->>+Worker: execute_until_blocked_inner(fn=@resonate search, args=['s…
+    Worker->>+Durable: invoke(args=('sagas'))
+    Durable-->>-Worker: 'finding about sagas'
     Worker-->>-Worker: 'finding about sagas'
     Worker->>+Engine: process(msg=TaskFulfill(id='research.1:4', ...), now=0)
     Engine-->>-Worker: Reply(status=200, ...)
@@ -64,6 +75,22 @@ sequenceDiagram
     Worker->>+Engine: process(msg=TaskAcquire(id='research.1', version=1, pid='…
     Engine-->>-Worker: Reply(status=200, ...)
     Worker->>+Worker: execute_until_blocked_inner(fn=@resonate research, args=[…
+    Worker->>+Durable: invoke(args=('What is durable execution?'))
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable->>+Durable: invoke(args=(<f931ea27 143b>))
+    Durable-->>-Durable: {'report': <f931ea27 143b>}
+    Durable->>+Engine: process(msg=TaskFence(id='research.1', ...), now=0)
+    Engine-->>-Durable: Reply(status=200, ...)
+    Durable-->>-Worker: {'report': <f931ea27 143b>}
     Worker-->>-Worker: {'report': <f931ea27 143b>}
     Worker->>+Engine: process(msg=TaskFulfill(id='research.1', ...), now=0)
     Engine-->>-Worker: Reply(status=200, ...)
