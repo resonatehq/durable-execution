@@ -135,6 +135,77 @@ class Trace:
     def of(self, name: str) -> list[Call]:
         return [c for c in self.calls if c.name == name]
 
+    def sequence(self, where: str | None = None, depth: int | None = None,
+                 caller: str = "Runtime") -> str:
+        """The same events as a Mermaid sequence diagram.
+
+        A trace already is one: the name before the dot is the participant,
+        going in is an arrow from whoever was already running, coming back
+        is the dashed arrow home. Nothing is invented here, which is the
+        point — `SEQUENCE.md` was drawn by hand from what the code was
+        believed to do, and this is drawn from what it did.
+
+        `depth` cuts the diagram off below a level, because every call in
+        this run is 208 arrows and no one reads that. Both events of a
+        call carry the same depth, so cutting never leaves an arrow that
+        does not come back.
+        """
+        def who(call: Call) -> str:
+            return call.name.split(".")[0]
+
+        def label(text: str, room: int = 58) -> str:
+            text = text.replace('"', "'").replace("\n", " ")
+            return text if len(text) <= room else text[:room - 1] + "\u2026"
+
+        # Participants left to right by who calls whom, so an arrow points
+        # rightwards and crosses nothing. First appearance would be simpler
+        # and would put the worker to the right of the ports it reaches
+        # through the engine, which is the one thing a reader must not
+        # believe.
+        shown = [(kind, c) for kind, c in self.events
+                 if (where is None or c.where == where)
+                 and (depth is None or c.depth <= depth)]
+        calls_whom: dict[str, set[str]] = {}
+        first, stack = [], [caller]
+        for kind, c in shown:
+            if kind == "call":
+                if who(c) not in first:
+                    first.append(who(c))
+                calls_whom.setdefault(stack[-1], set()).add(who(c))
+                stack.append(who(c))
+            else:
+                stack.pop()
+        order, placed = [], {caller}
+        while len(placed) < len(first) + 1:
+            for name in first:
+                if name in placed:
+                    continue
+                callers = {a for a, bs in calls_whom.items() if name in bs and a != name}
+                if callers <= placed:          # everyone who calls it is already left
+                    order.append(name)
+                    placed.add(name)
+                    break
+            else:                              # a cycle: fall back to first appearance
+                for name in first:
+                    if name not in placed:
+                        order.append(name)
+                        placed.add(name)
+                        break
+
+        out = ["sequenceDiagram", "    autonumber",
+               f"    participant {caller}"]
+        out += [f"    participant {p}" for p in order]
+        stack = [caller]
+        for kind, c in shown:
+            method = c.name.split(".", 1)[1] if "." in c.name else c.name
+            if kind == "call":
+                out.append(f"    {stack[-1]}->>+{who(c)}: {label(method + '(' + c.args + ')')}")
+                stack.append(who(c))
+            else:
+                stack.pop()
+                out.append(f"    {who(c)}-->>-{stack[-1]}: {label(c.result)}")
+        return "\n".join(out)
+
     def fingerprint(self) -> str:
         """The path, as sixteen hex characters: a cheap way to ask whether
         it is still the path that was reviewed. The answer worth reading

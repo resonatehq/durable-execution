@@ -4,6 +4,11 @@ Four routes, one engine, and one rule about the order effects happen in.
 Everything below is what `app.py`, `engine.py` and `runtime.py` actually
 do; where a diagram says a name, it is the name in the code.
 
+*These are drawn by hand, from what the design says the system does.
+`test/research.mmd` is the other kind: generated from a recorded run of
+the research agent, so it says what the system did. When they disagree,
+the generated one is right and this file has a bug.*
+
 ## Who is who
 
 Only two of these lifelines are somewhere else. Everything in a shaded box

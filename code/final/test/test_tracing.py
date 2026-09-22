@@ -47,9 +47,19 @@ from test_e2e import AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, agent, re
 ROOT = Path(__file__).parent.parent
 HERE = Path(__file__).parent
 
-#: The path, as reviewed. Rewrite it with UPDATE_TRACE=1, and commit the
+#: The path, as reviewed. Rewrite them with UPDATE_TRACE=1, and commit the
 #: rewrite only once you have read the diff.
 GOLDEN = HERE / "research.trace"
+
+#: The same path as a picture. `SEQUENCE.md` was drawn by hand from what
+#: the code was believed to do; this one is drawn from what it did, which
+#: is a different kind of claim and worth keeping beside the other.
+DIAGRAM = HERE / "research.mmd"
+
+#: Every call is 208 arrows and nobody reads that. One level down from the
+#: shell is the story: workers, transitions, and the ports the engine
+#: reaches directly.
+DIAGRAM_DEPTH = 1
 CFG = KernelCfg(retry_timeout=30_000)
 
 
@@ -209,10 +219,13 @@ def test_the_service_labels_a_trace_with_the_route(monkeypatch):
 
 
 def test_the_path_through_the_system_is_the_one_we_reviewed():
-    got = run().tree()
+    t = run()
+    got = t.tree()
     if os.environ.get("UPDATE_TRACE"):  # pragma: no cover - a person, deliberately
         GOLDEN.write_text(got + "\n")
-        pytest.skip(f"rewrote {GOLDEN.name}; read the diff before committing it")
+        DIAGRAM.write_text(t.sequence(depth=DIAGRAM_DEPTH) + "\n")
+        pytest.skip(f"rewrote {GOLDEN.name} and {DIAGRAM.name}; "
+                    "read the diff before committing it")
     want = GOLDEN.read_text().rstrip("\n")
     if got == want:
         return
@@ -236,6 +249,37 @@ def test_the_reviewed_path_says_what_we_think_it_says():
         "the replay reads five promises back at one version and writes once"
     assert want.count("url='sweep/research.1'") == 10 and want.count("\u2192 queue.delete(") == 10, \
         "the deadline is re-armed and the old one collected, every time it moves"
+
+
+def test_the_diagram_is_drawn_from_the_same_run():
+    """Two renderings of one recording, so they cannot drift: if the path
+    changes and only the text is regenerated, this says so."""
+    assert DIAGRAM.read_text().rstrip("\n") == run().sequence(depth=DIAGRAM_DEPTH)
+
+
+def test_the_diagram_is_a_diagram():
+    mmd = DIAGRAM.read_text()
+    assert mmd.startswith("sequenceDiagram\n")
+    assert mmd.count("->>+") == mmd.count("-->>-"), \
+        "an arrow out with no arrow back would draw a lifeline that never closes"
+
+
+def test_participants_are_ordered_by_who_calls_whom():
+    """Left to right, so every arrow points right and crosses nothing.
+    First appearance would put the worker to the right of the ports it
+    only ever reaches through the engine."""
+    order = [line.split()[-1] for line in DIAGRAM.read_text().split("\n")
+             if line.strip().startswith("participant ")]
+    assert order == ["Runtime", "Worker", "Engine", "store", "queue"], order
+
+
+def test_cutting_the_diagram_off_never_leaves_a_dangling_arrow():
+    """Both events of a call carry the same depth, so a cut takes the
+    arrow out and the arrow back together or neither."""
+    t = run()
+    for depth in (0, 1, 2, None):
+        mmd = t.sequence(depth=depth)
+        assert mmd.count("->>+") == mmd.count("-->>-"), depth
 
 
 # --- repeatable ------------------------------------------------------------
