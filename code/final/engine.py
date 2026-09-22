@@ -56,6 +56,7 @@ from kernel import (
 )
 from spec.queue import SWEEP, QueueP
 from spec.store import StoreP
+from tracing import trace
 from wire import encode_message
 
 
@@ -109,6 +110,7 @@ class Engine:
         self.store, self.queue = store, queue
         self.cfg, self.prefix = cfg, prefix
 
+    @trace
     def process(self, msg: Req | Timeout, now: int) -> Reply:
         origin = origin_of_msg(msg)
         key = doc_key(origin, self.prefix)

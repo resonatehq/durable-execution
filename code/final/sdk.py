@@ -61,6 +61,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from tracing import trace
 from kernel import (
     PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
     TaskFence, Value,
@@ -238,6 +239,7 @@ class Durable:
         _, data = inv.fence(PromiseSettle(id, state, value))
         return read_back(data["promise"])
 
+    @trace
     async def invoke(self, *args) -> Any:
         """Call the user's function, whether or not it is a coroutine. A leaf
         that only prompts a model has nothing to await."""

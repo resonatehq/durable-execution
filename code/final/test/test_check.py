@@ -19,12 +19,13 @@ import store_mem
 from spec import queue as queue_spec
 from spec import store as store_spec
 
-HERE = Path(__file__).parent
+#: Where the code is. The tests live one level down, in `test/`.
+ROOT = Path(__file__).parent.parent
 
 
 def run() -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "spec.check"],
-                          cwd=HERE, capture_output=True, text=True)
+                          cwd=ROOT, capture_output=True, text=True)
 
 
 def test_everything_checks_out():

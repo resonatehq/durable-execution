@@ -36,7 +36,7 @@ from sdk import Failed, gather, resonate
 CFG = KernelCfg(retry_timeout=30_000)
 AGENT, SEARCH = "worker://agent", "worker://search"
 VALIDATOR = jsonschema.Draft202012Validator(
-    json.loads((Path(__file__).parent / "line.schema.json").read_text()))
+    json.loads((Path(__file__).parent.parent / "line.schema.json").read_text()))
 
 #: What the model and the search index were actually asked to do. The point
 #: of the whole exercise is that these do not grow on replay.

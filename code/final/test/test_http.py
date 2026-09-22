@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -43,6 +44,10 @@ from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
 #: Where this service answers. One service runs every function, which is the
 #: smallest deployment that is still the real shape.
 WORKER = "https://svc-abc.a.run.app/execute"
+
+#: `create_app` resolves its source relative to the working directory, and
+#: pytest's is wherever it was started from.
+ROOT = Path(__file__).parent.parent
 
 
 @pytest.fixture
@@ -58,7 +63,7 @@ def client(monkeypatch):
     CALLS.clear()
     for fn in (research, agent, search):
         route(fn, WORKER)
-    return functions_framework.create_app("handler", "app.py").test_client()
+    return functions_framework.create_app("handler", str(ROOT / "app.py")).test_client()
 
 
 def post(client, kind, **data):

@@ -29,6 +29,7 @@ from kernel import (
 )
 from ports import Conflict, Unavailable
 from spec.queue import SWEEP
+from tracing import trace
 from sdk import (
     _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
     loads, route,
@@ -56,6 +57,7 @@ class Worker:
         self.engine, self.clock, self.pid, self.ttl = engine, clock, pid, ttl
         self.ran: list[str] = []  # which task ids this worker picked up, for tests
 
+    @trace
     def execute(self, task_id: str, version: int) -> str:
         """Run one task as far as it goes. The task is claimed once; the run
         itself may happen more than once, because a suspension that finds

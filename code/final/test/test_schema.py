@@ -21,7 +21,7 @@ from codec import encode
 from explore import BROAD, NARROW, explore
 from kernel import Document, Object, Promise, Task, Value
 
-SCHEMA = json.loads((Path(__file__).parent / "line.schema.json").read_text())
+SCHEMA = json.loads((Path(__file__).parent.parent / "line.schema.json").read_text())
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
 
 

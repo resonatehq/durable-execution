@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-HERE = Path(__file__).parent
+#: Where the code is. The tests live one level down, in `test/`.
+ROOT = Path(__file__).parent.parent
 
 if TYPE_CHECKING:
     import engine
@@ -54,6 +55,7 @@ def test_the_module_specs_hold():
         pytest.skip("mypy is not installed")
     done = subprocess.run(
         [sys.executable, "-m", "mypy", "--no-error-summary",
-         "--follow-imports=silent", "test_types.py"],
-        cwd=HERE, capture_output=True, text=True, env={"MYPYPATH": str(HERE), "PATH": ""})
+         "--follow-imports=silent", "test/test_types.py"],
+        cwd=ROOT, capture_output=True, text=True,
+        env={"MYPYPATH": str(ROOT), "PATH": ""})
     assert done.stdout == "" and done.returncode == 0, done.stdout or done.stderr

@@ -163,27 +163,29 @@ should not have to pretend.
 | `app.py` | the service: `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, and one engine built per container |
 | `main.py` | one line, because Google's buildpack looks for `main.py` and nothing else |
 | `local.py` | the simulated world as a module, so `SIMULATED=1` runs the whole service on a laptop |
+| `tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `runtime.py` | a worker, which is post 002's outer half in the protocol's words, and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
 | `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
 | `explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
-| `test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
-| `test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
-| `test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
-| `test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
-| `test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
-| `test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
-| `test_store.py` | what only a simulated store has: the power cut, and where in a write it happens |
-| `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
-| `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
-| `test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
+| `test/test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
+| `test/test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
+| `test/test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
+| `test/test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
+| `test/test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
+| `test/test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
+| `test/test_store.py` | what only a simulated store has: the power cut, and where in a write it happens |
+| `test/test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
+| `test/test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
+| `test/test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
 | `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
-| `test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
-| `test_check.py` | that `spec.check` sees all five implementations, admits what it skipped, and can say no |
-| `test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
-| `test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Service.handle` |
-| `test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
+| `test/test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
+| `test/test_tracing.py` | that a trace is faithful (a raise is a raise), cheap (nothing when off) and repeatable (the same fingerprint in any process) |
+| `test/test_check.py` | that `spec.check` sees all five implementations, admits what it skipped, and can say no |
+| `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
+| `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Service.handle` |
+| `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
 made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
@@ -191,7 +193,9 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 292 tests in about ninety seconds.
+separately; `python -m pytest` runs 305 tests in about ninety seconds. The
+tests live in `test/`; `conftest.py` at the root is what puts the code on
+their path.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
 

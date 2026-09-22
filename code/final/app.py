@@ -54,6 +54,7 @@ from engine import Timeout
 from kernel import KernelCfg
 from ports import Conflict, Unavailable
 from runtime import Clock, Worker
+from tracing import because
 from wire import Invalid, decode_message, encode_reply, parse_request
 
 
@@ -109,6 +110,11 @@ class Service:
 
     def handle(self, method: str, path: str, body: dict | None,
                authorized: bool = True) -> tuple[dict, int]:
+        with because(f"{method} {path}"):
+            return self._handle(method, path, body, authorized)
+
+    def _handle(self, method: str, path: str, body: dict | None,
+                authorized: bool) -> tuple[dict, int]:
         if method == "GET" and path == "/ready":
             return self.ready()
         if method != "POST":

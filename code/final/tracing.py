@@ -1,0 +1,260 @@
+"""What happened, in the order it happened, with the request it belonged to.
+
+Three ways to watch this system were tried before this one. `python -m
+trace --trackcalls` gives a call *graph* — a fact about the source, not
+about a run. `sys.setprofile` gives a real sequence and needs no wrappers,
+but it cannot tell a raise from a `return None`, which in a system whose
+whole story is 412-versus-429 is not a detail, and it costs about 4x on
+calls. Hand-written recording subclasses work and are exact, but they are
+one class per implementation and they see nothing above the ports.
+
+So: a decorator on what we own, a protocol-derived wrapper on what we do
+not, both feeding one log, and a context variable carrying the request
+that caused it all.
+
+    from tracing import recording, trace, watch
+
+    with recording() as t:
+        ...
+    print(t.tree())
+    assert t.fingerprint() == "..."
+
+## Why a context variable
+
+A worker runs a durable function under `asyncio.run`, and the branches of
+a `gather` are separate tasks. `contextvars` is the one mechanism that
+survives both: `asyncio` copies the current context into each task it
+creates, so a request id set in `Service.handle` reaches every store call
+made by every branch, without threading an argument through the kernel.
+It is the same mechanism the SDK already uses for `_INVOCATION` and
+`_FRAME`, for the same reason.
+
+Concurrency is why the log lives in the context rather than in a module
+global. One container can serve eighty requests at once; a global would
+interleave eight runs into one unreadable list and two tests into one.
+
+## Off by default, and cheap when off
+
+Every decorated call checks one context variable and returns. Nothing is
+formatted, nothing is allocated. `recording()` is what turns it on, for
+the duration of a block and for that context only.
+
+## Determinism
+
+A record holds names, arguments and results — never a clock, never an
+address, never an object id. That is what lets `fingerprint()` be the
+same on every run, which is the property that makes a golden trace worth
+keeping. Long strings are digested rather than stored, so a document body
+contributes its identity without its bulk, and a codec change moves one
+character of the trace rather than a thousand lines.
+"""
+
+from __future__ import annotations
+
+import functools
+import hashlib
+import inspect
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field, fields, is_dataclass
+from typing import Any, Callable
+
+#: How long a string may be before it is kept as a digest instead.
+BRIEF = 48
+
+
+@dataclass
+class Call:
+    """One call, as it will be compared. No timing, no addresses.
+
+    Mutable, and appended on the way *in* rather than on the way out, so
+    the log is in call order. Recording on return puts every child before
+    its parent, which is the order a stack unwinds and the opposite of the
+    order anything happened.
+    """
+
+    depth: int
+    where: str      # the request that caused it, or "" outside one
+    name: str
+    args: str
+    result: str = "..."
+
+    def __str__(self) -> str:
+        return f"{'  ' * self.depth}{self.name}({self.args}) -> {self.result}"
+
+
+@dataclass
+class Trace:
+    calls: list[Call] = field(default_factory=list)
+
+    def tree(self, where: str | None = None) -> str:
+        """Indented by nesting, which is the shape a reader wants."""
+        return "\n".join(str(c) for c in self.calls
+                         if where is None or c.where == where)
+
+    def of(self, name: str) -> list[Call]:
+        return [c for c in self.calls if c.name == name]
+
+    def fingerprint(self) -> str:
+        """The run, as sixteen hex characters. Equal runs, equal
+        fingerprint — across processes, and across implementations once
+        the values are normalised."""
+        return hashlib.sha256(self.tree().encode()).hexdigest()[:16]
+
+
+_LOG: ContextVar[Trace | None] = ContextVar("trace.log", default=None)
+_DEPTH: ContextVar[int] = ContextVar("trace.depth", default=0)
+_WHERE: ContextVar[str] = ContextVar("trace.where", default="")
+
+
+@contextmanager
+def recording():
+    """Turn tracing on for this context and collect what happens."""
+    log = Trace()
+    token = _LOG.set(log)
+    try:
+        yield log
+    finally:
+        _LOG.reset(token)
+
+
+@contextmanager
+def because(what: str):
+    """Name the thing that caused what follows: a request, a delivery."""
+    token = _WHERE.set(what)
+    try:
+        yield
+    finally:
+        _WHERE.reset(token)
+
+
+def brief(value: Any) -> str:
+    """A value, as something short, stable and characteristic.
+
+    A document body is thousands of bytes and belongs in a trace by its
+    identity rather than its content, so it becomes a digest and a length:
+    two runs that wrote the same bytes say so, and a reader is not asked
+    to scroll past them. Everything else shrinks by the same rule — show
+    what distinguishes it, then stop.
+    """
+    if isinstance(value, str):
+        if len(value) > BRIEF:
+            return f"<{hashlib.sha256(value.encode()).hexdigest()[:8]} {len(value)}b>"
+        return repr(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) > 4:
+            return f"[{len(value)} items]"
+        inside = ", ".join(brief(x) for x in value)
+        return f"({inside})" if isinstance(value, tuple) else f"[{inside}]"
+    if isinstance(value, dict):
+        if len(value) > 4:
+            return f"{{{len(value)} keys}}"
+        return "{" + ", ".join(f"{k!r}: {brief(v)}" for k, v in value.items()) + "}"
+    shown = repr(value)
+    if len(shown) <= BRIEF * 2:
+        return shown
+    if is_dataclass(value):
+        # The first field is the one that says which of them this is: an
+        # id, a state, a status.
+        first = fields(value)[0]
+        return f"{type(value).__name__}({first.name}={brief(getattr(value, first.name))}, ...)"
+    return f"<{type(value).__name__}>"
+
+
+def _args(fn: Callable, a: tuple, kw: dict) -> str:
+    """Positional arguments by name, `self` dropped, in signature order."""
+    try:
+        bound = inspect.signature(fn).bind_partial(*a, **kw)
+    except TypeError:  # pragma: no cover - a call that will fail anyway
+        return ", ".join(brief(x) for x in a)
+    return ", ".join(f"{k}={brief(v)}" for k, v in bound.arguments.items()
+                     if k != "self")
+
+
+def _enter(name: str, args: str, depth: int) -> Call:
+    """Appended on the way in, so the log is in call order."""
+    call = Call(depth, _WHERE.get(), name, args)
+    log = _LOG.get()
+    if log is not None:
+        log.calls.append(call)
+    return call
+
+
+def trace(fn: Callable) -> Callable:
+    """Watch this function. Works on `def` and on `async def`.
+
+    A raised exception is recorded as a result, because in this system a
+    refusal is an outcome: `Conflict` is the whole reason the engine never
+    loops, and a trace that hid it would be a trace of a different system.
+    """
+    name = f"{fn.__qualname__.split('.')[-2]}.{fn.__name__}" \
+        if "." in fn.__qualname__ else fn.__name__
+
+    if inspect.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def watched_async(*a, **kw):
+            if _LOG.get() is None:
+                return await fn(*a, **kw)
+            call = _enter(name, _args(fn, a, kw), _DEPTH.get())
+            token = _DEPTH.set(call.depth + 1)
+            try:
+                out = await fn(*a, **kw)
+            except BaseException as e:
+                call.result = f"!{type(e).__name__}"
+                raise
+            finally:
+                _DEPTH.reset(token)
+            call.result = brief(out)
+            return out
+        return watched_async
+
+    @functools.wraps(fn)
+    def watched(*a, **kw):
+        if _LOG.get() is None:
+            return fn(*a, **kw)
+        call = _enter(name, _args(fn, a, kw), _DEPTH.get())
+        token = _DEPTH.set(call.depth + 1)
+        try:
+            out = fn(*a, **kw)
+        except BaseException as e:
+            call.result = f"!{type(e).__name__}"
+            raise
+        finally:
+            _DEPTH.reset(token)
+        call.result = brief(out)
+        return out
+    return watched
+
+
+class watch:
+    """Any implementation of one of our protocols, watched.
+
+    The decorator is for what we own. This is for what we do not: the
+    protocol says which operations count, so one wrapper serves the
+    simulator and the bucket alike, and `store_gcp.py` needs no line of
+    instrumentation to appear in a trace.
+    """
+
+    def __init__(self, inner: Any, protocol: type, label: str) -> None:
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "_label", label)
+        object.__setattr__(self, "_ops", {
+            n for n in vars(protocol) if not n.startswith("_")})
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(object.__getattribute__(self, "_inner"), name)
+        if name not in object.__getattribute__(self, "_ops") or not callable(attr):
+            return attr
+        return trace(_named(attr, f"{object.__getattribute__(self, '_label')}.{name}"))
+
+
+def _named(fn: Callable, name: str) -> Callable:
+    """`trace` takes the name from `__qualname__`; a bound method of a
+    simulator would call itself `Store.get` when what a reader wants is
+    `store.get`, the port."""
+    @functools.wraps(fn)
+    def renamed(*a, **kw):
+        return fn(*a, **kw)
+    renamed.__qualname__ = name
+    renamed.__name__ = name.split(".")[-1]
+    return renamed
