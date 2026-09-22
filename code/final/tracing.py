@@ -152,7 +152,7 @@ class Trace:
         return [c for c in self.calls if c.name == name]
 
     def sequence(self, where: str | None = None, depth: int | None = None,
-                 caller: str = "Runtime") -> str:
+                 caller: str = "Runtime", preamble: str | None = None) -> str:
         """The same events as a Mermaid sequence diagram.
 
         A trace already is one: the name before the dot is the participant,
@@ -162,9 +162,15 @@ class Trace:
         believed to do, and this is drawn from what it did.
 
         `depth` cuts the diagram off below a level, because every call in
-        this run is 208 arrows and no one reads that. Both events of a
-        call carry the same depth, so cutting never leaves an arrow that
-        does not come back.
+        this run is hundreds of arrows and no one reads that. Both events
+        of a call carry the same depth, so cutting never leaves an arrow
+        that does not come back.
+
+        `preamble` is a note drawn across the top. A trace records one
+        process, so anything that happens between two processes is a gap
+        in the picture with nothing to mark it — and a reader is left to
+        infer a connection that was never drawn. Saying what the gap is
+        beats drawing an arrow nobody recorded.
         """
         def who(call: Call) -> str:
             return call.name.split(".")[0]
@@ -211,6 +217,8 @@ class Trace:
         out = ["sequenceDiagram", "    autonumber",
                f"    participant {caller}"]
         out += [f"    participant {p}" for p in order]
+        if preamble is not None and order:
+            out.append(f"    Note over {caller},{order[-1]}: {label(preamble, 200)}")
         stack = [caller]
         for kind, c in shown:
             method = c.name.split(".", 1)[1] if "." in c.name else c.name

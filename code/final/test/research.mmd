@@ -6,6 +6,7 @@ sequenceDiagram
     participant Engine
     participant store
     participant queue
+    Note over CloudRun,queue: a task created on the queue arrives later as a new request: Cloud Tasks delivers it from another process, so that hop is not in this trace
     CloudRun->>+Routes: handle(method='POST', path='/', body={'kind': 'promise.cr…
     Routes->>+Engine: process(msg=PromiseCreate(id='research.1', ...), now=0)
     Engine->>+store: get(key='wf/research.1')

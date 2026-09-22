@@ -70,6 +70,15 @@ CALLER = "CloudRun"
 #: Where this deployment answers. One service runs every function, which is
 #: the smallest shape that is still the real one.
 WORKER = "https://svc-abc.a.run.app/execute"
+
+#: The hop the picture cannot show. A task created on the queue arrives
+#: later as a new request, and Cloud Tasks makes that request from another
+#: process — so between a `queue.create` and the arrival it caused there is
+#: a gap with nothing in it. Better to name the gap than to draw an arrow
+#: nobody recorded, or to leave a reader joining two halves by eye.
+PREAMBLE = ("a task created on the queue arrives later as a new request: "
+            "Cloud Tasks delivers it from another process, so that hop is "
+            "not in this trace")
 CFG = KernelCfg(retry_timeout=30_000)
 
 
@@ -265,7 +274,7 @@ def test_the_path_through_the_system_is_the_one_we_reviewed():
     got = t.tree()
     if os.environ.get("UPDATE_TRACE"):  # pragma: no cover - a person, deliberately
         GOLDEN.write_text(got + "\n")
-        DIAGRAM.write_text(t.sequence(depth=DIAGRAM_DEPTH, caller=CALLER) + "\n")
+        DIAGRAM.write_text(t.sequence(depth=DIAGRAM_DEPTH, caller=CALLER, preamble=PREAMBLE) + "\n")
         pytest.skip(f"rewrote {GOLDEN.name} and {DIAGRAM.name}; "
                     "read the diff before committing it")
     want = GOLDEN.read_text().rstrip("\n")
@@ -297,7 +306,7 @@ def test_the_diagram_is_drawn_from_the_same_run():
     """Two renderings of one recording, so they cannot drift: if the path
     changes and only the text is regenerated, this says so."""
     assert DIAGRAM.read_text().rstrip("\n") == run().sequence(
-        depth=DIAGRAM_DEPTH, caller=CALLER)
+        depth=DIAGRAM_DEPTH, caller=CALLER, preamble=PREAMBLE)
 
 
 def test_every_delivery_says_what_caused_it():
@@ -311,6 +320,19 @@ def test_every_delivery_says_what_caused_it():
     mmd = DIAGRAM.read_text()
     assert mmd.count("Routes: handle(method='POST'") == 6, \
         "and the diagram says which route each arrival was"
+
+
+def test_the_diagram_names_the_hop_it_cannot_show():
+    """Between `queue.create` and the arrival that task caused there is
+    nothing, because Cloud Tasks delivers it from another process. A
+    reader who joins those two halves by eye is guessing; the banner says
+    what the gap is."""
+    mmd = DIAGRAM.read_text()
+    assert "Note over CloudRun,queue:" in mmd
+    assert "another process" in mmd
+    # And the halves really are both there, unjoined.
+    assert "create(url='https://svc-abc" in mmd
+    assert "handle(method='POST', path='/execute'" in mmd
 
 
 def test_the_diagram_is_a_diagram():
