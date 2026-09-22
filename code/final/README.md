@@ -164,6 +164,7 @@ should not have to pretend.
 | `main.py` | one line, because Google's buildpack looks for `main.py` and nothing else |
 | `local.py` | the simulated world as a module, so `SIMULATED=1` runs the whole service on a laptop |
 | `tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
+| `test/research.trace` | the path one run takes through the system, reviewed and checked in. A change to it is a diff somebody has to accept |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `runtime.py` | a worker, as post 002's two halves under its own names — `execute_until_blocked_outer` claims and decides, `execute_until_blocked_inner` runs the function — and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
@@ -181,7 +182,7 @@ should not have to pretend.
 | `test/test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
 | `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
 | `test/test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
-| `test/test_tracing.py` | that a trace is faithful (a raise is a raise), cheap (nothing when off) and repeatable (the same fingerprint in any process) |
+| `test/test_tracing.py` | that the path is still the reviewed path, and that a trace is faithful (a raise is a raise), cheap (nothing when off) and repeatable (the same fingerprint in any process) |
 | `test/test_check.py` | that `spec.check` sees all five implementations, admits what it skipped, and can say no |
 | `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Service.handle` |
@@ -193,7 +194,7 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 307 tests in about ninety seconds. The
+separately; `python -m pytest` runs 309 tests in about ninety seconds. The
 tests live in `test/`; `conftest.py` at the root is what puts the code on
 their path.
 

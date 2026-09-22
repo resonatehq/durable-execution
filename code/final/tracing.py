@@ -17,7 +17,19 @@ that caused it all.
     with recording() as t:
         ...
     print(t.tree())
-    assert t.fingerprint() == "..."
+
+## What it is for
+
+Not comparing implementations, and not proving determinism. Those are
+things it happens to be good for. It is for reading: `test/research.trace`
+is one run of the research agent, nested by who called whom, checked in
+because somebody read it and agreed that is the path the design says the
+system should take. A change to the path is then a diff a person has to
+look at and accept, rather than something that slips through because the
+final answer was still right.
+
+`fingerprint()` is the cheap way to ask "same path?" — sixteen characters
+instead of a hundred lines. The hundred lines are the artifact.
 
 ## Why a context variable
 
@@ -39,14 +51,18 @@ Every decorated call checks one context variable and returns. Nothing is
 formatted, nothing is allocated. `recording()` is what turns it on, for
 the duration of a block and for that context only.
 
-## Determinism
+## Why a record holds no clock, no address, no object id
 
-A record holds names, arguments and results — never a clock, never an
-address, never an object id. That is what lets `fingerprint()` be the
-same on every run, which is the property that makes a golden trace worth
-keeping. Long strings are digested rather than stored, so a document body
-contributes its identity without its bulk, and a codec change moves one
-character of the trace rather than a thousand lines.
+Because a path you cannot compare is a path you cannot sign off. If two
+runs of the same thing printed differently, the diff would be noise and
+nobody would read it. So a record holds names, arguments and results and
+nothing that varies between processes — and long strings are digested, so
+a document body contributes its identity without its bulk and a codec
+change moves one character rather than a thousand lines.
+
+The first thing to break this rule was the tracer's own: a `Durable`
+passed to the worker's inner half printed as `<sdk.Durable object at
+0x7ff99d975cd0>`. Nothing whose repr carries an address is recorded now.
 """
 
 from __future__ import annotations
@@ -101,9 +117,9 @@ class Trace:
         return [c for c in self.calls if c.name == name]
 
     def fingerprint(self) -> str:
-        """The run, as sixteen hex characters. Equal runs, equal
-        fingerprint — across processes, and across implementations once
-        the values are normalised."""
+        """The path, as sixteen hex characters: a cheap way to ask whether
+        it is still the path that was reviewed. The answer worth reading
+        is `tree()`; this is the way to notice you should read it."""
         return hashlib.sha256(self.tree().encode()).hexdigest()[:16]
 
 

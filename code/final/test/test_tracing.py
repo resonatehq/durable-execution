@@ -1,17 +1,31 @@
-"""A trace is worth having only if it is faithful, cheap and repeatable.
+"""The path a run takes through the system, written down and held to.
 
-Faithful: it records a raise as a raise, in the order things happened.
-Cheap: it costs nothing when nobody is recording.
-Repeatable: the same run fingerprints the same, in any process.
+`research.trace` is what one run of the research agent does: every
+transition, every read, every write, every task, nested by who called
+whom. It is in the repository because somebody read it and agreed that is
+the path — that the fan-out dispatches three searches before it blocks,
+that the replay reads five promises back and pays for none of them, that
+the deadline moves when the lease is shorter than the retry timeout.
 
-That last one is the property the whole idea rests on. If a fingerprint
-moved between runs, a golden trace would be noise — and it is also the
-check that would catch a set's iteration order leaking into behaviour,
-which is the one thing `sorted(t.resumes)` in the codec is there to stop.
+So the test below is not "the code still does what the code does". It is
+"the path is still the path we looked at". When it fails it prints a
+diff, and the only way past it is for a person to read that diff and say
+whether the new path is better. `UPDATE_TRACE=1` rewrites the file, and
+committing that rewrite is the act of agreeing.
+
+Everything else here supports that one test. Faithful, because a trace
+that rendered a raise as a return would be a trace of a different system.
+Cheap, because a trace nobody can afford to leave on gets left off.
+Repeatable, because a path that fingerprints differently in two processes
+was never a path anyone could sign off — and because a fingerprint that
+moves with `PYTHONHASHSEED` means a set's iteration order reached the
+behaviour, which is what `sorted(t.resumes)` in the codec exists to stop.
 """
 
 from __future__ import annotations
 
+import difflib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +46,10 @@ from test_e2e import AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, agent, re
 #: on its path to re-run one of these from outside pytest.
 ROOT = Path(__file__).parent.parent
 HERE = Path(__file__).parent
+
+#: The path, as reviewed. Rewrite it with UPDATE_TRACE=1, and commit the
+#: rewrite only once you have read the diff.
+GOLDEN = HERE / "research.trace"
 CFG = KernelCfg(retry_timeout=30_000)
 
 
@@ -185,6 +203,37 @@ def test_the_service_labels_a_trace_with_the_route(monkeypatch):
         service.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
     assert t.calls and all(c.where == "POST /" for c in t.calls)
     assert t.of("Engine.process")[0].result.startswith("Reply(status=404")
+
+
+# --- the path, as reviewed -------------------------------------------------
+
+
+def test_the_path_through_the_system_is_the_one_we_reviewed():
+    got = run().tree()
+    if os.environ.get("UPDATE_TRACE"):  # pragma: no cover - a person, deliberately
+        GOLDEN.write_text(got + "\n")
+        pytest.skip(f"rewrote {GOLDEN.name}; read the diff before committing it")
+    want = GOLDEN.read_text().rstrip("\n")
+    if got == want:
+        return
+    diff = "\n".join(difflib.unified_diff(
+        want.split("\n"), got.split("\n"), "reviewed", "now", lineterm="", n=3))
+    pytest.fail("the path through the system changed.\n"
+                "Read this, decide whether the new path is right, and if it is, "
+                "rerun with UPDATE_TRACE=1 and commit the rewrite.\n\n" + diff)
+
+
+def test_the_reviewed_path_says_what_we_think_it_says():
+    """A golden file nobody can read is a golden file nobody reviews, so
+    these are the claims a reader should be able to see in it."""
+    want = GOLDEN.read_text()
+    assert want.count("queue.create(url='worker://search'") == 3, \
+        "the fan-out dispatches three searches"
+    assert "-> !Blocked" in want, "and then blocks"
+    assert want.count(", 'v15')") == 5 and want.count("if_match='v15'") == 1, \
+        "the replay reads five promises back at one version and writes once"
+    assert want.count("url='sweep/research.1'") == 10 and want.count("queue.delete(") == 10, \
+        "the deadline is re-armed and the old one collected, every time it moves"
 
 
 # --- repeatable ------------------------------------------------------------
