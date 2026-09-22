@@ -158,7 +158,8 @@ class Unreachable(Store):
 
 def test_ready_says_whether_the_bucket_answers():
     svc, _, _, _ = service()
-    assert svc.handle("GET", "/ready", None) == ({"ready": True}, 200)
+    body, status = svc.handle("GET", "/ready", None)
+    assert status == 200 and body["ready"] is True
 
     svc.store = Unreachable()
     body, status = svc.handle("GET", "/ready", None)

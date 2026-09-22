@@ -24,11 +24,22 @@ whatever fronts the service. A deployment that leaves `SERVICE_ACCOUNT`
 unset is saying the service is unreachable except from inside its network,
 and had better mean it.
 
+## Running it
+
+    SIMULATED=1 functions-framework --target=handler
+
+serves the whole protocol on localhost over the in-memory ports — same
+engine, same kernel, same codec. `main.py` is the entry point the
+buildpack insists on; it imports `handler` from here.
+
 ## What is not verified
 
-This file has never run on Cloud Run. The routing, the parsing and the
-error mapping are exercised by `test_app.py` against a fake request; the
-rest is the documented behaviour of three libraries.
+This has never run on Cloud Run. What *is* verified is more than it was:
+`test_app.py` drives the router directly, and `test_http.py` drives this
+file's `handler` through a real Flask app built the way Cloud Run builds
+it, including a whole research agent over nothing but HTTP. What remains
+untested is the OIDC acceptance path, which needs Google to answer, and
+the deployment itself.
 """
 
 from __future__ import annotations
@@ -92,7 +103,7 @@ class Service:
             self.store.list("", 1)
         except Unavailable as e:
             return {"ready": False, "why": str(e)}, 503
-        return {"ready": True}, 200
+        return {"ready": True, "simulated": bool(os.environ.get("SIMULATED"))}, 200
 
     # -- what the routes have in common ------------------------------------
 
@@ -130,13 +141,42 @@ class Service:
 # ---------------------------------------------------------------------------
 
 
-def from_environment() -> Service:  # pragma: no cover - needs credentials
+def from_environment() -> Service:
     """What a container is told at boot.
 
-    `WORKERS` routes function names to the URLs they run at, as JSON, which
-    is the only thing in this system that knows the shape of the
-    deployment: `{"search": "https://search-abc.a.run.app/execute"}`.
+    `SIMULATED=1` swaps the two ports for the in-memory ones and nothing
+    else: the same engine, the same kernel, the same codec, over a store
+    and a queue that forget everything when the process stops. It is how
+    the service runs on a laptop and how `test_http.py` drives the real
+    `handler`. `/ready` reports it, because a deployment that set it by
+    accident would look healthy while losing every run.
     """
+    if os.environ.get("SIMULATED"):
+        import local
+
+        _route()
+        return Service(local.STORE, local.QUEUE, _cfg(),
+                       pid=os.environ.get("K_REVISION", "local"),
+                       ttl=int(os.environ.get("LEASE", 60_000)),
+                       clock=local.CLOCK)
+    return _from_gcp()
+
+
+def _cfg() -> KernelCfg:
+    return KernelCfg(retry_timeout=int(os.environ.get("RETRY_TIMEOUT", 30_000)))
+
+
+def _route() -> None:
+    """`WORKERS` routes function names to the URLs they run at, as JSON.
+    The only thing in this system that knows the shape of the deployment:
+    `{"search": "https://search-abc.a.run.app/execute"}`."""
+    from sdk import TARGETS
+
+    for name, url in json.loads(os.environ.get("WORKERS", "{}")).items():
+        TARGETS[name] = url
+
+
+def _from_gcp() -> Service:  # pragma: no cover - needs credentials
     store = store_gcp.Store(os.environ["BUCKET"])
     queue = queue_gcp.Queue(
         project=os.environ["PROJECT"],
@@ -145,19 +185,15 @@ def from_environment() -> Service:  # pragma: no cover - needs credentials
         base_url=os.environ["BASE_URL"],
         service_account=os.environ.get("SERVICE_ACCOUNT"),
     )
-    for name, url in json.loads(os.environ.get("WORKERS", "{}")).items():
-        from sdk import TARGETS
-
-        TARGETS[name] = url
+    _route()
     return Service(
-        store, queue,
-        KernelCfg(retry_timeout=int(os.environ.get("RETRY_TIMEOUT", 30_000))),
+        store, queue, _cfg(),
         pid=os.environ.get("K_REVISION", "local"),
         ttl=int(os.environ.get("LEASE", 60_000)),
     )
 
 
-def verify(request) -> bool:  # pragma: no cover - needs credentials
+def verify(request) -> bool:
     """Whether Cloud Tasks signed this. Unset means the deployment is
     relying on the network instead, which is a choice it has to make out
     loud."""
@@ -167,10 +203,12 @@ def verify(request) -> bool:  # pragma: no cover - needs credentials
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         return False
-    from google.auth.transport import requests as grequests
-    from google.oauth2 import id_token
+    # Everything below needs Google to answer, so it is where the tested
+    # part stops: an unsigned request is refused above, without a network.
+    from google.auth.transport import requests as grequests  # pragma: no cover
+    from google.oauth2 import id_token  # pragma: no cover
 
-    try:
+    try:  # pragma: no cover
         claims = id_token.verify_oauth2_token(
             header[len("Bearer "):], grequests.Request(),
             audience=os.environ.get("AUDIENCE"))
@@ -182,8 +220,11 @@ def verify(request) -> bool:  # pragma: no cover - needs credentials
 SERVICE: Service | None = None
 
 
-def handler(request):  # pragma: no cover - needs functions_framework
-    """The entry point. `gcloud run deploy --function handler`."""
+def handler(request):
+    """The entry point, reached via `main.py`.
+
+        gcloud run deploy engine --source . --function handler
+    """
     global SERVICE
     if SERVICE is None:
         SERVICE = from_environment()
