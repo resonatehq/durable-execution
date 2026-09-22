@@ -90,7 +90,8 @@ class Service:
         """A dispatch. A refused acquire is still a 2xx: somebody else has
         the task, and delivering this again would not change that."""
         message = decode_message(body)
-        outcome = self.worker.execute(message.task_id, message.version)
+        outcome = self.worker.execute_until_blocked_outer(
+            message.task_id, message.version)
         return {"outcome": outcome}, 200
 
     def sweep(self, origin: str) -> tuple[dict, int]:

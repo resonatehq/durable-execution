@@ -208,6 +208,12 @@ class Durable:
         self.fn, self.name = fn, name
         REGISTRY[name] = self
 
+    def __repr__(self) -> str:
+        """Which function this is. The default carries a heap address,
+        which is useless in a log and worse in a trace that is supposed to
+        fingerprint the same in every process."""
+        return f"@resonate {self.name}"
+
     async def __call__(self, *args) -> Any:
         """A local durable call: create, run if pending, settle, read back.
 

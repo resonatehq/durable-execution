@@ -16,7 +16,7 @@ anything.
 | **Cloud Tasks** | the queue, and the only thing that calls `/execute` and `/sweep`. A deadline and a dispatch are both tasks in it |
 | **GCS** | one object per origin, at `wf/{origin}`. The whole state of a run |
 | `handler` / `Service` | `app.py`. The HTTP entry point, and one `Service` built per container at import |
-| `Worker` | `runtime.Worker` — **an object, not a service**. `Service.worker`, built beside the engine in the same container and called in-process. It is post 002's outer half: acquire the task, run the function, then fulfil, suspend or release |
+| `Worker` | `runtime.Worker` — **an object, not a service**. `Service.worker`, built beside the engine in the same container and called in-process. Post 002's two halves: `execute_until_blocked_outer` claims the task and decides what the run meant, `execute_until_blocked_inner` runs the function from the top |
 | `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._run`. Ordinary async Python that mentions no promise, task or lease |
 | `Engine.process` | `engine.Engine`, in the same container again. The only thing that does I/O |
 | `kernel` | `handle_external` / `handle_internal`. A pure function: a document in, effects out |
@@ -159,7 +159,7 @@ sequenceDiagram
     end
 
     Q->>+H: POST /execute {task: {id, version}}
-    H->>+W: execute(task_id, version)
+    H->>+W: execute_until_blocked_outer(id, version)
     W->>E: task.acquire(id, version, pid, ttl)
 
     alt somebody else holds it, or it has moved on

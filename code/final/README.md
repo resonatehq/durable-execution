@@ -166,7 +166,7 @@ should not have to pretend.
 | `tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
-| `runtime.py` | a worker, which is post 002's outer half in the protocol's words, and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
+| `runtime.py` | a worker, as post 002's two halves under its own names — `execute_until_blocked_outer` claims and decides, `execute_until_blocked_inner` runs the function — and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
 | `properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
 | `explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
 | `test/test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
@@ -193,7 +193,7 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 305 tests in about ninety seconds. The
+separately; `python -m pytest` runs 307 tests in about ninety seconds. The
 tests live in `test/`; `conftest.py` at the root is what puts the code on
 their path.
 

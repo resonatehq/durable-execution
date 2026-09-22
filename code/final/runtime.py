@@ -1,13 +1,28 @@
 """A worker, and the loop that keeps one fed.
 
-`Worker.execute` is post 002's outer half, in the protocol's own words:
+A worker is post 002's two halves, under the post's own names.
+
+`execute_until_blocked_outer` is the protocol half. It never runs a line
+of anyone's function; it claims the task and then decides what the run's
+outcome means, in the protocol's own words:
 
     claim      -> task.acquire
-    run                                     the function, from the top
+    run                                     the inner half, from the top
     complete   -> task.fulfill              it returned
     subscribe
       + release-> task.suspend              it raised Blocked
     release    -> task.release              it raised something else
+
+`execute_until_blocked_inner` is the other half: one attempt at the
+function itself, from the top, until it returns a value or stops for
+something it does not have. It knows nothing about tasks or leases — only
+how to run a durable function and let whatever happens propagate.
+
+The split is the whole shape of the thing. The outer half is the same for
+every function there will ever be; the inner half is the same whatever the
+protocol does next. And the loop between them exists for one case: a
+suspension that finds nothing left to wait for, which sends the inner half
+round again rather than parking a task nothing will ever wake.
 
 `Runtime` is what a store, a queue and a clock add up to in one process: it
 takes what the queue is willing to deliver, turns each URL back into the
@@ -58,10 +73,13 @@ class Worker:
         self.ran: list[str] = []  # which task ids this worker picked up, for tests
 
     @trace
-    def execute(self, task_id: str, version: int) -> str:
-        """Run one task as far as it goes. The task is claimed once; the run
-        itself may happen more than once, because a suspension that finds
-        nothing left to wait for tells the caller to carry on."""
+    def execute_until_blocked_outer(self, task_id: str, version: int) -> str:
+        """Claim one task and see its run through, whatever the run does.
+
+        The task is claimed once; the inner half may run more than once,
+        because a suspension that finds nothing left to wait for carries on
+        from the top rather than parking.
+        """
         reply = self.engine.process(
             TaskAcquire(task_id, version, self.pid, self.ttl), self.clock())
         if reply.status != 200:
@@ -76,7 +94,7 @@ class Worker:
 
         while True:
             try:
-                result = self._run(fn, call["a"], task_id, v)
+                result = self.execute_until_blocked_inner(fn, call["a"], task_id, v)
             except Blocked as b:
                 suspend = self.engine.process(
                     TaskSuspend(task_id, v, tuple(b.ids)), self.clock())
@@ -103,13 +121,26 @@ class Worker:
                 task_id, v, PromiseSettle(task_id, RESOLVED, dumps(result))), self.clock())
             return "done"
 
-    def _run(self, fn, args, task_id: str, version: int):
-        """Drive one attempt of a durable function to its end or its block.
+    @trace
+    def execute_until_blocked_inner(self, fn, args, task_id: str, version: int):
+        """One attempt at the function, from the top.
 
-        A durable function is async, and a worker is not: something has to
-        own the loop. It is here rather than around the whole runtime so a
-        leaf that does real I/O can await it, while everything outside stays
-        the ordinary synchronous shell it is in production.
+        Returns what it returned, or raises: `Blocked` when it stopped for
+        a value it does not have yet, whatever the function itself raised,
+        or a platform failure. Deciding what any of those mean is the outer
+        half's business, not this one's.
+
+        A durable function is async and a worker is not, so something has
+        to own the event loop. It is here rather than around the whole
+        runtime, so a leaf that does real I/O can await it while everything
+        outside stays the ordinary synchronous shell it is in production.
+
+        The two context variables are what make a durable call durable: the
+        invocation carries the task and the version every write is fenced
+        at, and the frame carries the position the next call's id comes
+        from. `asyncio` copies the context into each task it creates, so a
+        `gather`'s branches each get their own frame and cannot tread on
+        each other.
         """
         async def attempt():
             _INVOCATION.set(Invocation(self.engine, task_id, version, self.clock))
@@ -173,7 +204,7 @@ class Runtime:
             if worker is not None:
                 # A refused acquire is still an answer: somebody else has it,
                 # and delivering this again would not change that.
-                worker.execute(msg.task_id, msg.version)
+                worker.execute_until_blocked_outer(msg.task_id, msg.version)
             return True
         if isinstance(msg, Unblock):
             self.notified[msg.promise["id"]] = msg.promise

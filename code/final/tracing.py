@@ -54,6 +54,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import inspect
+import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -61,6 +62,10 @@ from typing import Any, Callable
 
 #: How long a string may be before it is kept as a digest instead.
 BRIEF = 48
+
+#: What a heap address looks like. Nothing containing one is recordable:
+#: it differs in every process, so it would make `fingerprint` a lie.
+ADDRESS = re.compile(r"0x[0-9a-fA-F]{6,}")
 
 
 @dataclass
@@ -151,6 +156,11 @@ def brief(value: Any) -> str:
             return f"{{{len(value)} keys}}"
         return "{" + ", ".join(f"{k!r}: {brief(v)}" for k, v in value.items()) + "}"
     shown = repr(value)
+    if ADDRESS.search(shown):
+        # The default `object.__repr__` carries a heap address, which is
+        # different in every process and would make a fingerprint useless.
+        # A type that wants to appear in a trace says so with a `__repr__`.
+        return f"<{type(value).__name__}>"
     if len(shown) <= BRIEF * 2:
         return shown
     if is_dataclass(value):

@@ -118,9 +118,12 @@ def test_the_run_is_what_the_trace_says_it_is():
     assert len(t.of("Engine.process")) == 22, "transitions"
     assert len(t.of("store.put")) == 18, "one conditional write per transition that changed something"
     assert len(t.of("store.get")) > len(t.of("store.put")), "reads are free"
-    assert [c.result for c in t.of("Worker.execute")].count("'suspended'") >= 1
-    assert any(c.result == "!Blocked" for c in t.of("Durable.invoke")), \
-        "the fan-out unwound through Blocked"
+    outer = t.of("Worker.execute_until_blocked_outer")
+    assert [c.result for c in outer].count("'suspended'") >= 1
+    inner = t.of("Worker.execute_until_blocked_inner")
+    assert len(inner) >= len(outer) > 0, "every claim runs the function at least once"
+    assert any(c.result == "!Blocked" for c in inner), \
+        "the fan-out unwound through Blocked, out of the inner half"
 
 
 def test_the_deadline_is_armed_and_disarmed_as_it_moves():
@@ -130,6 +133,28 @@ def test_the_deadline_is_armed_and_disarmed_as_it_moves():
     arms = [c for c in t.of("queue.create") if "sweep/" in c.args]
     assert len(arms) > 1, "the deadline never moved; the fixture is too kind"
     assert t.of("queue.delete"), "armed and never disarmed"
+
+
+def test_nothing_with_a_heap_address_reaches_a_trace():
+    """The rule the fingerprint rests on, and the first thing to break it
+    was a `Durable` passed to the inner half: `<sdk.Durable object at
+    0x7ff99d975cd0>` is different in every process."""
+    class Anonymous:
+        pass
+
+    with tracing.recording() as t:
+        @tracing.trace
+        def takes(thing):
+            return thing
+        takes(Anonymous())
+    assert "0x" not in t.tree(), t.tree()
+    assert "<Anonymous>" in t.tree()
+
+
+def test_a_durable_function_says_which_one_it_is():
+    t = run()
+    args = t.of("Worker.execute_until_blocked_inner")[0].args
+    assert "fn=@resonate research" in args, args
 
 
 def test_a_document_body_is_in_the_trace_by_its_identity_not_its_bulk():
