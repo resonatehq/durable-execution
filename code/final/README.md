@@ -194,7 +194,7 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 310 tests in about ninety seconds. The
+separately; `python -m pytest` runs 309 tests in about ninety seconds. The
 tests live in `test/`; `conftest.py` at the root is what puts the code on
 their path.
 
