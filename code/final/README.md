@@ -146,6 +146,7 @@ should not have to pretend.
 | `test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 | `test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
 | `test_timer.py` | the simulated timer on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
+| `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
 | `test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
 | `test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test_app.py` | the service through its own surface: methods, paths, status codes, who may knock, and the whole research agent over nothing but HTTP |
