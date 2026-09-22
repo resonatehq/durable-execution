@@ -1,11 +1,37 @@
 """The document's canonical byte form.
 
 One line of JSON per object, a header first, joined by `\\n`. Two encoders
-given equal documents produce identical bytes, which is what lets the engine
-ask "did anything change?" by comparing bytes, and a writer recognize its own
-landed write after a lost response.
+given equal documents produce identical bytes.
 
-The rules, and each one is load-bearing rather than cosmetic:
+## What that is worth, stated honestly
+
+Nothing in this system requires it. The write law compares decoded
+substance — the objects and the armed deadline — not bytes, and a writer
+that lost the answer to a write recovers by re-deciding rather than by
+recognising its own bytes. The only byte comparison anywhere is the
+round-trip test in `test_engine.py`, which is the codec checking itself.
+An earlier version of this docstring claimed the engine compares bytes. It
+does not, and never did.
+
+What canonicity actually buys is optionality, for about four lines of
+code: two `sorted()` calls, a fixed key order that you write in some order
+anyway, and ASCII output that `json.dumps` gives by default. With it:
+
+- two generations of an object in the bucket can be diffed to see a
+  transition, which is the first thing anyone does when something goes
+  wrong in production;
+- a second implementation can be held to these bytes rather than to a
+  decoding of them, which is what the differential test against the Rust
+  server would want;
+- the schema corpus and the exhaustive explorer produce the same documents
+  on every run, so a failure is reproducible rather than merely likely.
+
+That last one is the only place it bites today. `Task.resumes` is a set,
+and a set of strings iterates in an order that depends on `PYTHONHASHSEED`,
+so without the `sorted()` the same state serialises differently in
+different processes. Nothing breaks — but nothing is reproducible either.
+
+## The rules, and what each is for
 
 - **ASCII only**, so the bytes do not depend on anyone's locale or encoder.
 - **Fixed key order** within a line and **fixed line order** between them (the
