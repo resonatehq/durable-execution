@@ -227,12 +227,14 @@ def test_the_reviewed_path_says_what_we_think_it_says():
     """A golden file nobody can read is a golden file nobody reviews, so
     these are the claims a reader should be able to see in it."""
     want = GOLDEN.read_text()
+    assert want.count("\u2192 ") == want.count("\u2190 "), \
+        "every call came back, or the trace is lying about something"
     assert want.count("queue.create(url='worker://search'") == 3, \
         "the fan-out dispatches three searches"
-    assert "-> !Blocked" in want, "and then blocks"
+    assert want.count("= !Blocked") == 2, "and then blocks, out through both halves"
     assert want.count(", 'v15')") == 5 and want.count("if_match='v15'") == 1, \
         "the replay reads five promises back at one version and writes once"
-    assert want.count("url='sweep/research.1'") == 10 and want.count("queue.delete(") == 10, \
+    assert want.count("url='sweep/research.1'") == 10 and want.count("\u2192 queue.delete(") == 10, \
         "the deadline is re-armed and the old one collected, every time it moves"
 
 

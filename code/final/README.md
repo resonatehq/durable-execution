@@ -164,7 +164,7 @@ should not have to pretend.
 | `main.py` | one line, because Google's buildpack looks for `main.py` and nothing else |
 | `local.py` | the simulated world as a module, so `SIMULATED=1` runs the whole service on a laptop |
 | `tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
-| `test/research.trace` | the path one run takes through the system, reviewed and checked in. A change to it is a diff somebody has to accept |
+| `test/research.trace` | the path one run takes through the system — every call in and every call out — reviewed and checked in. A change to it is a diff somebody has to accept |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `runtime.py` | a worker, as post 002's two halves under its own names — `execute_until_blocked_outer` claims and decides, `execute_until_blocked_inner` runs the function — and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
@@ -194,7 +194,7 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 309 tests in about ninety seconds. The
+separately; `python -m pytest` runs 310 tests in about ninety seconds. The
 tests live in `test/`; `conftest.py` at the root is what puts the code on
 their path.
 

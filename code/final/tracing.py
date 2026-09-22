@@ -86,13 +86,7 @@ ADDRESS = re.compile(r"0x[0-9a-fA-F]{6,}")
 
 @dataclass
 class Call:
-    """One call, as it will be compared. No timing, no addresses.
-
-    Mutable, and appended on the way *in* rather than on the way out, so
-    the log is in call order. Recording on return puts every child before
-    its parent, which is the order a stack unwinds and the opposite of the
-    order anything happened.
-    """
+    """One call, as it will be compared. No timing, no addresses."""
 
     depth: int
     where: str      # the request that caused it, or "" outside one
@@ -100,18 +94,43 @@ class Call:
     args: str
     result: str = "..."
 
-    def __str__(self) -> str:
-        return f"{'  ' * self.depth}{self.name}({self.args}) -> {self.result}"
+    def entered(self) -> str:
+        return f"{'  ' * self.depth}\u2192 {self.name}({self.args})"
+
+    def returned(self) -> str:
+        return f"{'  ' * self.depth}\u2190 {self.name} = {self.result}"
 
 
 @dataclass
 class Trace:
-    calls: list[Call] = field(default_factory=list)
+    """Two events per call: going in, and coming back out.
+
+    One line per call would be half as long and would lose the thing
+    worth having. A single line says what a call did but not *when it
+    finished*, so two calls that overlapped and two that ran one after
+    the other read identically. Today everything here is sequential and
+    the distinction costs nothing; the moment a container serves two
+    deliveries at once, or a leaf does real I/O inside a `gather`, it is
+    the only thing that says which happened.
+
+    It also puts a raise where it happened. `\u2190 Durable.invoke = !Blocked`
+    lands after the calls the attempt made before it gave up, rather than
+    on the line that opened it.
+    """
+
+    #: ("call" | "ret", the call), in the order those two things happened.
+    events: list[tuple[str, Call]] = field(default_factory=list)
+
+    @property
+    def calls(self) -> list[Call]:
+        return [c for kind, c in self.events if kind == "call"]
 
     def tree(self, where: str | None = None) -> str:
-        """Indented by nesting, which is the shape a reader wants."""
-        return "\n".join(str(c) for c in self.calls
-                         if where is None or c.where == where)
+        """Indented by nesting, arrowed by direction."""
+        return "\n".join(
+            (c.entered() if kind == "call" else c.returned())
+            for kind, c in self.events
+            if where is None or c.where == where)
 
     def of(self, name: str) -> list[Call]:
         return [c for c in self.calls if c.name == name]
@@ -198,12 +217,18 @@ def _args(fn: Callable, a: tuple, kw: dict) -> str:
 
 
 def _enter(name: str, args: str, depth: int) -> Call:
-    """Appended on the way in, so the log is in call order."""
     call = Call(depth, _WHERE.get(), name, args)
     log = _LOG.get()
     if log is not None:
-        log.calls.append(call)
+        log.events.append(("call", call))
     return call
+
+
+def _leave(call: Call, result: str) -> None:
+    call.result = result
+    log = _LOG.get()
+    if log is not None:
+        log.events.append(("ret", call))
 
 
 def trace(fn: Callable) -> Callable:
@@ -226,11 +251,11 @@ def trace(fn: Callable) -> Callable:
             try:
                 out = await fn(*a, **kw)
             except BaseException as e:
-                call.result = f"!{type(e).__name__}"
+                _leave(call, f"!{type(e).__name__}")
                 raise
             finally:
                 _DEPTH.reset(token)
-            call.result = brief(out)
+            _leave(call, brief(out))
             return out
         return watched_async
 
@@ -243,11 +268,11 @@ def trace(fn: Callable) -> Callable:
         try:
             out = fn(*a, **kw)
         except BaseException as e:
-            call.result = f"!{type(e).__name__}"
+            _leave(call, f"!{type(e).__name__}")
             raise
         finally:
             _DEPTH.reset(token)
-        call.result = brief(out)
+        _leave(call, brief(out))
         return out
     return watched
 
