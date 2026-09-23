@@ -65,7 +65,7 @@ theorem committed_linearize (old : Option Int) (d : Doc) (rest : List Effect) :
   rcases ha with rfl | ⟨n, _, _, rfl⟩ <;> simp
 
 theorem core_timerAt {d : Doc} (h : Core d) (t : Option Int) : Core { d with timerAt := t } :=
-  ⟨h.nodup, h.weak, h.agrees, h.refs⟩
+  ⟨h.nodup, h.sorted, h.weak, h.agrees, h.refs⟩
 
 theorem inv_linearize {old : Option Int} {d : Doc} (h : Core d) : Inv (linearize old d).1 :=
   ⟨core_timerAt h _, rfl⟩
@@ -98,7 +98,7 @@ inductive Reachable (cfg : Cfg) : Doc → Prop where
   | step {d d'} : Reachable cfg d → Step cfg d d' → Reachable cfg d'
 
 theorem inv_empty : Inv {} := by
-  refine ⟨⟨List.nodup_nil, ?_, ?_, ?_⟩, rfl⟩ <;> intro o ho <;> simp at ho
+  refine ⟨⟨List.nodup_nil, List.Pairwise.nil, ?_, ?_, ?_⟩, rfl⟩ <;> intro o ho <;> simp at ho
 
 theorem step_inv {cfg} {d d' : Doc} (h : Inv d) (s : Step cfg d d') : Inv d' := by
   cases s with

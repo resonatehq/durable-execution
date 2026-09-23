@@ -16,8 +16,7 @@ the broad one for variety and the narrow one for the long chains.
 Skipped when there is no `lake` on the path. `LEAN_SCRIPTS` sets how many
 scripts per alphabet (default 300); `LEAN_SEED` pins the seed.
 
-    cd lean && lake build            # once, and after every change to lean/
-    python -m pytest test/test_lean.py
+    python -m pytest test/test_lean.py      # runs `lake build` first
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ from pathlib import Path
 import pytest
 
 import explore as X
+import kernel as K
 from kernel import (
     Document, Execute, PromiseCreate, PromiseGet, PromiseRegisterCallback,
     PromiseRegisterListener, PromiseSettle, SetDocument, SetTimeout, DelTimeout, Send,
@@ -145,9 +145,25 @@ def run_python(script: list[tuple[int, object]]) -> list[dict]:
     return out
 
 
+_built = False
+
+
+def build() -> None:
+    """`lake build`, once per session: the model and every proof about it.
+    A proof that no longer checks fails the suite here, before any script
+    runs, so the differential never compares against a model nobody has
+    proved anything about."""
+    global _built
+    if not _built:
+        proc = subprocess.run([LAKE, "build"], capture_output=True, text=True, cwd=LEAN, timeout=3600)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        _built = True
+
+
 def run_lean(scripts: list[list[tuple[int, object]]]) -> list[list[dict]]:
     """Every script through the Lean kernel, in one process: a blank line
     between scripts starts the next from the empty document."""
+    build()
     lines = []
     for script in scripts:
         for now, action in script:
@@ -277,3 +293,44 @@ def test_the_driver_can_disagree():
     assert got == want
     want[0]["effects"][-1][1] = "http://elsewhere"
     assert got != want
+
+
+def _release_without_dispatch(tx, r, now, cfg):
+    """`task.release` as it would be if someone dropped its dispatch: the task
+    goes back to pending and nobody is told."""
+    o = tx.doc.get(r.id)
+    if o is None or o.task is None:
+        return K.Reply.err(404, "Task not found")
+    t = o.task
+    if t.state != K.T_ACQUIRED or t.version != r.version:
+        return K.Reply.err(409, "Task version mismatch or invalid state")
+    t.state, t.pid, t.ttl = K.T_PENDING, None, None
+    t.arm_retry(now + cfg.retry_timeout)
+    return K.Reply.ok({})
+
+
+def _settle_keeps_listeners(tx, id, now, cfg):
+    """A settlement chain that notifies its listeners but forgets to forget
+    them: the next settle attempt is refused, so only the document shows it."""
+    o = tx.doc.get(id)
+    keep = list(o.promise.listeners)
+    _real_trigger(tx, id, now, cfg)
+    o.promise.listeners = keep
+
+
+_real_trigger = K.trigger_settlement
+
+
+@pytest.mark.parametrize("name,mutant", [
+    ("task_release", _release_without_dispatch),
+    ("trigger_settlement", _settle_keeps_listeners),
+])
+def test_the_differential_catches_a_changed_kernel(monkeypatch, name, mutant):
+    """The same differential, against a kernel.py with one behaviour changed,
+    must fail: a proof about the Lean kernel covers kernel.py only because
+    this test would notice the two drifting apart."""
+    monkeypatch.setattr(K, name, mutant)
+    rng = random.Random(3)
+    scripts = [walk(rng, X.NARROW, rng.randint(5, 30)) for _ in range(200)]
+    with pytest.raises(AssertionError):
+        check(scripts)

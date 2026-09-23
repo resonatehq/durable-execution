@@ -31,7 +31,11 @@ theorem held_modify {E E' : String → Prop} {d : Doc} {id f o}
     (hE : ∀ x, x ≠ id → E x → E' x) : Held E' (d.modify id f) := by
   have hids := ids_modify d id hf
   obtain ⟨ho, hoid⟩ := get_mem hg
-  refine ⟨hids ▸ h.nodup, ?_, ?_, ?_⟩
+  refine ⟨hids ▸ h.nodup, sorted_map (fun o => by
+      show (if o.id == id then f o else o).id = o.id
+      split
+      · exact hf o
+      · rfl) h.sorted, ?_, ?_, ?_⟩
   · intro o' ho'
     obtain ⟨o2, ho2, rfl⟩ := mem_modify ho'
     by_cases hx : o2.id = id
@@ -64,7 +68,7 @@ theorem held_insert {E : String → Prop} {d : Doc} {o}
     (h : Held E d) (hg : d.get o.id = none) (hw : Weak o) (ha : Agrees o) (hr : Refs d.ids o) :
     Held E (d.insert o) := by
   have hsub : ∀ x ∈ d.ids, x ∈ (d.insert o).ids := fun x hx => mem_ids_insert.2 (Or.inr hx)
-  refine ⟨?_, ?_, ?_, ?_⟩
+  refine ⟨?_, sorted_insertSorted o h.sorted, ?_, ?_, ?_⟩
   · refine (ids_insert_perm d o).nodup_iff.2 (List.nodup_cons.2 ⟨?_, h.nodup⟩)
     intro hm
     obtain ⟨o', ho', he⟩ := List.mem_map.1 hm
@@ -148,7 +152,7 @@ theorem held_trigger {E : String → Prop} {tx : Tx} {id now cfg}
   unfold triggerSettlement
   split
   · rename_i hg
-    refine ⟨⟨h.nodup, h.weak, (fun o ho hn => h.agrees o ho fun he => hn ⟨he, get_none hg o ho⟩), h.refs⟩,
+    refine ⟨⟨h.nodup, h.sorted, h.weak, (fun o ho hn => h.agrees o ho fun he => hn ⟨he, get_none hg o ho⟩), h.refs⟩,
       rfl, fun _ hx => hx⟩
   · rename_i o hg
     obtain ⟨ho, hoid⟩ := get_mem hg
@@ -215,7 +219,7 @@ theorem core_phase1 {d : Doc} {now} (h : Core d) :
   have hid : ∀ o : Obj, (if expiring now o then expire o else o).id = o.id := by
     intro o; split <;> rfl
   have hids := ids_map (d := d) hid
-  refine ⟨⟨hids ▸ h.nodup, ?_, ?_, ?_⟩, ?_⟩
+  refine ⟨⟨hids ▸ h.nodup, sorted_map hid h.sorted, ?_, ?_, ?_⟩, ?_⟩
   · intro o' ho'
     obtain ⟨o, ho, rfl⟩ := List.mem_map.1 ho'
     split
@@ -252,7 +256,7 @@ theorem core_sweepPhase {tx : Tx} {due : Obj → Bool} {f : Obj → Obj}
     · rfl
   have hids := ids_map (d := tx.doc) hid
   have hloc := h.local
-  refine ⟨?_, ?_, ?_, ?_⟩
+  refine ⟨?_, sorted_map hid h.sorted, ?_, ?_, ?_⟩
   · simp only [sweepPhase]; rw [hids]; exact h.nodup
   · intro o' ho'
     obtain ⟨o, ho, rfl⟩ := List.mem_map.1 ho'

@@ -16,8 +16,14 @@ The invariants split three ways.
   settled; an object has a task exactly when its promise has a target.
 * `Refs ids o` says every id an object mentions — an awaiter in a callback, an
   awaited promise in a resume — names an object that exists.
-* `Core d` is both for every object, and ids that are unique. `Inv d` adds
-  that the armed timer is the earliest armed deadline.
+* `Core d` is both for every object, ids that are unique, and objects in
+  Dewey order. `Inv d` adds that the armed timer is the earliest armed
+  deadline.
+
+Together that is every clause of `check_invariants`, and three it does not
+check: a promise that has settled has a fulfilled task (the Python checks
+this), but also a pending promise has an unfulfilled one, and an object has a
+task exactly when its promise has a target.
 
 A settlement is two writes to one object, and between them that object breaks
 the fourth clause of `Local`: its promise has settled, its task has not yet
@@ -28,6 +34,101 @@ object out of `E`.
 -/
 
 namespace Kernel
+
+/-! ## Dewey order is a strict total order on keys -/
+
+theorem Seg.lt_irrefl : ∀ s : Seg, s.lt s = false
+  | .num n => by simp [Seg.lt]
+  | .str x => by simp [Seg.lt, String.lt_irrefl]
+
+theorem Seg.lt_trans : ∀ {a b c : Seg}, a.lt b → b.lt c → a.lt c
+  | .num _, .num _, .num _, h1, h2 => by simp [Seg.lt] at *; omega
+  | .num _, .num _, .str _, _, _ => rfl
+  | .num _, .str _, .str _, _, _ => rfl
+  | .str _, .str _, .str _, h1, h2 => by simp [Seg.lt] at *; exact String.lt_trans h1 h2
+  | .num _, .str _, .num _, _, h2 => by simp [Seg.lt] at h2
+  | .str _, .num _, _, h1, _ => by simp [Seg.lt] at h1
+  | .str _, .str _, .num _, _, h2 => by simp [Seg.lt] at h2
+
+theorem Seg.eq_of_not_lt : ∀ {a b : Seg}, a.lt b = false → b.lt a = false → a = b
+  | .num x, .num y, h1, h2 => by simp [Seg.lt] at *; congr 1; omega
+  | .num _, .str _, h1, _ => by simp [Seg.lt] at h1
+  | .str _, .num _, _, h2 => by simp [Seg.lt] at h2
+  | .str x, .str y, h1, h2 => by
+    simp only [Seg.lt, decide_eq_false_iff_not] at h1 h2
+    exact congrArg Seg.str (String.le_antisymm (String.not_lt.1 h2) (String.not_lt.1 h1))
+
+theorem keyLt_irrefl : ∀ k : List Seg, keyLt k k = false
+  | [] => rfl
+  | a :: as => by simp [keyLt, Seg.lt_irrefl, keyLt_irrefl as]
+
+theorem keyLt_cons (a b : Seg) (as bs : List Seg) :
+    keyLt (a :: as) (b :: bs) = true ↔ a.lt b = true ∨ (a = b ∧ keyLt as bs = true) := by
+  show (if a.lt b then true else if b.lt a then false else keyLt as bs) = true ↔ _
+  by_cases hab : a.lt b = true
+  · simp [hab]
+  · by_cases hba : b.lt a = true
+    · have hne : a ≠ b := by intro e; subst e; simp [Seg.lt_irrefl] at hba
+      simp [hab, hba, hne]
+    · have e := Seg.eq_of_not_lt (by simpa using hab) (by simpa using hba)
+      subst e
+      simp [Seg.lt_irrefl]
+
+theorem keyLt_trans : ∀ {a b c : List Seg}, keyLt a b → keyLt b c → keyLt a c
+  | [], _ :: _, _ :: _, _, _ => rfl
+  | [], [], _, h, _ => by simp [keyLt] at h
+  | _, _ :: _, [], _, h => by simp [keyLt] at h
+  | _ :: _, [], _, h, _ => by simp [keyLt] at h
+  | x :: xs, y :: ys, z :: zs, h1, h2 => by
+    rw [keyLt_cons] at h1 h2 ⊢
+    rcases h1 with h1 | ⟨rfl, h1⟩ <;> rcases h2 with h2 | ⟨rfl, h2⟩
+    · exact Or.inl (Seg.lt_trans h1 h2)
+    · exact Or.inl h1
+    · exact Or.inl h2
+    · exact Or.inr ⟨rfl, keyLt_trans h1 h2⟩
+
+theorem keyLt_asymm {a b : List Seg} (h : keyLt a b) : keyLt b a = false := by
+  cases e : keyLt b a
+  · rfl
+  · have := keyLt_trans h e; rw [keyLt_irrefl] at this; cases this
+
+/-- Objects in order: none sorts strictly before one ahead of it. -/
+def SortedObjs (l : List Obj) : Prop := l.Pairwise fun a b => keyLt (dewey b.id) (dewey a.id) = false
+
+theorem sorted_map {l : List Obj} {g : Obj → Obj} (hg : ∀ o, (g o).id = o.id) (h : SortedObjs l) :
+    SortedObjs (l.map g) := by
+  unfold SortedObjs
+  rw [List.pairwise_map]
+  exact h.imp fun {a b} hab => by rw [hg, hg]; exact hab
+
+theorem Doc.insertSorted_perm (o : Obj) (l : List Obj) : (insertSorted o l).Perm (o :: l) := by
+  induction l with
+  | nil => simp [Doc.insertSorted]
+  | cons x xs ih =>
+    unfold Doc.insertSorted
+    split
+    · exact List.Perm.refl _
+    · exact (List.Perm.cons x ih).trans (List.Perm.swap o x xs)
+
+theorem sorted_insertSorted (o : Obj) : ∀ {l : List Obj}, SortedObjs l → SortedObjs (Doc.insertSorted o l)
+  | [], _ => List.pairwise_singleton _ _
+  | x :: xs, h => by
+    unfold SortedObjs at h
+    rw [List.pairwise_cons] at h
+    unfold Doc.insertSorted
+    split
+    · rename_i hox
+      refine List.pairwise_cons.2 ⟨fun y hy => ?_, List.pairwise_cons.2 h⟩
+      rcases List.mem_cons.1 hy with rfl | hy
+      · exact keyLt_asymm hox
+      · cases e : keyLt (dewey y.id) (dewey o.id)
+        · rfl
+        · have := keyLt_trans e hox; rw [h.1 y hy] at this; cases this
+    · rename_i hox
+      refine List.pairwise_cons.2 ⟨fun z hz => ?_, sorted_insertSorted o h.2⟩
+      rcases List.mem_cons.1 ((Doc.insertSorted_perm o xs).mem_iff.1 hz) with rfl | hz
+      · simpa using hox
+      · exact h.1 z hz
 
 /-! ## Statements -/
 
@@ -57,6 +158,7 @@ def Refs (ids : List String) (o : Obj) : Prop :=
 tasks are not yet fulfilled. -/
 structure Held (E : String → Prop) (d : Doc) : Prop where
   nodup : d.ids.Nodup
+  sorted : SortedObjs d.objects
   weak : ∀ o ∈ d.objects, Weak o
   agrees : ∀ o ∈ d.objects, ¬ E o.id → Agrees o
   refs : ∀ o ∈ d.objects, Refs d.ids o
@@ -69,10 +171,10 @@ theorem Core.local {d : Doc} (h : Core d) : ∀ o ∈ d.objects, Local o :=
   fun o ho => ⟨h.weak o ho, h.agrees o ho (by simp)⟩
 
 theorem Held.core {E} {d : Doc} (h : Held E d) (hE : ∀ o ∈ d.objects, ¬ E o.id) : Core d :=
-  ⟨h.nodup, h.weak, fun o ho _ => h.agrees o ho (hE o ho), h.refs⟩
+  ⟨h.nodup, h.sorted, h.weak, fun o ho _ => h.agrees o ho (hE o ho), h.refs⟩
 
 theorem Held.mono {E E' : String → Prop} {d : Doc} (h : Held E d) (hE : ∀ x, E x → E' x) : Held E' d :=
-  ⟨h.nodup, h.weak, fun o ho hn => h.agrees o ho (fun hx => hn (hE _ hx)), h.refs⟩
+  ⟨h.nodup, h.sorted, h.weak, fun o ho hn => h.agrees o ho (fun hx => hn (hE _ hx)), h.refs⟩
 
 /-! ## The document: `get`, `modify`, `insert` -/
 
@@ -175,15 +277,6 @@ theorem get_modify_self {d : Doc} (hn : d.ids.Nodup) {id f o} (hf : IdPres f) (h
     obtain ⟨ho', ho'id⟩ := get_mem hg
     have hn' : (d.modify id f).ids.Nodup := by rwa [ids_modify d id hf]
     exact congrArg some (eq_of_get hn' hg hmem (by rw [hf, hoid])).symm
-
-theorem insertSorted_perm (o : Obj) (l : List Obj) : (insertSorted o l).Perm (o :: l) := by
-  induction l with
-  | nil => simp [insertSorted]
-  | cons x xs ih =>
-    unfold insertSorted
-    split
-    · exact List.Perm.refl _
-    · exact (List.Perm.cons x ih).trans (List.Perm.swap o x xs)
 
 theorem mem_insert {d : Doc} {o o'} : o' ∈ (d.insert o).objects ↔ o' = o ∨ o' ∈ d.objects := by
   simp [insert, (insertSorted_perm o d.objects).mem_iff]

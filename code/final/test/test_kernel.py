@@ -172,6 +172,27 @@ def test_objects_sort_by_dewey_id():
     assert dewey("o:2") < dewey("o:10")
 
 
+def test_ids_that_share_a_key_are_in_order_either_way_round():
+    """`o:1` and `o:01` have the same Dewey key, so either may come first.
+    The check used to compare against `sorted` of a set, which puts the two
+    in hash order: whichever of these documents disagreed with the hash was
+    reported unsorted. Found stating the invariant in Lean (`SortedObjs`)."""
+    for ids in (["o:1", "o:01"], ["o:01", "o:1"]):
+        doc = Document()
+        for id in ids:
+            doc, _, _, _ = step(doc, create(id, 100), 0)
+        assert [o.id for o in doc.objects] == ids
+
+
+def test_a_timer_armed_at_zero_is_still_armed():
+    """A halted task holds no timer. The check read `(retry_at or lease_at)`,
+    and 0 is falsy, so a timer at instant 0 passed as no timer at all."""
+    doc, _, _, _ = step(Document(), create("o", 100, {"resonate:target": W}), 0)
+    doc.objects[0].task = Task(state="halted", retry_at=0)
+    doc.timer_at = 0
+    assert check_invariants(doc) == "task o: halted with an armed timer"
+
+
 def test_a_promise_record_carries_the_wire_shape():
     _, _, reply, _ = step(Document(), create("o:a", 100, {"resonate:target": W}), 7)
     assert reply.data == {

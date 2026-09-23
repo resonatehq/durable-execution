@@ -193,6 +193,8 @@ should not have to pretend.
 | `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Routes.handle` |
 | `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
+| `lean/` | the kernel transcribed into Lean 4, and proofs that every reachable document satisfies `check_invariants`, that settlement is terminal, that stale fencing tokens are refused, and that no wakeup is lost. `lean/README.md` says exactly what is and is not proved |
+| `test/test_lean.py` | what makes those proofs about `kernel.py`: the same random scripts through both kernels, every reply, effect and committed document required equal, and two mutants of `kernel.py` it has to catch. Skips when there is no `lake` |
 
 The kernel has no dependencies, and neither does anything the kernel is
 made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
@@ -200,9 +202,9 @@ made of: `engine.py`, `codec.py`, `ports.py`, `spec/`, `store_mem.py`,
 standard library. Only `store_gcp.py`, `queue_gcp.py` and the entry point in
 `app.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 317 tests in about ninety seconds, and
-320 in about two and a quarter minutes when `GCS_BUCKET` names a bucket,
-those three being the ones that need one. The tests live in `test/`;
+separately; `python -m pytest` runs 324 tests in about ninety seconds, five
+more when `lake` is on the path for `test/test_lean.py`, and three more,
+in about two and a quarter minutes, when `GCS_BUCKET` names a bucket. The tests live in `test/`;
 `conftest.py` at the root is what puts the code on their path.
 
 Two campaigns are opt-in because they take minutes rather than seconds:
@@ -213,7 +215,7 @@ python explore.py --depth 7 --alphabet narrow
 hypothesis fuzz -- -k TestKernelMachine      # needs hypofuzz; runs until stopped
 ```
 
-Four layers of evidence, each answering something the others cannot:
+Five layers of evidence, each answering something the others cannot:
 
 - **The unit tests** pin each operation's branches against the Rust kernel's
   own test suite, which we transcribed from.
@@ -225,6 +227,12 @@ Four layers of evidence, each answering something the others cannot:
   narrow one, which is where the long chains live.
 - **The Hypothesis machine** goes further than any bound, and shrinks what it
   finds.
+- **The proofs** go further than any search: they cover every document the
+  kernel can reach, at any depth. `lean/` proves the invariants,
+  first-writer-wins, fencing and no lost wakeups for a Lean transcription of
+  the kernel, and `test/test_lean.py` holds the transcription equal to
+  `kernel.py`. Stating the invariants precisely found two bugs in
+  `check_invariants` itself, both now fixed.
 
 ### Steering the search
 

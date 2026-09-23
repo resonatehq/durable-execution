@@ -1024,7 +1024,13 @@ def check_invariants(doc: Document) -> str | None:
     """Structural invariants every committed document satisfies. Returns the
     first violation, or None."""
     ids = {o.id for o in doc.objects}
-    if [o.id for o in doc.objects] != sorted(ids, key=dewey):
+    if len(ids) != len(doc.objects):
+        return "duplicate object ids"
+    # Non-decreasing keys, not a comparison against `sorted(ids)`: distinct
+    # ids can share a key (`o:1`, `o:01`), and sorting a set puts those in
+    # hash order, so the old form failed some runs of a correct document.
+    keys = [dewey(o.id) for o in doc.objects]
+    if any(b < a for a, b in zip(keys, keys[1:])):
         return "objects are not sorted by dewey id"
     for o in doc.objects:
         p, t = o.promise, o.task
@@ -1044,7 +1050,7 @@ def check_invariants(doc: Document) -> str | None:
             return f"task {o.id}: pending without exactly a retry timer"
         if t.state == T_ACQUIRED and (t.lease_at is None or t.retry_at is not None):
             return f"task {o.id}: acquired without exactly a lease timer"
-        if t.state in (T_SUSPENDED, T_HALTED, T_FULFILLED) and (t.retry_at or t.lease_at) is not None:
+        if t.state in (T_SUSPENDED, T_HALTED, T_FULFILLED) and (t.retry_at is not None or t.lease_at is not None):
             return f"task {o.id}: {t.state} with an armed timer"
         # Settlement is terminal for the task that owns the promise.
         if p.state != PENDING and t.state != T_FULFILLED:
