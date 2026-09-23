@@ -210,12 +210,19 @@ def _cfg() -> KernelCfg:
 
 
 def _route() -> None:
-    """`WORKERS` routes function names to the URLs they run at, as JSON.
-    The only thing in this system that knows the shape of the deployment:
-    `{"search": "https://search-abc.a.run.app/execute"}`."""
+    """`ROUTES_WORKERS` routes function names to the URLs they run at, as
+    JSON. The only thing in this system that knows the shape of the
+    deployment: `{"search": "https://search-abc.a.run.app/execute"}`.
+
+    Not `WORKERS`, which is what this was called until Cloud Run refused to
+    start it: `functions-framework` reads `WORKERS` as gunicorn's worker
+    count and dies on `int()` of our JSON, before the container ever listens
+    on its port. Nothing local sees it -- `test_http.py` builds the app with
+    `create_app` and never starts gunicorn -- so the name has to stay out of
+    the runtime's namespace rather than be tested into safety."""
     from sdk import TARGETS
 
-    for name, url in json.loads(os.environ.get("WORKERS", "{}")).items():
+    for name, url in json.loads(os.environ.get("ROUTES_WORKERS", "{}")).items():
         TARGETS[name] = url
 
 

@@ -642,7 +642,7 @@ BASE_URL         where this service answers, so a sweep can be addressed
 ROUTES_ACCOUNT  whose OIDC token the queue signs with, and /execute and
                  /sweep verify. Unset says the network is the protection,
                  and a deployment had better mean it
-WORKERS          {"search": "https://search-xyz.a.run.app/execute"} — the
+ROUTES_WORKERS   {"search": "https://search-xyz.a.run.app/execute"} — the
                  only thing in the system that knows the deployment's shape
 RETRY_TIMEOUT    how long a claimed task may go quiet before it is offered
                  again (default 30s)

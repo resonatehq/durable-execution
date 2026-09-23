@@ -181,3 +181,63 @@ def test_the_entry_point_the_buildpack_looks_for_exists():
     amount of local testing reaches."""
     assert (ROOT / "main.py").is_file()
     assert "handler" in (ROOT / "main.py").read_text()
+
+
+#: Every environment variable `functions-framework` reads for itself,
+#: harvested from the installed package rather than from memory. A name in
+#: here means the runtime owns it, whatever we might want it for.
+RUNTIME_OWNED = {
+    "CLOUD_RUN_TIMEOUT_SECONDS", "ENTRY_POINT", "FUNCTION_NAME",
+    "FUNCTION_SOURCE", "FUNCTION_TARGET", "FUNCTION_TRIGGER_TYPE",
+    "GUNICORN_LOG_LEVEL", "HTTP_FUNCTION_EXECUTION_ID", "K_SERVICE",
+    "LOG_EXECUTION_ID", "THREADED_TIMEOUT_ENABLED", "THREADS", "WORKERS",
+}
+
+#: Ones the service reads on purpose because the platform sets them.
+BORROWED = {"K_REVISION"}
+
+
+def configured_names() -> set[str]:
+    """Every environment variable `app.py` reads."""
+    names: set[str] = set()
+    tree = ast.parse((ROOT / "app.py").read_text())
+    for node in ast.walk(tree):
+        # os.environ.get("X") / os.environ.get("X", default)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr in ("get", "pop") and node.args \
+                and isinstance(node.args[0], ast.Constant) \
+                and isinstance(node.args[0].value, str):
+            if "environ" in ast.dump(node.func.value):
+                names.add(node.args[0].value)
+        # os.environ["X"]
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
+                and isinstance(node.slice.value, str) and "environ" in ast.dump(node.value):
+            names.add(node.slice.value)
+    return names
+
+
+def test_no_configuration_name_collides_with_the_runtime():
+    """The bug this file could not have caught, so it catches the next one.
+
+    `WORKERS` was the routing map until a Cloud Run deploy refused to start:
+    `functions-framework` reads it as gunicorn's worker count and raises
+    `ValueError: invalid literal for int()` on our JSON, before the container
+    listens on its port. Every local test builds the app with `create_app`
+    and never starts gunicorn, so nothing saw it -- the collision is only
+    visible on the real serving path.
+
+    A name is not testable into safety here; it has to stay out of the
+    runtime's namespace. So this asserts the namespaces are disjoint.
+    """
+    clash = (configured_names() & RUNTIME_OWNED) - BORROWED
+    assert not clash, (
+        "app.py reads environment variables functions-framework owns: "
+        + ", ".join(sorted(clash))
+        + " -- the container will not start. Prefix them, as ROUTES_* does.")
+
+
+def test_the_check_can_see_the_names_at_all():
+    """A set-intersection test passes just as well against an empty set,
+    which would make the check above a decoration."""
+    found = configured_names()
+    assert {"BUCKET", "PROJECT", "QUEUE", "ROUTES_WORKERS"} <= found, found

@@ -30,13 +30,23 @@ longer deadline is clamped, and the sweep it triggers finds nothing due and
 re-arms. Cheap, and a place a bug would make a promise never time out, so
 it has a test.
 
-## What is not verified
+## What is verified
 
-This file has never been run against Google Cloud Tasks. It is written
-against the documented API, and `queue_mem` is what the tests drive. The
-two agree on the interface by construction and on the contract by
-`queues.conformance`, which both pass, and on nothing else until someone
-points this at a project.
+On 2026-09-23 all eight claims held against a real Cloud Tasks queue: the
+service names each task, two creates are two tasks, cancelling is
+idempotent and cancelling what was never there succeeds, a dispatch
+carries no schedule, a past schedule is accepted and one past the horizon
+is clamped. `spec.check` prints it when `TASKS_QUEUE` names a queue, which
+is how the run was made repeatable rather than a thing done once.
+
+The queue used for that is a paused one: it accepts creation and deletion,
+which is the whole contract, and dispatches nothing, so the eight claims
+run without a single POST escaping.
+
+Delivery to a real endpoint is verified separately and less completely: a
+task created here reached a Cloud Run service and its handler answered
+200, so the OIDC signing path works end to end. What that run also found
+is the `actAs` requirement above.
 """
 
 from __future__ import annotations
@@ -58,6 +68,15 @@ class Queue:
     token for that account, and the handler verifies it. Without one the
     handler must be unreachable except from inside the network, and saying
     which of the two a deployment relies on is not optional.
+
+    Creating such a task needs `iam.serviceAccounts.actAs` on the account
+    being signed for, which the service running this code does not get by
+    running *as* that account. A deployment where the service and the token
+    name one account still needs that account granted
+    `roles/iam.serviceAccountUser` on itself, or every `create` raises
+    `PermissionDenied`. Being the account and being allowed to mint tokens
+    for it are two different grants; a real deployment is where that
+    difference shows up.
     """
 
     def __init__(self, project: str, location: str, queue: str, base_url: str,

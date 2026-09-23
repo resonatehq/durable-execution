@@ -56,7 +56,7 @@ def client(monkeypatch):
     import functions_framework
 
     monkeypatch.setenv("SIMULATED", "1")
-    monkeypatch.setenv("WORKERS", json.dumps(
+    monkeypatch.setenv("ROUTES_WORKERS", json.dumps(
         {"research": WORKER, "agent": WORKER, "search": WORKER}))
     monkeypatch.delenv("ROUTES_ACCOUNT", raising=False)
     local.reset()
