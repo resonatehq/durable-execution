@@ -32,26 +32,46 @@ serves the whole protocol on localhost over the in-memory ports — same
 engine, same kernel, same codec. `main.py` is the entry point the
 buildpack insists on; it imports `handler` from here.
 
-## What is not verified
+## What is verified
 
-This has never run on Cloud Run. What *is* verified is more than it was:
-`test_app.py` drives the router directly, and `test_http.py` drives this
-file's `handler` through a real Flask app built the way Cloud Run builds
-it, including a whole research agent over nothing but HTTP.
+This has run on Cloud Run. On 2026-09-23 the research agent ran to
+completion there: a client task created the promise, Cloud Tasks dispatched
+each step with an OIDC token Google minted, every transition committed to
+Google Cloud Storage under a generation precondition, and the run resolved
+to the answer the simulator gives, in 22 conditional writes across six
+promises. The deadline was armed and disarmed as designed -- the finished
+document carries no `ta`, so the run left nothing queued -- and the split
+the local trace shows held up: the two awaited calls ran in-process and the
+three `rpc` branches went over the queue.
 
-On 2026-09-22 the same entry point was driven over a bound socket with
-Google Cloud Storage underneath rather than the in-memory store, by a pump
-POSTing what Cloud Tasks would: the agent ran to a correct answer in five
-deliveries, and again in six when the first dispatch was thrown away
-unexecuted -- there the deadline armed in the document fired as
-`/sweep/<origin>`, the run recovered, and every unit of work was still
-done exactly once. So the composition root, the routes, the JSON, the
-status codes and the recovery path do work against real storage.
+What that took, besides the code: eleven IAM bindings and ten distinct
+permission failures, none of which the documentation implies. Three are
+worth repeating because they are not guessable. Creating a task with an
+OIDC token needs `actAs` on the account signed for, which a service does
+not get by running as it. Retiring a deadline needs `cloudtasks.taskDeleter`,
+which `enqueuer` does not include, and without it every transition
+livelocks: the sweep re-arms, the disarm 403s, and the queue retries. And
+`roles/storage.objectAdmin` does not include `storage.buckets.get`, which
+this code never needs and the build tooling does.
 
-What remains untested is the OIDC acceptance path, which needs Google to
-answer; Cloud Tasks itself, which `queue_gcp.py` has still never spoken to;
-and the deployment -- the buildpack, `main.py`, cold start, and what
-concurrent instances do to one origin's object.
+## What is still not verified
+
+The recovery path on the deployment. A dispatch thrown away unexecuted was
+recovered by the armed deadline over a local socket, and the deadline is
+armed and disarmed correctly here, but no run on Cloud Run has yet lost a
+message and been rescued by a sweep.
+
+Concurrency, too: every run so far has been one at a time. What several
+instances do to one origin's object under real contention is measured in
+`store_gcp.py` and unobserved here.
+
+And the local layers stay what they were: `test_app.py` drives the router
+directly, `test_http.py` drives this file's `handler` through a real Flask
+app built the way Cloud Run builds it, and on 2026-09-22 the same entry
+point ran over a bound socket with Google Cloud Storage underneath -- where
+a dropped dispatch was recovered by its deadline and every unit of work was
+still done exactly once. Those remain the cheap checks; the deployment is
+the expensive one.
 """
 
 from __future__ import annotations
@@ -220,7 +240,20 @@ def _route() -> None:
     on its port. Nothing local sees it -- `test_http.py` builds the app with
     `create_app` and never starts gunicorn -- so the name has to stay out of
     the runtime's namespace rather than be tested into safety."""
+    from importlib import import_module
+
     from sdk import TARGETS
+
+    # `ROUTES_APP` names the modules whose `@resonate` functions this worker
+    # can run, comma separated. Importing them is what fills `sdk.REGISTRY`,
+    # and a worker with an empty registry answers `KeyError` to the first
+    # dispatch it is handed -- it serves the protocol perfectly and executes
+    # nothing. The first Cloud Run deployment did exactly that, because the
+    # only module defining the example functions was a test file, which the
+    # build does not ship.
+    for module in os.environ.get("ROUTES_APP", "").split(","):
+        if module.strip():
+            import_module(module.strip())
 
     for name, url in json.loads(os.environ.get("ROUTES_WORKERS", "{}")).items():
         TARGETS[name] = url

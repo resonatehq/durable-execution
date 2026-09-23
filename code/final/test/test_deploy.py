@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -241,3 +242,42 @@ def test_the_check_can_see_the_names_at_all():
     which would make the check above a decoration."""
     found = configured_names()
     assert {"BUCKET", "PROJECT", "QUEUE", "ROUTES_WORKERS"} <= found, found
+
+
+def test_a_worker_with_no_application_module_registers_nothing():
+    """The gap the first Cloud Run deployment fell into.
+
+    A container that imports `app.py` alone has an empty `sdk.REGISTRY`: it
+    answers `promise.create` and `promise.get` correctly, passes a health
+    check, and raises `KeyError` on the first dispatch it is handed, because
+    the only module defining the example functions was a test file and the
+    build does not ship `test/`. Serving the protocol and being able to run
+    anything are two different things, and only the second needs
+    `ROUTES_APP`.
+    """
+    import sdk
+
+    before = dict(sdk.REGISTRY)
+    sdk.REGISTRY.clear()
+    try:
+        os.environ.pop("ROUTES_APP", None)
+        import app
+        app._route()
+        assert sdk.REGISTRY == {}, "nothing should register without ROUTES_APP"
+
+        os.environ["ROUTES_APP"] = "demo"
+        app._route()
+        assert set(sdk.REGISTRY) == {"research", "agent", "search"}, sorted(sdk.REGISTRY)
+    finally:
+        os.environ.pop("ROUTES_APP", None)
+        sdk.REGISTRY.clear()
+        sdk.REGISTRY.update(before)
+
+
+def test_the_example_the_deployment_runs_is_the_one_in_the_readme():
+    """`demo.py` is what a deployed worker executes, so it has to stay the
+    program the project describes rather than drift into a second version."""
+    src = (ROOT / "demo.py").read_text()
+    for step in ("Plan the searches", "Fan out the searches",
+                 "Synthesize the results", "gather(search.rpc(q)"):
+        assert step in src, step
