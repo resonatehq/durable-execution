@@ -98,9 +98,15 @@ class Promise:
         return RESOLVED if self.tags.get(TAG_TIMER) == "true" else REJECTED_TIMEDOUT
 
     def timeout_armed(self) -> bool:
-        """Only a pending promise with a target has a deadline the sweep fires;
-        an undispatched promise expires lazily, when someone reads it."""
-        return self.state == PENDING and self.target() is not None
+        """Whether the sweep has to fire for this promise's deadline.
+
+        Exactly the external ones. An external promise is awaitable, so
+        something may be asleep on it and the deadline is the only thing that
+        will wake them; an internal promise is not, so it can expire lazily,
+        when someone reads it. A timer is external -- that is what the tag
+        means -- and needs no separate mention here.
+        """
+        return self.state == PENDING and self.is_external()
 
     def to_record(self, id: str) -> dict[str, Any]:
         out: dict[str, Any] = {

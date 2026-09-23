@@ -64,7 +64,7 @@ from typing import Any, Callable
 from tracing import trace
 from kernel import (
     PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
-    TaskFence, Value,
+    TAG_TIMER, TaskFence, Value,
 )
 from ports import Conflict, Unavailable
 
@@ -281,6 +281,31 @@ def resonate(fn: Callable) -> Durable:
 def route(fn: Durable, target: str) -> None:
     """Say where a function runs. Wiring, not definition."""
     TARGETS[fn.name] = target
+
+
+async def sleep(ms: int) -> None:
+    """Wait `ms` milliseconds, durably.
+
+    A durable sleep is a promise that resolves rather than rejects when its
+    deadline passes -- the kernel's `resonate:timer` tag -- so the passage of
+    time settles it and the settlement wakes whoever awaited it. It carries
+    no target, because there is nothing to dispatch: waiting is the whole of
+    the work, and `promise_create` refuses a timer that names one.
+
+    It takes a position like any other call, so a run that sleeps and is
+    replayed reads the same promise back rather than sleeping again. A sleep
+    already elapsed costs nothing on replay; a sleep still running blocks the
+    worker exactly as an unfinished `rpc` does.
+    """
+    if ms < 0:
+        raise ValueError("a sleep cannot be negative")
+    inv, frame = current()
+    id = frame.child()
+    _, data = inv.fence(PromiseCreate(
+        id, inv.now() + ms, dumps({"sleep": ms}), {TAG_TIMER: "true"}))
+    if data["promise"]["state"] == PENDING:
+        raise Blocked([id])
+    return None
 
 
 async def gather(*awaitables) -> list[Any]:
