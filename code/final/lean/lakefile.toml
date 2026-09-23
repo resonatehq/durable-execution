@@ -1,0 +1,12 @@
+name = "kernel"
+version = "0.1.0"
+defaultTargets = ["Kernel"]
+
+[[lean_lib]]
+name = "Kernel"
+
+# The differential driver. Run it with `lake env lean --run Main.lean`, which
+# needs no C toolchain; `lake build replay` links a native one where there is.
+[[lean_exe]]
+name = "replay"
+root = "Main"
