@@ -13,7 +13,7 @@ paid for twice, and production has no business carrying that.
 
 from __future__ import annotations
 
-from sdk import gather, resonate
+from sdk import gather, resonate, sleep
 
 
 @resonate
@@ -40,3 +40,17 @@ async def research(question: str):
 
     # Synthesize the results
     return await agent(f"Write a cited report. {question}: {results}")
+
+
+@resonate
+async def nap(ms: int):
+    """A durable sleep, as small as one can be and still be worth deploying.
+
+    Nothing runs while this waits. The worker suspends, the container is free
+    to go away, and what brings the run back is a deadline in the document
+    that the shell handed to the queue as a schedule. On a laptop that is a
+    clock a test moves; on Cloud Run it is Cloud Tasks deciding the time has
+    come, which is the only version of the claim that is not a simulation.
+    """
+    await sleep(ms)
+    return {"slept": ms}

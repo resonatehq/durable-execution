@@ -267,7 +267,12 @@ def test_a_worker_with_no_application_module_registers_nothing():
 
         os.environ["ROUTES_APP"] = "demo"
         app._route()
-        assert set(sdk.REGISTRY) == {"research", "agent", "search"}, sorted(sdk.REGISTRY)
+        # Derived from the module, not listed here: a hardcoded set goes stale
+        # the first time the example grows a function, and did.
+        import demo
+        expected = {n for n, v in vars(demo).items() if isinstance(v, sdk.Durable)}
+        assert expected, "demo defines no durable functions"
+        assert set(sdk.REGISTRY) == expected, sorted(sdk.REGISTRY)
     finally:
         os.environ.pop("ROUTES_APP", None)
         sdk.REGISTRY.clear()
