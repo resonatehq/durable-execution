@@ -873,3 +873,19 @@ def test_acquiring_after_the_lease_expired_drops_the_stale_dispatch():
     nxt, sends, reply, _ = step(doc, TaskAcquire("o:a", 1, "p2", 5_000), 7_000)
     assert reply.status == 200 and nxt.get("o:a").task.version == 2
     assert sends == []
+
+
+def test_a_durable_sleep_arms_its_own_deadline():
+    """A sleep is an external timer promise with no target. Only targeted
+    promises used to be armed, so a one-minute sleep in a workflow with a
+    one-day deadline armed only the day: it slept a day, then the sweep
+    expired the sleep and the root together and the workflow timed out.
+    Every pending external promise now arms its deadline."""
+    doc, _, _, _ = step(Document(), TaskCreate("p", 10_000, create("wf", 86_400_000, {"resonate:target": W})), 0)
+    doc, _, _, _ = step(doc, TaskFence("wf", 1, "c", create("wf:1", 60_000, {"resonate:timer": "true"})), 0)
+    doc, _, reply, _ = step(doc, TaskSuspend("wf", 1, ("wf:1",)), 0)
+    assert reply.status == 200
+    assert doc.timer_at == 60_000
+    swept = next(e.doc for e in handle_internal(doc, 60_000, CFG) if isinstance(e, SetDocument))
+    assert swept.get("wf:1").promise.state == "resolved"
+    assert swept.get("wf").task.state == "pending"

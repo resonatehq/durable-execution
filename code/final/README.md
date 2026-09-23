@@ -231,8 +231,9 @@ Five layers of evidence, each answering something the others cannot:
   kernel can reach, at any depth. `lean/` proves the invariants,
   first-writer-wins, fencing and no lost wakeups for a Lean transcription of
   the kernel, and `test/test_lean.py` holds the transcription equal to
-  `kernel.py`. Stating the invariants precisely found two bugs in
-  `check_invariants` itself, both now fixed.
+  `kernel.py`. Stating them precisely found a kernel bug (a durable
+  sleep's deadline was never armed) and two bugs in `check_invariants`
+  itself, all now fixed.
 
 ### Steering the search
 

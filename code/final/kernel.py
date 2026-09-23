@@ -98,9 +98,13 @@ class Promise:
         return RESOLVED if self.tags.get(TAG_TIMER) == "true" else REJECTED_TIMEDOUT
 
     def timeout_armed(self) -> bool:
-        """Only a pending promise with a target has a deadline the sweep fires;
-        an undispatched promise expires lazily, when someone reads it."""
-        return self.state == PENDING and self.target() is not None
+        """Every pending external promise has a deadline the sweep fires:
+        whoever awaits it, a suspended task or a listener, is woken by the
+        settlement, so it must not wait for someone to read it. A durable
+        sleep is an external timer with no target, and was armed by nothing.
+        An internal promise has no awaiter outside its own task, and expires
+        lazily, when someone reads it."""
+        return self.state == PENDING and self.is_external()
 
     def to_record(self, id: str) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -570,8 +574,8 @@ def promise_create(tx: Tx, r: PromiseCreate, now: int, cfg: KernelCfg) -> Reply:
     o = insert_promise(tx, r.id, r, now)
     record = o.promise.to_record(r.id)
     if o.promise.target() is None:
-        # No target means no task and no armed deadline: such a promise only
-        # ever expires lazily, when someone reads it.
+        # No target means no task, and nothing to dispatch. Its deadline is
+        # still armed if it is external (a timer, a global): see `timeout_armed`.
         return Reply.ok({"promise": record})
 
     o.task = Task(state=T_FULFILLED, version=0)

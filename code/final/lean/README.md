@@ -27,7 +27,7 @@ sequence of requests and deadlines, at any times, under any configuration.
 | `reachable_evolves` | Along any run: once a promise settles, its state, value and `settledAt` never change (first writer wins). Id, tags, param and deadline never change. Objects are never deleted. A task's version never goes down, and a fulfilled task stays fulfilled. |
 | `stale_is_refused` | Once a task is past version `v`, any `task.acquire`, `release`, `fulfill`, `suspend` or `fence` carrying `v` is refused with a 4xx. The step it arrives in commits exactly what a bare sweep at that instant would. Fencing works. |
 | `reachable_noLost` | Every suspended task is registered as a callback on a promise that is still pending. The only thing that ever wakes a suspended task is a settlement chain on a promise it is registered on, so this says no wakeup is lost. `kernel.py` argues it in prose to justify departing from the Rust kernel in `promise_register_callback`; here it is a theorem. |
-| `pending_workflow_has_timer` | If a workflow's root promise is pending and has a target, the document has a timer armed, and it fires no later than the root's deadline. The timer need not be the root's own; it is the earliest deadline anywhere in the workflow. Without a target the claim is false: `untargeted_root_has_no_timer` is a real one-request counterexample, a pending root with nothing scheduled, because an untargeted promise expires lazily when read. The theorem is about the document's `timerAt`. Whether the queue really holds that task is the shell's job; see the arm-before-commit race. |
+| `pending_workflow_has_timer` | While a workflow's root promise is pending, the document has a timer armed, firing no later than the root's deadline. It is the earliest deadline anywhere in the workflow, not necessarily the root's. `reachable_timer` says the same of every pending external promise. Stating this found a bug, since fixed: the kernel armed only *targeted* promises, so a durable sleep (an external timer with no target) was never armed. A one-minute sleep in a one-day workflow slept a day, then timed out with its root. The theorem is about the document's `timerAt`; whether the queue really holds that task is the shell's job (see the arm-before-commit race). |
 
 `#print axioms` on each shows only `propext`, `Classical.choice` and
 `Quot.sound`. There is no `sorry`, `admit` or `native_decide`.
@@ -76,9 +76,13 @@ The model leaves out only what the kernel never reads: the document's
 
 ## What stating it found
 
-Writing `check_invariants` down as propositions turned up two places where
-the Python checker, not the kernel, was wrong. Both are fixed in `kernel.py`,
-each with a regression test in `test/test_kernel.py`:
+Writing the invariants down found three bugs. The first is in the kernel:
+it armed a deadline only for promises with a target, so a durable sleep,
+an external timer promise with no target, never woke on time. Every pending
+external promise now arms its deadline (`timeout_armed`), with a regression
+test in `test/test_kernel.py`. The other two were in the Python checker,
+not the kernel. Both are fixed in
+`kernel.py`, each with a regression test in `test/test_kernel.py`:
 
 - The sort check compared against `sorted()` of a *set*. Distinct ids can
   share a Dewey key (`o:1` and `o:01`), and sorting a set puts those in hash
@@ -87,8 +91,8 @@ each with a regression test in `test/test_kernel.py`:
 - `(t.retry_at or t.lease_at) is not None` treats a timer at instant 0 as no
   timer, because 0 is falsy.
 
-The kernel itself held up. Every theorem above went through without changing
-a line of it.
+Apart from the sleep bug, the kernel held up: every other theorem went
+through without changing a line of it.
 
 ## Layout
 

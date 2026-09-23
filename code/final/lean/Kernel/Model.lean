@@ -81,8 +81,8 @@ def isExternal (p : Promise) : Bool :=
 def timeoutState (p : Promise) : PState :=
   if p.isTimer then .resolved else .rejectedTimedout
 
-/-- Only a pending promise with a target has a deadline the sweep fires. -/
-def timeoutArmed (p : Promise) : Bool := p.state == .pending && p.target.isSome
+/-- Every pending external promise has a deadline the sweep fires. -/
+def timeoutArmed (p : Promise) : Bool := p.state == .pending && p.isExternal
 
 end Promise
 
