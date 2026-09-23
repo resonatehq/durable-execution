@@ -27,6 +27,7 @@ sequence of requests and deadlines, at any times, under any configuration.
 | `reachable_evolves` | Along any run: once a promise settles, its state, value and `settledAt` never change (first writer wins). Id, tags, param and deadline never change. Objects are never deleted. A task's version never goes down, and a fulfilled task stays fulfilled. |
 | `stale_is_refused` | Once a task is past version `v`, any `task.acquire`, `release`, `fulfill`, `suspend` or `fence` carrying `v` is refused with a 4xx. The step it arrives in commits exactly what a bare sweep at that instant would. Fencing works. |
 | `reachable_noLost` | Every suspended task is registered as a callback on a promise that is still pending. The only thing that ever wakes a suspended task is a settlement chain on a promise it is registered on, so this says no wakeup is lost. `kernel.py` argues it in prose to justify departing from the Rust kernel in `promise_register_callback`; here it is a theorem. |
+| `pending_workflow_has_timer` | If a workflow's root promise is pending and has a target, the document has a timer armed, and it fires no later than the root's deadline. The timer need not be the root's own; it is the earliest deadline anywhere in the workflow. Without a target the claim is false: `untargeted_root_has_no_timer` is a real one-request counterexample, a pending root with nothing scheduled, because an untargeted promise expires lazily when read. The theorem is about the document's `timerAt`. Whether the queue really holds that task is the shell's job; see the arm-before-commit race. |
 
 `#print axioms` on each shows only `propext`, `Classical.choice` and
 `Quot.sound`. There is no `sorry`, `admit` or `native_decide`.
@@ -101,4 +102,5 @@ a line of it.
 | `Kernel/Evolution.lean` | what no step can undo |
 | `Kernel/Fencing.lean` | stale tokens are refused |
 | `Kernel/Wakeups.lean` | no lost wakeups |
+| `Kernel/Timers.lean` | every pending workflow has a timer |
 | `Main.lean` | the differential driver: JSON lines in, JSON lines out |
