@@ -19,7 +19,7 @@ sense if the one before it passed:
 What cannot be answered without credentials says so rather than passing.
 An adapter's shape is checked here; its behaviour is checked by
 `test_conformance.py`, against a double always and against Google when
-`GCS_BUCKET` names a bucket.
+`GCS_BUCKET` names a bucket and `TASKS_QUEUE` names a queue.
 """
 
 from __future__ import annotations
@@ -130,8 +130,23 @@ if cls is not None and implements(cls, queue_spec.QueueP):
 print("  queue_gcp")
 cls = offers(queue_gcp, queue_spec.QueueM)
 if cls is not None and implements(cls, queue_spec.QueueP):
-    say("conformance", SKIP, "needs a project; test_conformance.py runs it "
-                             "against a double")
+    #: `project/location/queue`, the three coordinates a queue has. One
+    #: variable rather than three, because two of the three set and the
+    #: third missing is a confusing way to be skipped.
+    live = os.environ.get("TASKS_QUEUE")
+    if live is None:
+        say("conformance", SKIP,
+            "set TASKS_QUEUE=project/location/queue to run it against a real queue")
+    else:  # pragma: no cover - only with credentials
+        from google.cloud import tasks_v2
+
+        project, location, name = live.split("/")
+        # A paused queue is the safe way to do this: it accepts creation and
+        # deletion, which is the whole contract, and dispatches nothing.
+        holds("conformance", queue_spec.conformance(
+            queue_gcp, project=project, location=location, queue=name,
+            base_url="https://example.invalid", client=tasks_v2.CloudTasksClient()),
+            f"{len(queue_spec.CLAIMS)} claims, on {name}")
 
 # ---------------------------------------------------------------------------
 
