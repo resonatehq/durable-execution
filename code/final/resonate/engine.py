@@ -44,7 +44,6 @@ What is left at each point the process can stop:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 
 from .codec import decode, doc_key, encode
 from .kernel import (
@@ -58,19 +57,10 @@ from .types import (
     TaskHeartbeat, TaskRelease, TaskSuspend,
 )
 from . import otel
-from .spec.queue import SWEEP, QueueP
+from .spec.queue import QueueP
 from .spec.store import StoreP
 from .tracing import trace
-from .types import encode_message
-
-
-@dataclass(frozen=True)
-class Timeout:
-    """The internal message: a deadline for this origin came due. Not a
-    protocol request — no client can send one — but a transition on the
-    origin's document all the same."""
-
-    origin: str
+from .types import SWEEP, Timeout, encode_message
 
 
 def origin_of_msg(msg: Req | Timeout) -> str:

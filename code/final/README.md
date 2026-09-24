@@ -163,7 +163,9 @@ should not have to pretend.
 | `resonate/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
 | `resonate/queue_gcp.py` | a queue in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
 | `resonate/codec.py` | the document's canonical byte form, and the key it lives under |
-| `resonate/ports.py` | the vocabulary the two ports share: the two failures, the fault injector that cuts power between two effects, and the violation all three contracts report |
+| `resonate/errors.py` | the two ways a store or queue refuses: `Conflict` and `Unavailable` |
+| `resonate/testing/faults.py` | the fault injector that cuts power between two effects |
+| `resonate/spec/violation.py` | what all three contracts report |
 | `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
 | `resonate/server.py` | `Server`: the four routes — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready` — over one engine and one worker |
 | `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
@@ -180,7 +182,8 @@ should not have to pretend.
 | `test/research.mmd` | the same run as a sequence diagram, generated rather than drawn, starting at `Server` because that is where a request arrives. `SEQUENCE.md` says what the design means; this says what the code did |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
-| `resonate/runtime.py` | a worker, as post 002's two halves under its own names — `execute_until_blocked_outer` claims and decides, `execute_until_blocked_inner` runs the function — and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
+| `resonate/worker.py` | a worker: `run` claims the task and decides what the outcome means, `_attempt` runs the function from the top |
+| `resonate/testing/sim.py` | a clock a test can move, and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
 | `resonate/properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
 | `resonate/explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
 | `test/test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
@@ -202,8 +205,8 @@ should not have to pretend.
 | `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
-made of: `resonate/engine.py`, `resonate/codec.py`, `resonate/ports.py`, `spec/`, `resonate/store_mem.py`,
-`resonate/queue_mem.py`, `resonate/sdk.py` and `resonate/runtime.py` import nothing but the
+made of: `resonate/engine.py`, `resonate/codec.py`, `resonate/errors.py`, `spec/`, `resonate/store_mem.py`,
+`resonate/queue_mem.py`, `resonate/sdk.py`, `resonate/worker.py` and `resonate/testing/` import nothing but the
 standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the auth check in
 `resonate/server.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,

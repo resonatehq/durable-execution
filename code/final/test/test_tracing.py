@@ -39,14 +39,14 @@ from resonate import queue_mem
 from resonate import store_mem
 from resonate import tracing
 from resonate.engine import Engine
-from resonate.runtime import Worker
+from resonate.worker import Worker
 from resonate.server import Server
 from resonate.kernel import KernelCfg, TAG_TARGET
-from resonate.runtime import Clock
+from resonate.testing.sim import Clock
 from resonate.sdk import dumps, route
 from resonate.spec import queue as queue_spec
 from resonate.spec import store as store_spec
-from resonate.spec.queue import SWEEP
+from resonate.types import SWEEP
 from test_e2e import (
     CALLS, ORIGIN, QUESTION, counted_agent, counted_research, counted_search,
 )
@@ -202,9 +202,9 @@ def test_the_run_is_what_the_trace_says_it_is():
     assert len(t.of("Engine.process")) == 22, "transitions"
     assert len(t.of("store.put")) == 18, "one conditional write per transition that changed something"
     assert len(t.of("store.get")) > len(t.of("store.put")), "reads are free"
-    outer = t.of("Worker.execute_until_blocked_outer")
+    outer = t.of("Worker.run")
     assert [c.result for c in outer].count("'suspended'") >= 1
-    inner = t.of("Worker.execute_until_blocked_inner")
+    inner = t.of("Worker._attempt")
     assert len(inner) >= len(outer) > 0, "every claim runs the function at least once"
     assert any(c.result == "!Blocked" for c in inner), \
         "the fan-out unwound through Blocked, out of the inner half"
@@ -237,7 +237,7 @@ def test_nothing_with_a_heap_address_reaches_a_trace():
 
 def test_a_durable_function_says_which_one_it_is():
     t = run()
-    args = t.of("Worker.execute_until_blocked_inner")[0].args
+    args = t.of("Worker._attempt")[0].args
     assert "fn=@resonate counted_research" in args, args
     # No heap address, and no version either: an unversioned function reads
     # as its bare name, so a project that never versions anything never

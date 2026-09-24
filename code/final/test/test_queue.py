@@ -18,8 +18,9 @@ from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
 from resonate.queue_mem import Delivery, Queue
-from resonate.spec.queue import SWEEP
-from resonate.runtime import Clock, Runtime, Worker
+from resonate.types import SWEEP
+from resonate.testing.sim import Clock, Runtime
+from resonate.worker import Worker
 from resonate.store_mem import Store
 from test_e2e import (
     AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, counted_agent,

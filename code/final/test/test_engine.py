@@ -11,7 +11,8 @@ from __future__ import annotations
 import pytest
 
 from resonate.codec import Malformed, decode, doc_key, encode
-from resonate.engine import Engine, Timeout, origin_of_msg
+from resonate.engine import Engine, origin_of_msg
+from resonate.types import Timeout
 from resonate.kernel import (
     Document, KernelCfg, PENDING, REJECTED_TIMEDOUT, RESOLVED, T_ACQUIRED,
     T_FULFILLED, T_PENDING, check_invariants,
@@ -20,9 +21,10 @@ from resonate.types import (
     Execute, PromiseCreate, PromiseGet, PromiseRegisterListener,
     PromiseSettle, TaskAcquire, TaskFulfill, TaskSuspend, Value,
 )
-from resonate.ports import Conflict, Crash, Fault
+from resonate.errors import Conflict
+from resonate.testing.faults import Crash, Fault
 from resonate.queue_mem import Queue
-from resonate.spec.queue import SWEEP
+from resonate.types import SWEEP
 from resonate.store_mem import Store
 from resonate.types import decode_message
 

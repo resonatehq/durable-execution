@@ -51,7 +51,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
-from .ports import Conflict, Unavailable
+from .errors import Conflict, Unavailable
 
 #: One label set, sorted, so two spellings of one thing are one key.
 Key = tuple[str, tuple[tuple[str, str], ...]]

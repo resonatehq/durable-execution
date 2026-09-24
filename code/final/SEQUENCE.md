@@ -1,7 +1,7 @@
 # The Cloud Run function, in sequence
 
 Four routes, one engine, and one rule about the order effects happen in.
-Everything below is what `server.py`, `engine.py` and `runtime.py` actually
+Everything below is what `server.py`, `engine.py` and `worker.py` actually
 do; where a diagram says a name, it is the name in the code.
 
 *These are drawn by hand, from what the design says the system does.
@@ -21,7 +21,7 @@ anything.
 | **Cloud Tasks** | the queue, and the only thing that calls `/execute` and `/sweep`. A deadline and a dispatch are both tasks in it |
 | **GCS** | one object per origin, at `wf/{origin}`. The whole state of a run |
 | `handler` / `Server` | `server.py`. The HTTP entry point: `serve()` in `main.py` builds one `Server` per container at import |
-| `Worker` | `runtime.Worker` — **an object, not a service**. `Server.worker`, built beside the engine in the same container and called in-process. Post 002's two halves: `execute_until_blocked_outer` claims the task and decides what the run meant, `execute_until_blocked_inner` runs the function from the top |
+| `Worker` | `worker.Worker` — **an object, not a service**. `Server.worker`, built beside the engine in the same container and called in-process. `run` claims the task and decides what the run meant, `_attempt` runs the function from the top |
 | `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._run`. Ordinary async Python that mentions no promise, task or lease |
 | `Engine.process` | `engine.Engine`, in the same container again. The only thing that does I/O |
 | `kernel` | `handle_external` / `handle_internal`. A pure function: a document in, effects out |
@@ -164,7 +164,7 @@ sequenceDiagram
     end
 
     Q->>+H: POST /execute {task: {id, version}}
-    H->>+W: execute_until_blocked_outer(id, version)
+    H->>+W: run(id, version)
     W->>E: task.acquire(id, version, pid, ttl)
 
     alt somebody else holds it, or it has moved on

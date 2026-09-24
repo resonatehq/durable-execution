@@ -15,11 +15,11 @@ from typing import Callable
 
 import flask
 
-from .engine import Engine, Timeout
-from .ports import Conflict, Unavailable
-from .runtime import Worker
+from .engine import Engine
+from .errors import Conflict, Unavailable
 from .tracing import because, trace
-from .types import Invalid, decode_message, encode_reply, parse_request
+from .types import Invalid, Timeout, decode_message, encode_reply, parse_request
+from .worker import Worker
 
 
 @dataclass
@@ -76,7 +76,7 @@ class Server:
     def execute(self, body: dict) -> tuple[dict, int]:
         with because("POST /execute"):
             message = decode_message(body)
-            outcome = self.worker.execute_until_blocked_outer(
+            outcome = self.worker.run(
                 message.task_id, message.version)
             return {"outcome": outcome}, 200
 

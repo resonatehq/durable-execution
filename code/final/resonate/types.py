@@ -185,6 +185,20 @@ class Unblock:
     promise: dict[str, Any]
 
 
+#: The URL a deadline is delivered to. Everything after it is the origin to
+#: sweep, exactly as a Cloud Run route would read it.
+SWEEP = "sweep/"
+
+
+@dataclass(frozen=True)
+class Timeout:
+    """The internal message: a deadline for this origin came due. Not a
+    protocol request — no client can send one — but a transition on the
+    origin's document all the same."""
+
+    origin: str
+
+
 @dataclass(frozen=True)
 class Reply:
     status: int

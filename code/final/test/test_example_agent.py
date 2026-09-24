@@ -26,7 +26,8 @@ from resonate.engine import Engine
 from resonate.kernel import KernelCfg, TAG_EXTERNAL
 from resonate.types import PromiseSettle
 from resonate.queue_mem import Queue
-from resonate.runtime import Clock, Runtime, Worker
+from resonate.testing.sim import Clock, Runtime
+from resonate.worker import Worker
 from resonate.sdk import dumps
 from resonate.store_mem import Store
 

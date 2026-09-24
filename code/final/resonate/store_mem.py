@@ -12,8 +12,8 @@ neither does this.
 
 from __future__ import annotations
 
-from .ports import Fault
-from .spec.store import PreconditionFailed
+from .testing.faults import Fault
+from .errors import Conflict
 
 
 class Store:
@@ -40,12 +40,12 @@ class Store:
             raise ValueError("if_match and if_absent are exclusive")
         current = self.objects.get(key)
         if if_absent and current is not None:
-            raise PreconditionFailed(f"{key} already exists")
+            raise Conflict(f"{key} already exists")
         if if_match is not None:
             if current is None:
-                raise PreconditionFailed(f"{key} does not exist")
+                raise Conflict(f"{key} does not exist")
             if current[1] != if_match:
-                raise PreconditionFailed(f"{key} is at {current[1]}, not {if_match}")
+                raise Conflict(f"{key} is at {current[1]}, not {if_match}")
         self._n += 1
         version = f"v{self._n}"
         if self.land_then_fail and self.fault is not None and self.fault.budget == 0:

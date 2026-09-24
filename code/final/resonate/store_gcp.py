@@ -8,7 +8,7 @@ and writes conditioned on it.
     if_generation_match=0      create only if nothing is there
     if_generation_match=<gen>  replace only what was read
 
-A refused precondition comes back as `412`, which is `PreconditionFailed`:
+A refused precondition comes back as `412`, which is `Conflict`:
 the state moved, so the decision must be re-decided and never replayed.
 A `429` or a `503` is `Unavailable`: nothing is known about whether the
 write landed, which the protocol already tolerates because every operation
@@ -19,7 +19,7 @@ is idempotent.
 Every promise and task of one run lives in one object, so a single object's
 write rate is the ceiling on a single run's transitions, not on the system.
 A run that needs more than that is a run whose fan-out should be its own
-origin. Under many writers the contention surfaces as `PreconditionFailed`,
+origin. Under many writers the contention surfaces as `Conflict`,
 which the caller retries, so the failure mode is latency rather than loss.
 
 Measured against a real bucket on 2026-09-22, rather than assumed:
@@ -63,7 +63,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .spec.store import PreconditionFailed, Unavailable
+from .errors import Conflict, Unavailable
 
 #: The bytes a document is. Not `application/json`: a document is a sequence
 #: of JSON values, one per line, which is a different media type and worth
@@ -123,7 +123,7 @@ class Store:
         try:
             blob.upload_from_string(body, content_type=CONTENT_TYPE, **precondition)
         except gcp.PreconditionFailed as e:
-            raise PreconditionFailed(f"{key}: {e}") from None
+            raise Conflict(f"{key}: {e}") from None
         except (gcp.TooManyRequests, gcp.ServiceUnavailable, gcp.ServerError) as e:
             raise Unavailable(str(e)) from None
         return str(blob.generation)

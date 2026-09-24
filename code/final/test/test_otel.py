@@ -23,9 +23,10 @@ import pytest
 from resonate import otel
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
-from resonate.ports import Unavailable
+from resonate.errors import Unavailable
 from resonate.queue_mem import Queue
-from resonate.runtime import Clock, Runtime, Worker
+from resonate.testing.sim import Clock, Runtime
+from resonate.worker import Worker
 from resonate.sdk import gather, resonate
 from resonate.store_mem import Store
 

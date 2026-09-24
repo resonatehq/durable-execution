@@ -17,8 +17,8 @@ import pytest
 
 from resonate.spec import store as store_spec
 from resonate import store_mem
-from resonate.ports import Crash, Fault
-from resonate.spec.store import PreconditionFailed
+from resonate.testing.faults import Crash, Fault
+from resonate.errors import Conflict
 from resonate.store_mem import Store
 
 
@@ -70,7 +70,7 @@ def test_a_precondition_is_checked_before_the_power_is_cut():
     s = Store(fault)
     s.put("wf/o", "one", if_absent=True)
     fault.crash_after(0)
-    with pytest.raises(PreconditionFailed):
+    with pytest.raises(Conflict):
         s.put("wf/o", "two", if_absent=True)
 
 

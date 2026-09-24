@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import os
 import sys
 from importlib import metadata
 from pathlib import Path

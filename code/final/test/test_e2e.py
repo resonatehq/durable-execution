@@ -26,10 +26,11 @@ from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, Send
 from resonate.types import PromiseRegisterListener
-from resonate.ports import Crash, Fault
+from resonate.testing.faults import Crash, Fault
 from resonate.queue_mem import Queue
-from resonate.spec.queue import SWEEP
-from resonate.runtime import Clock, Runtime, Worker
+from resonate.types import SWEEP
+from resonate.testing.sim import Clock, Runtime
+from resonate.worker import Worker
 from resonate.store_mem import Store
 from resonate.types import decode_message
 from resonate.sdk import Failed, gather, resonate

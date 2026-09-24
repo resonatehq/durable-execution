@@ -66,11 +66,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ..ports import Violation
-
-#: The URL a deadline is delivered to. Everything after it is the origin to
-#: sweep, exactly as a Cloud Run route would read it.
-SWEEP = "sweep/"
+from ..types import SWEEP
+from .violation import Violation
 
 
 # ---------------------------------------------------------------------------

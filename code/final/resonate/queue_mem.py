@@ -39,7 +39,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
-from .ports import Fault
+from .testing.faults import Fault
 
 
 @dataclass(frozen=True)

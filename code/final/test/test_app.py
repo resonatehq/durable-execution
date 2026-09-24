@@ -19,12 +19,12 @@ import json
 import pytest
 
 from resonate.engine import Engine
-from resonate.runtime import Worker
+from resonate.worker import Worker
 from resonate.server import Server
 from resonate.codec import doc_key
 from resonate.kernel import KernelCfg, TAG_TARGET
-from resonate.ports import Conflict, Unavailable
-from resonate.runtime import Clock
+from resonate.errors import Conflict, Unavailable
+from resonate.testing.sim import Clock
 from resonate.sdk import dumps, route
 from resonate.store_mem import Store
 from test_e2e import (
@@ -32,7 +32,7 @@ from test_e2e import (
     counted_search,
 )
 from resonate.queue_mem import Queue
-from resonate.spec.queue import SWEEP
+from resonate.types import SWEEP
 
 CFG = KernelCfg(retry_timeout=30_000)
 

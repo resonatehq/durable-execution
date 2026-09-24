@@ -63,7 +63,7 @@ libraries promise nothing — so an adapter that cannot guarantee it sorts.
 
 They demand opposite responses, which is why they are not one:
 
-  - `PreconditionFailed` — the write did not land and the state has moved.
+  - `Conflict` — the write did not land and the state has moved.
     The decision was made against something that no longer exists, so it
     must be re-decided. Replaying it would produce answers no sequential
     execution gives.
@@ -87,13 +87,10 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ..ports import Conflict, Unavailable, Violation
+from ..errors import Conflict, Unavailable
+from .violation import Violation
 
-#: A refused precondition. The state moved: re-decide, never replay. Spelled
-#: as the engine's `Conflict` so there is one name for it in the codebase.
-PreconditionFailed = Conflict
-
-__all__ = ["StoreP", "StoreC", "StoreM", "PreconditionFailed", "Unavailable",
+__all__ = ["StoreP", "StoreC", "StoreM", "Unavailable",
            "conformance", "CLAIMS"]
 
 
@@ -188,7 +185,7 @@ def _absent(store: StoreP, p: str) -> None:
 def _create(store: StoreP, p: str) -> None:
     version = store.put(p + "o", "one", if_absent=True)
     assert store.get(p + "o") == ("one", version)
-    with refused(PreconditionFailed, "a second create was allowed"):
+    with refused(Conflict, "a second create was allowed"):
         store.put(p + "o", "two", if_absent=True)
     assert store.get(p + "o")[0] == "one", "the loser's bytes landed anyway"
 
@@ -198,14 +195,14 @@ def _replace(store: StoreP, p: str) -> None:
     first = store.put(p + "o", "one", if_absent=True)
     second = store.put(p + "o", "two", if_match=first)
     assert second != first, "the version did not change with the object"
-    with refused(PreconditionFailed, "a stale version was accepted"):
+    with refused(Conflict, "a stale version was accepted"):
         store.put(p + "o", "three", if_match=first)
     assert store.get(p + "o") == ("two", second)
 
 
 @claim("a replacement of nothing is refused")
 def _replace_nothing(store: StoreP, p: str) -> None:
-    with refused(PreconditionFailed, "replacing what is not there was allowed"):
+    with refused(Conflict, "replacing what is not there was allowed"):
         store.put(p + "o", "one", if_match="1")
 
 
@@ -262,7 +259,7 @@ def _versions(store: StoreP, p: str) -> None:
     a = store.put(p + "a", "one", if_absent=True)
     b = store.put(p + "b", "one", if_absent=True)
     assert isinstance(a, str) and a, "a version is a non-empty string"
-    with refused(PreconditionFailed, "another key's version was accepted"):
+    with refused(Conflict, "another key's version was accepted"):
         store.put(p + "a", "two", if_match=b)
 
 

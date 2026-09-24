@@ -68,7 +68,7 @@ from .kernel import (
     origin_of,
 )
 from .types import PromiseCreate, PromiseSettle, TaskFence, Value
-from .ports import Conflict, Unavailable
+from .errors import Conflict, Unavailable
 
 #: How long a promise this SDK creates has to settle before it times out.
 DEFAULT_TIMEOUT = 24 * 60 * 60 * 1_000

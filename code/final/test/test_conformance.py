@@ -36,7 +36,7 @@ from resonate.spec import queue as queue_spec
 from resonate.spec import store as store_spec
 from resonate import store_gcp
 from resonate import store_mem
-from resonate.ports import Unavailable
+from resonate.errors import Unavailable
 from resonate.queue_gcp import HORIZON_MS
 from resonate.store_gcp import CONTENT_TYPE
 

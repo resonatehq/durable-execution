@@ -13,13 +13,13 @@ flowchart TB
     subgraph container["one Cloud Run container"]
         direction TB
         routes["<b>Server</b> — resonate/server.py<br/>POST / · /execute · /sweep/&lt;origin&gt; · GET /ready"]
-        worker["<b>Worker</b> — resonate/runtime.py<br/>runs the function until it blocks"]
+        worker["<b>Worker</b> — resonate/worker.py<br/>runs the function until it blocks"]
         app["<b>examples/*/main.py</b> — the user's file<br/>@resonate, REGISTRY, TARGETS"]
         engine["<b>Engine</b> — resonate/engine.py<br/>read · decide · write once"]
         kernel["<b>resonate/kernel.py</b> — pure<br/>doc, request, now → effects, reply"]
     end
 
-    subgraph ports["two ports — resonate/ports.py, resonate/spec/"]
+    subgraph ports["two ports — resonate/errors.py, resonate/spec/"]
         direction LR
         store["<b>StoreP</b><br/>get put delete list"]
         queue["<b>QueueP</b><br/>create delete"]

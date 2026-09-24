@@ -32,7 +32,8 @@ from typing import Mapping
 from . import queue_gcp, queue_mem, store_gcp, store_mem
 from .engine import Engine
 from .kernel import KernelCfg
-from .runtime import Clock, Worker
+from .testing.sim import Clock
+from .worker import Worker
 from .sdk import REGISTRY, TARGETS
 from .server import Server
 

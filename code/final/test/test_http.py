@@ -41,9 +41,9 @@ import pytest
 from resonate import store_mem
 from resonate.codec import decode, doc_key
 from resonate.kernel import TAG_TARGET
-from resonate.spec.queue import SWEEP
+from resonate.types import SWEEP
 from exampleapp import path_to
-from resonate.ports import Conflict, Unavailable
+from resonate.errors import Conflict, Unavailable
 from resonate.sdk import dumps, route
 from test_e2e import (
     CALLS, EXPECTED, ORIGIN, QUESTION, counted_agent, counted_research,

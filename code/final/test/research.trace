@@ -13,7 +13,7 @@
 ← Server.protocol = ({'head': {'status': 200}, 'data': {'promise': {7 keys}}}, 200)
 → Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
 [POST /execute]
-  → Worker.execute_until_blocked_outer(task_id='research.1', version=0)
+  → Worker.run(task_id='research.1', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<16b95610 330b>, 'v1')
@@ -24,7 +24,7 @@
       → queue.delete(name='task-1')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-    → Worker.execute_until_blocked_inner(fn=@resonate counted_research, args=['What is durable execution?'], task_id='research.1', version=1)
+    → Worker._attempt(fn=@resonate counted_research, args=['What is durable execution?'], task_id='research.1', version=1)
       → Durable.invoke(args=('What is durable execution?'))
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
@@ -65,7 +65,7 @@
           ← queue.create = 'task-6'
         ← Engine.process = Reply(status=200, ...)
       ← Durable.invoke = !Blocked
-    ← Worker.execute_until_blocked_inner = !Blocked
+    ← Worker._attempt = !Blocked
     → Engine.process(msg=TaskSuspend(id='research.1', ...), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<4e8d6be7 1308b>, 'v7')
@@ -76,11 +76,11 @@
       → queue.delete(name='task-3')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, data={})
-  ← Worker.execute_until_blocked_outer = 'suspended'
+  ← Worker.run = 'suspended'
 ← Server.execute = ({'outcome': 'suspended'}, 200)
 → Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:2', 'version': 0}})
 [POST /execute]
-  → Worker.execute_until_blocked_outer(task_id='research.1:2', version=0)
+  → Worker.run(task_id='research.1:2', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:2', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<c62b5a8a 1332b>, 'v8')
@@ -91,10 +91,10 @@
       → queue.delete(name='task-7')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-    → Worker.execute_until_blocked_inner(fn=@resonate counted_search, args=['durable execution'], task_id='research.1:2', version=1)
+    → Worker._attempt(fn=@resonate counted_search, args=['durable execution'], task_id='research.1:2', version=1)
       → Durable.invoke(args=('durable execution'))
       ← Durable.invoke = 'finding about durable execution'
-    ← Worker.execute_until_blocked_inner = 'finding about durable execution'
+    ← Worker._attempt = 'finding about durable execution'
     → Engine.process(msg=TaskFulfill(id='research.1:2', ...), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<f4bccba8 1359b>, 'v9')
@@ -107,11 +107,11 @@
       → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
       ← queue.create = 'task-10'
     ← Engine.process = Reply(status=200, ...)
-  ← Worker.execute_until_blocked_outer = 'done'
+  ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)
 → Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:3', 'version': 0}})
 [POST /execute]
-  → Worker.execute_until_blocked_outer(task_id='research.1:3', version=0)
+  → Worker.run(task_id='research.1:3', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:3', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<ae4b9873 1392b>, 'v10')
@@ -122,10 +122,10 @@
       → queue.delete(name='task-9')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-    → Worker.execute_until_blocked_inner(fn=@resonate counted_search, args=['workflow recovery'], task_id='research.1:3', version=1)
+    → Worker._attempt(fn=@resonate counted_search, args=['workflow recovery'], task_id='research.1:3', version=1)
       → Durable.invoke(args=('workflow recovery'))
       ← Durable.invoke = 'finding about workflow recovery'
-    ← Worker.execute_until_blocked_inner = 'finding about workflow recovery'
+    ← Worker._attempt = 'finding about workflow recovery'
     → Engine.process(msg=TaskFulfill(id='research.1:3', ...), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<b4fed1dc 1420b>, 'v11')
@@ -136,11 +136,11 @@
       → queue.delete(name='task-11')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-  ← Worker.execute_until_blocked_outer = 'done'
+  ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)
 → Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:4', 'version': 0}})
 [POST /execute]
-  → Worker.execute_until_blocked_outer(task_id='research.1:4', version=0)
+  → Worker.run(task_id='research.1:4', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:4', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<c50f1c59 1436b>, 'v12')
@@ -151,10 +151,10 @@
       → queue.delete(name='task-12')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-    → Worker.execute_until_blocked_inner(fn=@resonate counted_search, args=['sagas'], task_id='research.1:4', version=1)
+    → Worker._attempt(fn=@resonate counted_search, args=['sagas'], task_id='research.1:4', version=1)
       → Durable.invoke(args=('sagas'))
       ← Durable.invoke = 'finding about sagas'
-    ← Worker.execute_until_blocked_inner = 'finding about sagas'
+    ← Worker._attempt = 'finding about sagas'
     → Engine.process(msg=TaskFulfill(id='research.1:4', ...), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<38c8f8b6 1463b>, 'v13')
@@ -165,11 +165,11 @@
       → queue.delete(name='task-13')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-  ← Worker.execute_until_blocked_outer = 'done'
+  ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)
 → Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
 [POST /execute]
-  → Worker.execute_until_blocked_outer(task_id='research.1', version=1)
+  → Worker.run(task_id='research.1', version=1)
     → Engine.process(msg=TaskAcquire(id='research.1', version=1, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<1eac07b1 1467b>, 'v14')
@@ -180,7 +180,7 @@
       → queue.delete(name='task-14')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-    → Worker.execute_until_blocked_inner(fn=@resonate counted_research, args=['What is durable execution?'], task_id='research.1', version=2)
+    → Worker._attempt(fn=@resonate counted_research, args=['What is durable execution?'], task_id='research.1', version=2)
       → Durable.invoke(args=('What is durable execution?'))
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
@@ -213,7 +213,7 @@
           ← store.put = 'v17'
         ← Engine.process = Reply(status=200, ...)
       ← Durable.invoke = {'report': <f931ea27 143b>}
-    ← Worker.execute_until_blocked_inner = {'report': <f931ea27 143b>}
+    ← Worker._attempt = {'report': <f931ea27 143b>}
     → Engine.process(msg=TaskFulfill(id='research.1', ...), now=0)
       → store.get(key='wf/research.1')
       ← store.get = (<49ef90d3 1889b>, 'v17')
@@ -222,5 +222,5 @@
       → queue.delete(name='task-15')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
-  ← Worker.execute_until_blocked_outer = 'done'
+  ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)

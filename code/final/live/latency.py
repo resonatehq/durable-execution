@@ -25,7 +25,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from resonate import store_gcp  # noqa: E402
-from resonate.spec.store import PreconditionFailed  # noqa: E402
+from resonate.errors import Conflict  # noqa: E402
 
 BUCKET = os.environ.get("GCS_BUCKET", "de-contract-28425")
 N = int(os.environ.get("N", 30))
@@ -85,7 +85,7 @@ def main() -> int:
         t = time.perf_counter()
         try:
             store.put("doc", BODY, if_match="1")
-        except PreconditionFailed:
+        except Conflict:
             pass
         refused.append((time.perf_counter() - t) * 1000)
 

@@ -40,16 +40,16 @@ from typing import Protocol, runtime_checkable
 
 from .. import properties as P
 from ..codec import decode, doc_key
-from ..engine import Timeout
+from ..errors import Conflict
 from ..kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
+from ..testing.faults import Fault
 from ..types import (
-    PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
-    TaskAcquire, TaskFulfill, TaskSuspend, Value,
+    SWEEP, PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
+    TaskAcquire, TaskFulfill, TaskSuspend, Timeout, Value, decode_message,
 )
-from ..ports import Conflict, Fault, Violation
-from .queue import SWEEP, QueueP
+from .queue import QueueP
 from .store import StoreP
-from ..types import decode_message
+from .violation import Violation
 
 
 class _Recorded:
