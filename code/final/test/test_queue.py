@@ -3,7 +3,7 @@
 A store that refuses a write is one failure. A queue has four, and they are
 the ones the protocol's fencing and idempotence were built for: the same
 message twice, messages out of order, messages late, and messages that
-never arrive at all. None of them were exercised before this file.
+never arrive at all.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def test_the_order_is_nobody_s_promise():
     assert [d.body for d in out] != list(range(6)), "shuffling did not shuffle"
 
 
-# --- the counted_agent, over an unkind queue ---------------------------------------
+# --- the research agent, over an unkind queue ------------------------------
 
 
 def cloud(**knobs):
@@ -183,8 +183,8 @@ class DropsEverySweep(Queue):
 
 def test_a_dropped_deadline_is_the_one_thing_nothing_repairs():
     """A dropped `execute` is recoverable: the task's retry deadline was
-    committed before the message left. A dropped *sweep* is not, because the
-    deadline it carried is the only thing that was going to fire.
+    committed before the message left. A dropped *timeout* is not, because
+    the deadline it carried is the only thing that was going to fire.
 
     This is not a defect in the engine. It is a condition a deployment has
     to meet, and the remedy is below: a sweep that does not depend on any
@@ -203,7 +203,7 @@ def test_a_dropped_deadline_is_the_one_thing_nothing_repairs():
 
 
 def test_a_periodic_sweep_recovers_what_the_queue_lost():
-    """The remedy. Something that walks the bucket on its own schedule, so a
+    """The remedy. Something that posts a timeout on its own schedule, so a
     deadline that was only ever in a queued task is not the only way a task
     is offered again."""
     rt, store, queue, clock = cloud()

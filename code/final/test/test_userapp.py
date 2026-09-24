@@ -4,13 +4,6 @@ The claim is that a durable service is one file. Not one file plus a
 routing table, plus a module list naming itself, plus an import of four
 internal modules -- one file, whose only wiring is `handler = serve()`.
 
-Every one of those qualifications was true at some point in this project's
-life and was removed because of a test below. `ROUTES_APP` existed because
-the deployed container had no functions in it; `ROUTES_WORKERS` had to name
-every function even when they all ran in one service; the entry point came
-from a module called `app`, which is one of the likeliest names to already
-exist in somebody's project.
-
 So this builds the user's repository in a temporary directory -- `main.py`
 and nothing else -- and drives it through the loader Google's buildpack
 uses. If the story ever needs a second file again, this is what says so.

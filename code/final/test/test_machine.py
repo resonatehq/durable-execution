@@ -1,15 +1,13 @@
 """The kernel as a Hypothesis state machine.
 
-This replaces a hand-rolled random walk. What the port buys, and the reason
-for the dependency: when a script violates the catalogue, Hypothesis shrinks
-it to its minimal form and stores it, so the next run replays it first. The
-walk it replaces found one real defect and handed over two document dumps to
-read; this hands over the shortest script that breaks.
+The reason for the dependency: when a script violates the catalogue,
+Hypothesis shrinks it to its minimal form and stores it, so the next run
+replays it first, and what a failure hands over is the shortest script that
+breaks.
 
-The steering the walk did by hand is `@precondition`, so the long chains
-(acquire, suspend, settle, wake, re-acquire, fulfil) are walked rather than
-stumbled into. Ids, tags and deadlines still come from an adversarial
-alphabet, so the doors are knocked on too — but only where no guided rule
+Steering is `@precondition`, so the long chains (acquire, suspend, settle,
+wake, re-acquire, fulfil) are walked rather than stumbled into. Ids, tags
+and deadlines still come from an adversarial alphabet, so the doors are knocked on too — but only where no guided rule
 covers them. Breadth over refusals is `explore.py`'s job, which enumerates
 them; this machine is for the long chains, which no exhaustive search
 reaches.
@@ -18,11 +16,10 @@ Rules are grouped by what they need rather than by which operation they
 send, and the operation is drawn inside. That is not tidiness: Hypothesis
 samples a rule and then filters it against its preconditions, so a rule
 gated on a task state that the document rarely holds costs a retry every
-time it is drawn. Collapsing twenty such rules into five coarse groups, plus
-six that are always enabled, moved the share of steps that reach the kernel
-rather than a door from 45% to 64% on the same budget — and brought the wake
-and the halted awaiter's buffered resume, which the ungrouped version only
-reached by luck, into every campaign.
+time it is drawn. Five coarse groups, plus six rules that are always enabled,
+keep most steps reaching the kernel rather than a door, and bring the wake
+and the halted awaiter's buffered resume into every campaign rather than
+leaving them to luck.
 
 Each rule runs one request through both abstract halves, as the other suites
 do: the sweep as an internal step and the operation as an external step, with
@@ -386,7 +383,7 @@ def test_the_deep_campaign():
     the default run — it takes minutes, and its job is to look for what the
     short campaigns cannot reach, not to gate a commit.
 
-        DEEP=1 python -m pytest test_machine.py -k deep --hypothesis-show-statistics
+        DEEP=1 python -m pytest test/test_machine.py -k deep --hypothesis-show-statistics
 
     The statistics print the best score reached for each label, which is how
     you tell whether the search is still finding wider documents or has
@@ -408,7 +405,7 @@ def test_the_campaign_reaches_every_interesting_transition():
     same demand of its own corpus.
 
     `TestKernelMachine` above is the same machine run for its own sake: it is
-    the search that looks for bugs, and it found one."""
+    the search that looks for bugs."""
     SEEN.clear()
     run_state_machine_as_test(
         KernelMachine,

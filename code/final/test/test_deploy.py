@@ -1,11 +1,9 @@
 """What the container gets, against what the code imports.
 
-The suite ran green for the whole life of this project with no
-`requirements.txt` in it. Every test imported `google.cloud.storage` from
-the machine it ran on, so nothing noticed that the file the buildpack
-installs from did not exist -- the service would have built and then died
-at its first import. A green suite implying a working deploy is the claim
-this file exists to make true.
+Every test imports its libraries from the machine it runs on, so nothing
+else notices when the file the buildpack installs from is missing or short
+-- the service would build and then die at its first import. A green suite
+implying a working deploy is the claim this file exists to make true.
 
 The check is not "are these four names present". It is: every third-party
 module production code imports must be reachable from what
@@ -17,9 +15,7 @@ Resolution is by the file the module actually comes from, not by its
 top-level name. `google` is a namespace package: `google.cloud.storage`
 and `google.cloud.tasks_v2` share a root but come from different
 distributions, so a check on roots alone says `google-cloud-tasks` covers
-both and a dropped `google-cloud-storage` sails through. The first version
-of this file had exactly that hole, and it was found by deleting a line
-from `requirements.txt` and watching the test pass.
+both and a dropped `google-cloud-storage` sails through.
 """
 
 from __future__ import annotations
@@ -34,8 +30,6 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 
-#: Production is everything the container runs. `test/` is not in the image
-#: at all (see `.gcloudignore`), and `conftest.py` is pytest's.
 #: Production is the package. The applications under `examples/` are not
 #: part of it -- each ships its own `requirements.txt` and is checked
 #: against that instead, by `test_each_example_declares_what_it_imports`,
@@ -55,7 +49,7 @@ def imported_modules(path: Path) -> set[tuple[str, ...]]:
 
     `from google.cloud import storage` has to be looked up as
     `google.cloud.storage`: `google.cloud` is a namespace package that owns
-    no file and so belongs to no distribution. But `from ports import
+    no file and so belongs to no distribution. But `from resonate.errors import
     Conflict` imports a name, not a module, so the less specific form has
     to remain a candidate.
     """
@@ -269,14 +263,11 @@ def configured_names() -> set[str]:
 
 
 def test_no_configuration_name_collides_with_the_runtime():
-    """The bug this file could not have caught, so it catches the next one.
-
-    `WORKERS` was the routing map until a Cloud Run deploy refused to start:
-    `functions-framework` reads it as gunicorn's worker count and raises
-    `ValueError: invalid literal for int()` on our JSON, before the container
+    """`functions-framework` reads names like `WORKERS` for itself (that one
+    as gunicorn's worker count), and a clash fails before the container
     listens on its port. Every local test builds the app with `create_app`
-    and never starts gunicorn, so nothing saw it -- the collision is only
-    visible on the real serving path.
+    and never starts gunicorn, so the collision is only visible on the real
+    serving path.
 
     A name is not testable into safety here; it has to stay out of the
     runtime's namespace. So this asserts the namespaces are disjoint.

@@ -41,8 +41,8 @@ ORIGIN = "trip.1"
 def agent():
     """The example, loaded the way the platform loads it.
 
-    Under a name of its own: this repository's own `main.py` is already
-    imported as `main` by other tests, and two modules cannot both be it.
+    Under a name of its own: `test_http.py` imports the research agent's
+    `main.py` as `main`, and two modules cannot both be it.
     """
     sys.path.insert(0, str(EXAMPLE))
     try:

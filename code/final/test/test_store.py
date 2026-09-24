@@ -1,10 +1,9 @@
 """What is true of the simulated store and of no other.
 
-The four operations are not tested here. They are `store.CLAIMS`, and
-`test_conformance.py` runs them against every implementation, which is the
-whole reason the contract was lifted out of this file: a claim written
-beside one implementation is a claim the other is graded against by
-accident.
+The four operations are not tested here. They are `spec.store.CLAIMS`, and
+`test_conformance.py` runs them against every implementation: a claim
+written beside one implementation is a claim the other is graded against
+by accident.
 
 What is left is what only a simulator has — the power cut — and it is not a
 detail. Every crash-window test in the project rests on these two

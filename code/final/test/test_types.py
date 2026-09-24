@@ -1,12 +1,11 @@
 """The module specs, checked by something that is not us.
 
 `spec.engine.EngineM`, `spec.store.StoreM` and `spec.queue.QueueM` are claims in the type
-system, and nothing in this project had ever asked the type system whether
-they hold. Every test passed with `Engine: EngineC` — a form mypy rejects,
-because a protocol's mutable attribute is invariant and no class object is
-*exactly* a callback protocol. The tests could not have caught it. A type
-checker is an oracle in the same sense the line schema is: it is not ours,
-it does not know what we meant, and it says no for reasons of its own.
+system, and only the type system can say whether they hold. `Engine: EngineC`
+would pass every other test and still be a form mypy rejects, because a
+protocol's mutable attribute is invariant and no class object is *exactly* a
+callback protocol. A type checker is an oracle: it is not ours, it does not
+know what we meant, and it says no for reasons of its own.
 
 The claims are below, in a block that only a type checker reads. The test
 runs mypy over this file and fails on anything it says about it. Errors in

@@ -1,7 +1,7 @@
 """Every implementation, against the contract its interface publishes.
 
-`store.conformance` and `timer.conformance` are the claims; this file is
-the list of things to run them against. The simulated ones run always. The
+`spec.store.conformance` and `spec.queue.conformance` are the claims; this
+file is the list of things to run them against. The simulated ones run always. The
 real store runs when `GCS_BUCKET` names a bucket this machine can reach,
 and is skipped otherwise, so a green suite never implies a live one.
 
@@ -291,9 +291,8 @@ def test_a_deadline_carries_the_instant_it_is_for():
 
 def test_a_deadline_past_the_horizon_is_clamped_rather_than_refused():
     """Cloud Tasks will not schedule further out than thirty days. A promise
-    with a longer deadline is clamped here, and the sweep it triggers finds
-    nothing due and re-arms. A bug in this line makes a promise never time
-    out, which is why it has a test of its own."""
+    with a longer deadline is clamped here. A bug in this line makes a
+    promise never time out, which is why it has a test of its own."""
     q, client = faked_queue(now=0)
     q.create("/", {}, not_before=10 * HORIZON_MS)
     assert client.created[0]["schedule_time"].timestamp() == pytest.approx(HORIZON_MS / 1_000)

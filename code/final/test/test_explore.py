@@ -1,12 +1,11 @@
 """The exhaustive search, at depths that fit in a test run. Deeper runs are
-`python explore.py --depth N [--alphabet narrow]`.
+`python -m resonate.testing.explore --depth N [--alphabet narrow]`.
 
 Two profiles, because breadth and depth trade against each other. The broad
 alphabet says many things a few steps deep, which is where the door checks and
 the birth shapes live. The narrow one says few things far enough to reach the
 long chains — acquire, suspend, settle, wake, halt, continue — which no broad
-search gets to and which is exactly where the Hypothesis machine found a
-divergence from the specification.
+search gets to.
 """
 
 from resonate.testing.explore import BROAD, NARROW, explore

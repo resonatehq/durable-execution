@@ -1,13 +1,13 @@
 """The whole thing, from a decorated function to bytes in a bucket.
 
-The program is the one from the repository's own README, character for
-character: plan the searches, fan them out, synthesize the results. It is
+The program is the one from the repository's own README, with a counter in
+each step: plan the searches, fan them out, synthesize the results. It is
 ordinary async/await. Nothing in it mentions promises, tasks, leases,
 retries or recovery, which is the claim the entire project is making.
 
 Everything under it is real: the kernel decides, the engine commits one
 conditional write per transition, the document lands in a simulated bucket
-as canonical lines, and a runtime carries the messages and fires the
+as JSON, and a runtime carries the messages and fires the
 deadlines. Only the bucket, the queue and the clock are in memory, and each
 is behind the port its production version will implement.
 """

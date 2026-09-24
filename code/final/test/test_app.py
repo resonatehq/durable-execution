@@ -1,11 +1,10 @@
 """The service, driven the way Cloud Run drives it.
 
-Nothing here calls the engine. Every test goes in through a method, a path
-and a JSON body, and comes back a status code, because that is the only
-surface production has. What the earlier suites prove about the kernel and
-the engine is not re-proved; what is proved here is the thin, dull layer
-that is nevertheless the one a deployment gets wrong: which route, which
-code, and who is allowed to knock.
+Nothing here calls the engine. Every test goes in through the `Server` with
+a JSON body and comes back a status code, because that is the only surface
+production has. What the other suites prove about the kernel and the engine
+is not re-proved; what is proved here is the thin, dull layer that is
+nevertheless the one a deployment gets wrong: which `kind`, which code.
 
 The one thing this file cannot reach is the GCP half of `config.build` and
 `Server.authorized`, which need credentials. They are wiring, and they are
@@ -108,7 +107,7 @@ def test_a_malformed_request_is_a_400_and_never_reaches_the_bucket(envelope):
     assert store.objects == {}, "a request that was never understood wrote something"
 
 
-# --- the queue's routes ----------------------------------------------------
+# --- what the queue sends ---------------------------------------------------
 
 
 def test_a_duplicate_dispatch_is_answered_rather_than_retried():

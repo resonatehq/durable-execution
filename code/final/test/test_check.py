@@ -67,9 +67,8 @@ def test_it_admits_what_it_could_not_check():
 @pytest.mark.skipif(not os.environ.get("GCS_BUCKET"),
                     reason="set GCS_BUCKET to check that a live run reports itself")
 def test_a_live_bucket_turns_that_skip_into_a_result():
-    """The other half, and the one that went untested until a real bucket
-    existed: given credentials the store must stop skipping and name the
-    bucket it used. A checker that printed a skip either way would be
+    """The other half: given credentials the store must stop skipping and
+    name the bucket it used. A checker that printed a skip either way would be
     hiding the only run that settles anything."""
     done = run()
     assert done.returncode == 0, done.stdout + done.stderr

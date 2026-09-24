@@ -6,11 +6,6 @@ so the name is not a label -- it is the protocol's identifier. Two
 unrelated functions answering to it means a dispatch created for one runs
 the other, silently, and the only symptom is a wrong answer.
 
-That was the behaviour until this file existed: `@resonate` wrote to a
-dict and the last module imported won. It was found by moving the engine
-into a package, which made `main.py` and `test_sleep.py` both define `nap`
--- the suite became order-dependent and only one of the two noticed.
-
 The other side of it is that a durable function's body cannot be changed
 freely while runs of it are in flight. A run replays from the top and
 reads its previous calls back *by position*, so inserting a call or
@@ -74,8 +69,8 @@ def module_from(tmp_path, name: str, source: str):
 
 
 def test_two_files_cannot_claim_one_name(tmp_path):
-    """The bug this file was written for. `billing.py` and `orders.py` each
-    define `process`; one of them silently wins."""
+    """The collision the rule exists for. `billing.py` and `orders.py` each
+    define `process`, and without the rule one of them silently wins."""
     module_from(tmp_path, "billing", "@resonate\ndef process(x):\n    return 'billed'\n")
     with pytest.raises(DuplicateFunction) as caught:
         module_from(tmp_path, "orders", "@resonate\ndef process(x):\n    return 'ordered'\n")
@@ -127,9 +122,8 @@ def test_a_version_is_a_non_negative_integer(bad):
 
 
 def test_an_unversioned_call_writes_what_it_always_wrote():
-    """Version zero adds no key. Documents written before versions existed
-    still decode, and the reviewed trace does not move for a feature nobody
-    in that project is using."""
+    """Version zero adds no key, so a project that never uses versions
+    writes nothing it does not need."""
     @resonate
     def plain(x):
         return x
@@ -147,8 +141,8 @@ def test_a_versioned_call_says_so():
 
 
 def test_a_parameter_with_no_version_is_version_zero():
-    """The compatibility rule, stated once. Everything written before this
-    feature is version zero, which is what it was."""
+    """The compatibility rule, stated once: a parameter without `v` is
+    version zero."""
     assert called({"f": "old", "a": [1]}) == ("old", 0, [1])
     assert called({"f": "new", "a": [1], "v": 2}) == ("new", 2, [1])
 

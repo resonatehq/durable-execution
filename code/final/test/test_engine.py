@@ -140,7 +140,7 @@ def test_the_effects_go_in_the_order_every_crash_window_survives():
     e, store, q = build(fault)
     e.process(create("o:a"), 0)
     # An arm and a send are the same call to the same port, told apart the
-    # way the deployment tells them apart: by where the task is addressed.
+    # way the deployment tells them apart: by the message's `kind`.
     assert fault.log == ["create timeout /", f"commit {doc_key('o')}", "create execute http://w"]
 
     fault.log = []
@@ -301,7 +301,7 @@ def test_a_remote_call_through_the_engine():
     assert sent(q) == [(W, Execute("run", 0))], "the run is offered"
 
     e.process(TaskAcquire("run", 0, "w1", 5_000), 1)
-    e.process(create("run:1"), 2)                                  # durable() creates the rpc
+    e.process(create("run:1"), 2)                                  # the call creates the rpc
     assert sent(q) == [(W, Execute("run:1", 0))]
     e.process(TaskSuspend("run", 1, ("run:1",)), 3)                 # Blocked: park
 

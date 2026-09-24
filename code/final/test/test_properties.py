@@ -3,10 +3,10 @@
 1. Every property must be FALSIFIABLE: a hand-built violator is rejected by
    exactly the entry that names it. A property that cannot fail is not being
    checked.
-2. The corpus must REACH the states that make each guard bite: a randomized
-   walk over an adversarial alphabet, with the whole catalogue evaluated at
-   every state and every consecutive pair, and a tally proving the
-   interesting transitions actually happened.
+2. The corpus must REACH the states that make each guard bite, with the
+   whole catalogue evaluated at every state and every consecutive pair and a
+   tally proving the interesting transitions actually happened. That half is
+   `test_machine.py` and `test_explore.py`; this file is the first.
 """
 
 import copy

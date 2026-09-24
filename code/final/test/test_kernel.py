@@ -821,7 +821,7 @@ def test_a_remote_call_end_to_end():
     """Post 002: create here, settle over there, resume, run from the top."""
     doc = with_targeted("run", 100_000)                                   # the run itself
     doc = apply(doc, TaskAcquire("run", 0, "w1", 5_000), 1)                # a worker claims it
-    doc = apply(doc, fence(create("run:1", 100_000, {"resonate:target": W}), corr="c", id="run"), 2)  # durable() creates the rpc's promise
+    doc = apply(doc, fence(create("run:1", 100_000, {"resonate:target": W}), corr="c", id="run"), 2)  # the call creates the rpc's promise
     doc = apply(doc, TaskSuspend("run", 1, ("run:1",)), 3)                # Blocked: unwind, park
     assert doc.get("run").task.state == T_SUSPENDED and doc.timer_at == 30_002
     doc = apply(doc, TaskAcquire("run:1", 0, "w2", 5_000), 4)              # another worker takes the callee

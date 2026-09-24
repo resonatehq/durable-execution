@@ -17,9 +17,7 @@ rejects it. A sleep of five seconds becomes a rejection in eleven days,
 which is worse than a crash because nothing reports it.
 
 That is why `timeout_armed` follows `is_external` rather than asking for a
-target: a timer is external, so it is armed. The suite passed both spellings
-before this file existed, and passed a third that special-cased the timer
-tag, which is the gap this closes.
+target: a timer is external, so it is armed.
 """
 
 from __future__ import annotations

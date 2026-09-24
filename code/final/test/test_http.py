@@ -1,8 +1,8 @@
 """The service as an HTTP service, through the entry point Cloud Run calls.
 
-`test_app.py` stops one layer short: it calls `Server.protocol`,
-`Server.execute` and `Server.sweep` directly. Everything between an HTTP
-request and those calls — `handler`, `Server.dispatch`, `Server.authorized`,
+`test_app.py` stops one layer short: it calls `Server.dispatch`,
+`Server.protocol` and `Server.timeout` directly. Everything between an HTTP
+request and those calls — `handler`, `Server.handle`, `Server.authorized`,
 the JSON in and out, the status code, the path Flask hands over — is what
 this file covers, and it is exactly the layer a deployment gets wrong.
 
@@ -110,7 +110,7 @@ def post(client, kind, **data):
     return client.post("/", json={"kind": kind, "data": data})
 
 
-# --- the routes, over HTTP -------------------------------------------------
+# --- the route, over HTTP --------------------------------------------------
 
 
 def test_the_protocol_round_trips_over_http(client):
@@ -159,7 +159,7 @@ def test_the_queue_routes_refuse_an_unsigned_request(build):
     assert post(client, "promise.get", id="nothing").status_code == 404
 
 
-# --- the whole counted_agent, over nothing but HTTP --------------------------------
+# --- the whole run, over nothing but HTTP ----------------------------------
 
 
 def pump(client, server, budget: int = 2_000) -> int:
