@@ -25,7 +25,7 @@ is the whole of the wiring: Google's buildpack looks for a module-level
 function named `handler`, and `serve()` builds the service from the
 environment and returns one. It goes last, after the functions it serves.
 
-## The six names
+## The names
 
 `resonate` marks a function durable. `gather` awaits several durable calls
 at once, dispatching all of them before anything blocks. `sleep` waits,
@@ -34,6 +34,7 @@ outside to answer -- a person approving, a webhook, a form -- which is what
 other systems spell as a signal handler and a wait condition. `Failed` is what a durable
 call raises when the call it is replaying was recorded as rejected --
 catch it like any other exception. `serve` builds the entry point above.
+`Durable` is what `@resonate` returns.
 
 ## Two names, and versions
 
@@ -54,9 +55,9 @@ the top and reads its earlier calls back *by position*, so inserting a
 durable call or reordering two moves every position after it, and a run
 already in flight would resume into a body that disagrees with its own
 history. Under a version, it finishes on the body it started on, and new
-runs take the new one. Unversioned means version 0, writes exactly the
-bytes it wrote before versions existed, and is what you want until the day
-you change a durable function with runs in the air.
+runs take the new one. Unversioned means version 0, which a promise
+records by leaving the version out, and is what you want until the day you
+change a durable function with runs in the air.
 
 Everything else in this package is the engine, and you should not need to
 import any of it. If you find yourself reaching for `kernel`, `engine` or
@@ -79,6 +80,5 @@ from .sdk import Durable, Failed, external, gather, resonate, sleep
 __all__ = ["serve", "resonate", "gather", "sleep", "external",
            "Failed", "Durable"]
 
-#: Kept in step with `pyproject.toml`, which reads it rather than repeating
-#: it -- two spellings of a version number is one spelling too many.
+#: `pyproject.toml` reads the package version from here.
 __version__ = "0.1.0"

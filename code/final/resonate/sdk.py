@@ -1,6 +1,6 @@
 """The programming model: ordinary async/await, one decorator.
 
-This is the target from the repository's README, and it is the whole claim:
+The whole claim:
 
     @resonate
     async def research(question: str):
@@ -99,8 +99,8 @@ class LeaseLost(Exception):
 
 
 #: What the worker and the SDK must not mistake for an answer. Everything
-#: else a durable function raises is its result, recorded as a rejection —
-#: post 001's `except Exception: settle(id, REJECTED, e)`. These three mean
+#: else a durable function raises is its result, recorded as a rejection.
+#: These three mean
 #: the attempt could not produce a result at all, so the task goes back and
 #: somebody tries again.
 PLATFORM = (LeaseLost, Conflict, Unavailable)
@@ -328,17 +328,11 @@ class Durable:
         return self.name if self.version == UNVERSIONED else f"{self.name}@{self.version}"
 
     def __repr__(self) -> str:
-        """Which function this is. The default carries a heap address,
-        which is useless in a log and worse in a trace that is supposed to
-        fingerprint the same in every process."""
+        """Which function this is, without the default's heap address."""
         return f"@resonate {self.label}"
 
     async def __call__(self, *args) -> Any:
-        """A local durable call: create, run if pending, settle, read back.
-
-        The whole of post 001, with the bookkeeping under the language
-        instead of at the call site.
-        """
+        """A local durable call: create, run if pending, settle, read back."""
         inv, frame = current()
         id = frame.child()
         _, data = inv.fence(PromiseCreate(

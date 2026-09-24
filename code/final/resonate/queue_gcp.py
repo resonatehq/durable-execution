@@ -1,6 +1,6 @@
 """A queue, for real: Google Cloud Tasks.
 
-`queue_gcp.Queue` is `queues.QueueP` over a real queue. Two methods, because
+`queue_gcp.Queue` is `ports.QueueP` over a real queue. Two methods, because
 that is all the engine needs: put a task in, take one out again. There is
 no third method for receiving, and that is not an omission — Cloud Tasks is
 push-only. A task is delivered by an HTTP POST to the URL it carries, which
@@ -8,7 +8,7 @@ is why `server.py` exists and why a worker is a service rather than a loop.
 
 ## What a task is here
 
-    POST <base_url>/<url>          the handler, chosen by whoever created it
+    POST <url>                     absolute, or relative to base_url (`HERE`)
     body: the message, as JSON     what the kernel emitted
     schedule_time: not before      set for a deadline, absent for a dispatch
 
@@ -21,32 +21,20 @@ Never from us. A caller-chosen name leaves a tombstone for about an hour
 after deletion, so re-creating the same name is refused — which is exactly
 what a deadline re-armed at the same instant for the same origin would try
 to do. Letting the service name it, and recording that name in the
-document, avoids the trap and is why the document has a `tn` field.
+document, avoids the trap and is why the document has a `timerName` field.
 
 ## The horizon
 
-Cloud Tasks will not schedule further out than 30 days. A promise with a
-longer deadline is clamped, and the sweep it triggers finds nothing due and
-re-arms. Cheap, and a place a bug would make a promise never time out, so
-it has a test.
+Cloud Tasks will not schedule further out than 30 days, so a later
+`not_before` is clamped to the horizon. The clamped deadline fires early,
+the sweep finds nothing due, and a decision that changes nothing writes
+nothing -- so nothing re-arms it.
 
 ## What is verified
 
-On 2026-09-23 all eight claims held against a real Cloud Tasks queue: the
-service names each task, two creates are two tasks, cancelling is
-idempotent and cancelling what was never there succeeds, a dispatch
-carries no schedule, a past schedule is accepted and one past the horizon
-is clamped. `spec.check` prints it when `TASKS_QUEUE` names a queue, which
-is how the run was made repeatable rather than a thing done once.
-
-The queue used for that is a paused one: it accepts creation and deletion,
-which is the whole contract, and dispatches nothing, so the eight claims
-run without a single POST escaping.
-
-Delivery to a real endpoint is verified separately and less completely: a
-task created here reached a Cloud Run service and its handler answered
-200, so the OIDC signing path works end to end. What that run also found
-is the `actAs` requirement above.
+The queue contract in `testing/spec/queue.py` runs against a real queue
+when `TASKS_QUEUE` names one. A paused queue is enough: it accepts creation
+and deletion, which is the whole contract, and dispatches nothing.
 """
 
 from __future__ import annotations

@@ -3,13 +3,13 @@
     handle_internal(doc, now, cfg)      -> effects            the sweep: everything whose deadline has passed
     handle_external(doc, req, now, cfg) -> (effects, reply)   the sweep, then one protocol request
 
-Neither reads a clock, generates an id, or does I/O. Everything a decision
-implies comes back as an Effect for the shell to perform, in order: arm the new
-timer, commit the document, clear the old timer, send. The transition *is*
-`apply_effects(handle_external(doc, req, now, cfg)[0])`; there is no second
-updater.
+Neither reads a clock, generates an id, or does I/O. Each operation is
+`(doc, req, ...) -> (Reply, Commands)` and never mutates `doc`; `commit`
+turns the merged commands into Effects for the shell to perform, in order:
+arm the new timer, write the document, clear the old timer, send. The
+transition *is* `document_after(doc, fx)`; there is no second updater.
 
-Transcribed from resonatehq/resonate, crates/resonate-server-blob/src/kernel.
+Mirrors the Lean implementation in resonatehq/s3.
 """
 
 from __future__ import annotations
@@ -182,12 +182,7 @@ def min_deadline(doc: Document) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Requests
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Effects, messages, replies
+# Effects
 # ---------------------------------------------------------------------------
 
 
@@ -448,8 +443,7 @@ def promise_create(doc: Document, r: PromiseCreate, now: int, cfg: KernelCfg) ->
     p = new_promise(r, now)
     reply = Reply.ok({"promise": p.to_record(r.id)})
     if p.target() is None:
-        # No target means no task and no armed deadline: such a promise only
-        # ever expires lazily, when someone reads it.
+        # No target means no task.
         return reply, Commands([Object(r.id, p)])
     if p.state != PENDING:
         # Born settled, so its task is born done.
@@ -499,14 +493,7 @@ def promise_register_callback(doc: Document, r: PromiseRegisterCallback) -> tupl
     # otherwise), and a settlement drains every callback it holds, so a
     # suspended task always has a rung on a pending promise. Waking one here
     # would be a transition out of `suspended` that consumed no callback, which
-    # `consistent_wake_follows_callback_consumption` forbids — and the state it
-    # defends against is one the catalogue says is unreachable.
-    #
-    # (The Rust kernel does wake, following its SQL backend, where the
-    # registration inserts a *ready callback* that a later step drains. The
-    # coalesced machine has no later step, and the specification's
-    # `promiseRegisterCallback` accordingly does nothing here:
-    # `spec/02-abstract/external.lean:78-83`. Found by the Hypothesis machine.)
+    # `consistent_wake_follows_callback_consumption` forbids.
     p = awaited.promise
     if p.state != PENDING or awaiter.promise.state != PENDING or r.awaiter in p.callbacks:
         return reply, NOTHING
@@ -637,7 +624,7 @@ def task_fulfill(doc: Document, r: TaskFulfill, now: int, cfg: KernelCfg) -> tup
         return Reply.err(409, "Task version mismatch or invalid state"), NOTHING
     if o.promise.state != PENDING:
         # Unreachable while the invariants hold (an acquired task's promise is
-        # pending), but the reference fulfils the task regardless.
+        # pending), but the task is fulfilled regardless.
         return (Reply.ok({"promise": o.promise.to_record(r.id)}),
                 Commands([replace(o, task=parked(o.task, T_FULFILLED))]))
     record, c = settle(doc, r.id, r.action.state, r.action.value, now, cfg)
@@ -796,10 +783,8 @@ def trigger_settlement(doc: Document, id: str, now: int, cfg: KernelCfg) -> Comm
 
     # settlement_enqueued: the settled promise's own task is done. Its
     # registrations against other, still pending promises stay where they
-    # are: the specification only ever removes a callback when the awaited
-    # promise settles, and the fan-out below skips a finished awaiter. (The
-    # Rust kernel deletes them here, mirroring its SQL schema; the wire
-    # cannot tell the difference, and the catalogue forbids the deletion.)
+    # are: a callback is removed only when the awaited promise settles, and
+    # the fan-out below skips a finished awaiter.
     task = o.task
     if task is not None and task.state != T_FULFILLED:
         task = parked(task, T_FULFILLED)

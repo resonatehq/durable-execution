@@ -30,7 +30,7 @@ class Worker:
     def run(self, task_id: str, version: int) -> str:
         """Claim one task and see its run through, whatever the run does.
 
-        The task is claimed once; the inner half may run more than once,
+        The task is claimed once; `_attempt` may run more than once,
         because a suspension that finds nothing left to wait for carries on
         from the top rather than parking.
         """
@@ -87,13 +87,12 @@ class Worker:
 
         Returns what it returned, or raises: `Blocked` when it stopped for
         a value it does not have yet, whatever the function itself raised,
-        or a platform failure. Deciding what any of those mean is the outer
-        half's business, not this one's.
+        or a platform failure. Deciding what any of those mean is `run`'s
+        business, not this one's.
 
         A durable function is async and a worker is not, so something has
-        to own the event loop. It is here rather than around the whole
-        runtime, so a leaf that does real I/O can await it while everything
-        outside stays the ordinary synchronous shell it is in production.
+        to own the event loop. It is here, per attempt, so a leaf that does
+        real I/O can await it while everything outside stays synchronous.
 
         The two context variables are what make a durable call durable: the
         invocation carries the task and the version every write is fenced

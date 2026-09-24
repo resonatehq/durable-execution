@@ -12,7 +12,9 @@ Everything else about the method is the same for both, and the order is the
 part that matters:
 
 1. **Load** the origin's document and the version it is at.
-2. **Decide**, purely: the kernel returns the next document and its effects.
+2. **Decide**, purely: the kernel returns the reply and the effects, in
+   the order below. A decision that changed nothing has no effects, and the
+   engine returns the reply without writing.
 3. **Arm** the new deadline, *before* the commit, and record what it is
    called. A committed document whose deadline was never armed is the one
    state nothing repairs — the promise never times out and every answer about
@@ -23,21 +25,20 @@ part that matters:
    to the caller, who retries, because every operation is idempotent. The
    engine never loops: a loop here would choose a retry policy before anything
    has said what it should be.
-5. **Disarm** the old deadline, *after* the commit it belonged to is gone.
+5. **Disarm** the old deadline, by the name the loaded document recorded,
+   *after* the commit that replaced it.
 6. **Send**, strictly post-commit, so a message is always a consequence of
    committed state rather than of an intention.
 
-The write law sits in front of all of it: if the decision left the objects
-and the armed deadline untouched, nothing is written at all. The document's
-clock is deliberately outside that comparison — it is a monotonicity hint,
-not state, and paying a write to advance it would make every read a write.
+The document's clock and generation are stamped only on a write that happens
+anyway; advancing them alone never causes one, or every read would be a write.
 
 What is left at each point the process can stop:
 
 | stopped after | what is left | what repairs it |
 |---|---|---|
 | arming | a deadline nothing points at | it fires, the sweep finds nothing due and writes nothing |
-| committing | the transition is durable, the old deadline still armed | it fires into a document that moved on, and is collected |
+| committing | the transition is durable, the old deadline still armed | it fires; the sweep does only what is due, usually nothing |
 | disarming | durable, but the messages did not go | the task's retry deadline, committed before the message left |
 | sending | the caller was told nothing | it retries, and every operation is idempotent |
 """

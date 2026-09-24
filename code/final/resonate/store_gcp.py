@@ -1,6 +1,6 @@
 """A store, for real: Google Cloud Storage.
 
-`store_gcp.Store` is `store.StoreP` over a bucket, and it is almost empty,
+`store_gcp.Store` is `ports.StoreP` over a bucket, and it is almost empty,
 which is the test of whether the interface was drawn in the right place.
 Everything the design rests on, GCS already offers: a generation per object,
 and writes conditioned on it.
@@ -44,19 +44,15 @@ reach; we were slower than it for a simpler reason.
 
 ## What is verified, and what is not
 
-`store.conformance` passes against a real bucket: all eleven claims, which
-is what `spec.check` prints when `GCS_BUCKET` is set, and what
-`test_conformance.py::...[gcs]` runs. Generation preconditions behave as
-this file reads them -- `if_generation_match=0` creates exactly once, and a
-matched generation replaces exactly what was read.
+The store contract in `testing/spec/store.py` runs against a real bucket
+when `GCS_BUCKET` is set, from `python -m resonate.testing.spec.check` and
+from `test_conformance.py`. Generation preconditions behave as this file
+reads them -- `if_generation_match=0` creates exactly once, and a matched
+generation replaces exactly what was read.
 
-Still resting on documentation: everything about a bucket this code never
-asked for. The measurements above are one bucket, one region, one day, from
-one machine; the region is not recorded here because the credential used
-could not read the bucket's own metadata. Cross-region latency, behaviour
-under sustained load far above this, and the queue side (Cloud Tasks) are
-unverified -- `spec.check` still prints `skip` for `queue_gcp`, and saying
-so is better than implying otherwise.
+The measurements above are one bucket, one region, one day, from one
+machine. Cross-region latency and behaviour under sustained load far above
+this are unverified.
 """
 
 from __future__ import annotations

@@ -1,17 +1,9 @@
 """The protocol: everything that can be said, and its form on a wire.
 
-Fifteen requests a client may send, the reply that comes back, the two
-messages a queue carries, and the parsing that turns an envelope into one
-of them. Nothing here decides anything -- `kernel.py` does that, and what
-it decides *about* is this.
-
-These used to be in two files. The types were in `kernel.py`, because the
-kernel matches on them, and the parsing was in `wire.py`, because parsing
-felt like an edge. That split has a good general argument behind it -- keep
-a domain model away from its serialisation, so one model can have several
-wire formats -- and this system does not collect on it: there is exactly
-one wire format for a request, and the only other encoder in the project,
-`codec.py`, serialises documents rather than requests.
+Fifteen requests a client may send, the reply that comes back, the three
+messages a queue carries (`Execute`, `Unblock`, `Timeout`), and the parsing
+that turns a dict into one of them. Nothing here decides anything --
+`kernel.py` does that, and what it decides *about* is this.
 
 ## It parses dicts, not bytes
 
@@ -23,9 +15,9 @@ the field that holds them.
 
 ## Two seams, both JSON
 
-Requests in, messages out, and both are the point at which this stops being
-Python objects and becomes something another implementation could sit on
-the other side of. Parsing is where a malformed request becomes a 400 and
+Requests in, messages in and out: both are where this stops being Python
+objects and becomes something another implementation could sit on the
+other side of. Parsing is where a malformed request becomes a 400 and
 never reaches the state machine; the *semantic* doors, the ones the
 specification's catalogue shadows, are the kernel's own and are not here.
 
