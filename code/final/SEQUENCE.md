@@ -124,7 +124,7 @@ sequenceDiagram
     E->>S: put(..., if_match=generation)
 
     alt 412 — the state moved
-        S-->>E: PreconditionFailed
+        S-->>E: Conflict (the generation moved)
         Note over E: nothing was written. The decision was<br/>made against a document that no longer<br/>exists, so it must be re-decided.
         E-->>C: 409 — ask again, never replay
     else 429 / 503 — no answer
