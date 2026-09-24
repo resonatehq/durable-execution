@@ -11,8 +11,8 @@ passes `legal_pre=False` and is checked against the kernel's own invariants
 only.
 """
 
-from properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
-from kernel import (
+from resonate.properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
+from resonate.kernel import (
     PENDING, REJECTED_TIMEDOUT, RESOLVED, T_FULFILLED, T_PENDING, TAG_TIMER,
     T_ACQUIRED, DelTimeout, Document, Execute, KernelCfg, PromiseCreate, Reply,
     Send, SetDocument, SetTimeout, Task, Value, check_invariants, dewey,
@@ -279,7 +279,7 @@ def test_a_sweep_that_fires_nothing_changes_nothing():
 # The remaining operations. Fixtures build documents through the kernel.
 # ===========================================================================
 
-from kernel import (  # noqa: E402
+from resonate.kernel import (  # noqa: E402
     REJECTED, T_HALTED, T_SUSPENDED, PromiseGet, PromiseRegisterCallback,
     PromiseRegisterListener, PromiseSettle, TaskAcquire, TaskContinue, TaskCreate,
     TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat, TaskRelease,

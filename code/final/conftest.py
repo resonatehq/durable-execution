@@ -1,9 +1,12 @@
 """Make the modules under test importable from `test/`.
 
 pytest puts a test file's own directory on `sys.path`, which for these is
-`test/`. The things they import — `engine`, `store_mem`, `spec` — live one
-level up, so that is what goes on the path. A conftest at the root is also
-what makes `code/final` the rootdir, so `python -m pytest` from here finds
+`test/`. What they import — the `resonate` package, and the `main.py`
+beside it that stands in for a user's application — lives one level up, so
+that is what goes on the path. In a user's repository the package is
+installed and this file does not exist; here it is a sibling directory,
+which is the same import either way. A conftest at the root is also what
+makes `code/final` the rootdir, so `python -m pytest` from here finds
 everything.
 """
 

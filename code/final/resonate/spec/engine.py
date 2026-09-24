@@ -28,8 +28,8 @@ observable behaviour as the reference, whatever it does inside — a different
 language, a different store, a kernel written from the specification rather
 than transcribed from it.
 
-    from spec import conformance
-    import engine
+    from . import conformance
+    from .. import engine
 
     assert conformance(engine) == []
 """
@@ -38,18 +38,18 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-import properties as P
-from codec import decode, doc_key
-from engine import Timeout
-from kernel import (
+from .. import properties as P
+from ..codec import decode, doc_key
+from ..engine import Timeout
+from ..kernel import (
     RESOLVED, Document, KernelCfg, PromiseCreate, PromiseRegisterListener,
     PromiseSettle, Reply, Req, Send, TaskAcquire, TaskFulfill, TaskSuspend,
     Value, check_invariants,
 )
-from ports import Conflict, Fault, Violation
-from spec.queue import SWEEP, QueueP
-from spec.store import StoreP
-from wire import decode_message
+from ..ports import Conflict, Fault, Violation
+from .queue import SWEEP, QueueP
+from .store import StoreP
+from ..wire import decode_message
 
 
 class _Recorded:
@@ -281,8 +281,8 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
     one; hand it `store_gcp.Store` and the same suite grades the same engine
     through the seam it will really run on.
     """
-    import queue_mem
-    import store_mem  # here, so `store.py` may import this module's Violation
+    from .. import queue_mem
+    from .. import store_mem  # here, so `store.py` may import this module's Violation
 
     script = STANDARD_SCRIPT if script is None else script
     fault = Fault()  # not injecting: used here only as the log of what was written

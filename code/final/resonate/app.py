@@ -81,14 +81,14 @@ import logging
 import os
 from datetime import datetime, timezone
 
-import queue_gcp
-import store_gcp
-from engine import Timeout
-from kernel import KernelCfg
-from ports import Conflict, Unavailable
-from runtime import Clock, Worker
-from tracing import because, trace
-from wire import Invalid, decode_message, encode_reply, parse_request
+from . import queue_gcp
+from . import store_gcp
+from .engine import Timeout
+from .kernel import KernelCfg
+from .ports import Conflict, Unavailable
+from .runtime import Clock, Worker
+from .tracing import because, trace
+from .wire import Invalid, decode_message, encode_reply, parse_request
 
 
 def wall_clock() -> int:
@@ -117,7 +117,7 @@ class Routes:
 
     def __init__(self, store, queue, cfg: KernelCfg, pid: str, ttl: int,
                  clock=wall_clock) -> None:
-        from engine import Engine
+        from .engine import Engine
 
         self.clock = clock
         self.store, self.queue = store, queue
@@ -217,7 +217,7 @@ def from_environment() -> Routes:
     """
     _trace()
     if os.environ.get("SIMULATED"):
-        import local
+        from . import local
 
         _route()
         return Routes(local.STORE, local.QUEUE, _cfg(),
@@ -243,7 +243,7 @@ def _trace() -> None:
     if not os.environ.get("TRACE"):
         return
     try:
-        import otel_gcp
+        from . import otel_gcp
 
         otel_gcp.install()
     except Exception as e:  # pragma: no cover - needs a broken environment
@@ -267,7 +267,7 @@ def _route() -> None:
     the runtime's namespace rather than be tested into safety."""
     from importlib import import_module
 
-    from sdk import TARGETS
+    from .sdk import REGISTRY, TARGETS
 
     # `ROUTES_APP` names the modules whose `@resonate` functions this worker
     # can run, comma separated. Importing them is what fills `sdk.REGISTRY`,
@@ -280,6 +280,22 @@ def _route() -> None:
         if module.strip():
             import_module(module.strip())
 
+    # Every function runs here unless told otherwise. One service running
+    # everything is the common deployment and the one a user starts with,
+    # and in that shape the routing table is derivable: `.rpc` on any
+    # registered function is a dispatch to this service's own `/execute`.
+    # Without this default a single-service deployment still had to hand-
+    # write a JSON map of every function to the one URL it already knew,
+    # and a typo in it surfaced as `KeyError` at the first dispatch rather
+    # than at deploy.
+    base = os.environ.get("BASE_URL", "").rstrip("/")
+    if base:
+        for name in REGISTRY:
+            TARGETS.setdefault(name, f"{base}/execute")
+
+    # Explicit second, so it overrides. This is the split deployment: some
+    # functions live in another service, and naming one here says so
+    # without saying anything about the rest.
     for name, url in json.loads(os.environ.get("ROUTES_WORKERS", "{}")).items():
         TARGETS[name] = url
 

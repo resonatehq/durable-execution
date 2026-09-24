@@ -18,9 +18,9 @@ different, and both are held to the same contracts as the real ones.
 
 from __future__ import annotations
 
-from queue_mem import Queue
-from runtime import Clock
-from store_mem import Store
+from .queue_mem import Queue
+from .runtime import Clock
+from .store_mem import Store
 
 #: One store, one queue, one clock, for the life of the process.
 STORE = Store()

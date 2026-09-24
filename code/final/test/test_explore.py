@@ -9,7 +9,7 @@ search gets to and which is exactly where the Hypothesis machine found a
 divergence from the specification.
 """
 
-from explore import BROAD, NARROW, explore
+from resonate.explore import BROAD, NARROW, explore
 
 
 def test_the_broad_alphabet_to_depth_3():

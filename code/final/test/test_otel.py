@@ -14,19 +14,20 @@ a test below.
 
 from __future__ import annotations
 
+import pathlib
 import subprocess
 import sys
 
 import pytest
 
-import otel
-from engine import Engine
-from kernel import KernelCfg
-from ports import Unavailable
-from queue_mem import Queue
-from runtime import Clock, Runtime, Worker
-from sdk import gather, resonate
-from store_mem import Store
+from resonate import otel
+from resonate.engine import Engine
+from resonate.kernel import KernelCfg
+from resonate.ports import Unavailable
+from resonate.queue_mem import Queue
+from resonate.runtime import Clock, Runtime, Worker
+from resonate.sdk import gather, resonate
+from resonate.store_mem import Store
 
 CFG = KernelCfg(retry_timeout=30_000)
 
@@ -91,10 +92,12 @@ def test_the_ids_survive_a_process_boundary():
     test would still pass. This runs the derivation in a fresh interpreter
     with a hash seed that cannot match ours.
     """
-    src = ("import sys; sys.path.insert(0, '.'); import otel; "
+    src = ("from resonate import otel; "
            "print(otel.trace_id('research.1').hex(), otel.span_id('research.1:2').hex())")
-    out = subprocess.run([sys.executable, "-c", src], capture_output=True,
-                         text=True, env={"PYTHONHASHSEED": "12345", "PATH": "/usr/bin"})
+    out = subprocess.run(
+        [sys.executable, "-c", src], capture_output=True, text=True,
+        cwd=str(pathlib.Path(__file__).parent.parent),
+        env={"PYTHONHASHSEED": "12345", "PATH": "/usr/bin", "PYTHONPATH": "."})
     assert out.returncode == 0, out.stderr
     there = out.stdout.split()
     here = [otel.trace_id("research.1").hex(), otel.span_id("research.1:2").hex()]
@@ -203,7 +206,7 @@ def test_the_logical_span_is_the_promise_not_the_process():
     """Its ends come from the document, which is why a second process would
     emit the same span rather than a competing version of it."""
     spans, rt, store, _ = run("branch.1", branch, "q", functions=(branch, leaf))
-    from codec import decode, doc_key
+    from resonate.codec import decode, doc_key
     doc = decode(store.get(doc_key("branch.1"))[0].encode(), "branch.1")
     for s in logical(spans):
         p = doc.get(s.attributes["de.promise"]).promise
@@ -212,7 +215,7 @@ def test_the_logical_span_is_the_promise_not_the_process():
 
 def test_waiting_is_the_difference_between_the_layers():
     """The question neither layer answers alone, and the reason for both."""
-    from demo import nap
+    from main import nap
     rt, store, clock = world(nap)
     with otel.collecting() as spans:
         rt.start("nap.1", nap, 5_000)
@@ -231,7 +234,7 @@ def test_waiting_is_the_difference_between_the_layers():
 
 def test_a_timer_has_no_attempt_because_nothing_runs_it():
     """Time settles it. There is no process to have a physical span."""
-    from demo import nap
+    from main import nap
     rt, store, clock = world(nap)
     with otel.collecting() as spans:
         rt.start("nap.1", nap, 5_000)
@@ -275,7 +278,7 @@ def test_an_attempt_that_records_nothing_is_still_a_span():
     settled = [s for s in logical(spans) if s.attributes["de.promise"] == "flaky.1"]
     assert len(settled) == 1 and settled[0].status == otel.OK, settled
 
-    from codec import decode, doc_key
+    from resonate.codec import decode, doc_key
     doc = decode(store.get(doc_key("flaky.1"))[0].encode(), "flaky.1")
     assert doc.get("flaky.1").promise.state == "resolved"
     assert "503" not in store.get(doc_key("flaky.1"))[0], \

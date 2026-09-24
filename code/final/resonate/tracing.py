@@ -12,7 +12,7 @@ So: a decorator on what we own, a protocol-derived wrapper on what we do
 not, both feeding one log, and a context variable carrying the request
 that caused it all.
 
-    from tracing import recording, trace, watch
+    from .tracing import recording, trace, watch
 
     with recording() as t:
         ...

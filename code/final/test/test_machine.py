@@ -51,8 +51,8 @@ from hypothesis.stateful import (
     RuleBasedStateMachine, invariant, precondition, rule, run_state_machine_as_test,
 )
 
-import properties as P
-from kernel import (
+from resonate import properties as P
+from resonate.kernel import (
     PENDING, REJECTED, REJECTED_CANCELED, RESOLVED, T_ACQUIRED, T_FULFILLED,
     T_HALTED, T_PENDING, T_SUSPENDED, Document, Execute, KernelCfg,
     PromiseCreate, PromiseGet, PromiseRegisterCallback, PromiseRegisterListener,

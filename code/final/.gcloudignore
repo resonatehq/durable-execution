@@ -10,3 +10,8 @@ __pycache__/
 test/
 requirements-dev.txt
 live/
+
+# What IS uploaded: `main.py`, the `resonate/` package beside it, and
+# `requirements.txt`. The package is a sibling rather than an installed
+# distribution here, which is what makes `--source .` deploy this
+# repository's own example; a user installs it and uploads one file.

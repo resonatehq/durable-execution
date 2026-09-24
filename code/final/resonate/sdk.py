@@ -61,13 +61,13 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
-import otel
-from tracing import trace
-from kernel import (
+from . import otel
+from .tracing import trace
+from .kernel import (
     PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
     TAG_TIMER, TaskFence, Value, origin_of,
 )
-from ports import Conflict, Unavailable
+from .ports import Conflict, Unavailable
 
 #: How long a promise this SDK creates has to settle before it times out.
 DEFAULT_TIMEOUT = 24 * 60 * 60 * 1_000

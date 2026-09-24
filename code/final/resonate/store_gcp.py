@@ -63,7 +63,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spec.store import PreconditionFailed, Unavailable
+from .spec.store import PreconditionFailed, Unavailable
 
 #: The bytes a document is. Not `application/json`: a document is a sequence
 #: of JSON values, one per line, which is a different media type and worth

@@ -7,7 +7,7 @@ around a store:
     QueueC   how one is made: its configuration in, a queue out
     QueueM   a module that offers one, under the name `Queue`
 
-    from spec.queue import conformance
+    from ..queue import conformance
     import queue_mem, queue_gcp
 
     assert conformance(queue_mem) == []
@@ -66,7 +66,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ports import Violation
+from ..ports import Violation
 
 #: The URL a deadline is delivered to. Everything after it is the origin to
 #: sweep, exactly as a Cloud Run route would read it.

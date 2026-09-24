@@ -81,7 +81,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
-from kernel import PENDING, RESOLVED
+from .kernel import PENDING, RESOLVED
 
 #: What a span's outcome is called. OTel's own vocabulary is `OK`, `ERROR`
 #: and `UNSET`; the third is the one that matters here, because a suspension

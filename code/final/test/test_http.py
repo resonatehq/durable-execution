@@ -9,9 +9,15 @@ it is exactly the layer a deployment gets wrong.
 So this drives `app.handler` itself, through a real Flask app built the way
 Cloud Run builds it:
 
-    functions_framework.create_app("handler", "app.py")
+    functions_framework.create_app("handler", "main.py")
 
-`create_app` loads `app.py` as a module object of its own, which is why the
+`main.py` is what a user writes and what this project deploys: their
+functions, and `handler` re-exported from the package in a single import.
+Driving the example rather than the package is the point -- the import
+that makes the entry point exist is in `main.py`, so a test that loaded
+`resonate/app.py` directly would pass with that line deleted.
+
+`create_app` loads it as a module object of its own, which is why the
 service has to be constructible from the environment rather than injected —
 see `local.py`. `SIMULATED=1` gives it the in-memory store and queue and
 changes nothing else: same engine, same kernel, same codec.
@@ -34,11 +40,11 @@ from pathlib import Path
 
 import pytest
 
-import local
-from codec import decode, doc_key
-from kernel import TAG_TARGET
-from spec.queue import SWEEP
-from sdk import dumps, route
+from resonate import local
+from resonate.codec import decode, doc_key
+from resonate.kernel import TAG_TARGET
+from resonate.spec.queue import SWEEP
+from resonate.sdk import REGISTRY, dumps, route
 from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
 
 #: Where this service answers. One service runs every function, which is the
@@ -61,9 +67,22 @@ def client(monkeypatch):
     monkeypatch.delenv("ROUTES_ACCOUNT", raising=False)
     local.reset()
     CALLS.clear()
+    # `main.py`, not the package: that is the file the platform loads, and
+    # the re-exported `handler` in it is the only wiring a user writes. An
+    # entry point that worked when imported directly and not through the
+    # example would be a broken deployment with a green suite.
+    app = functions_framework.create_app("handler", str(ROOT / "main.py"))
+    # After `create_app`, deliberately. Loading `main.py` runs its own
+    # `@resonate` decorators, which claim `research`, `agent` and `search` in
+    # the registry. This test wants its own, which count their calls, so it
+    # takes the names back once the example has finished registering.
     for fn in (research, agent, search):
         route(fn, WORKER)
-    return functions_framework.create_app("handler", str(ROOT / "app.py")).test_client()
+        # `route` only says where a function runs. What decides which code
+        # runs is `REGISTRY`, and `@resonate` writes to it at import, so the
+        # example's functions are sitting in these three names already.
+        REGISTRY[fn.name] = fn
+    return app.test_client()
 
 
 def post(client, kind, **data):

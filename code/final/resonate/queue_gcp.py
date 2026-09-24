@@ -55,7 +55,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ports import Unavailable
+from .ports import Unavailable
 
 #: Cloud Tasks refuses a schedule further out than this.
 HORIZON_MS = 30 * 24 * 60 * 60 * 1_000

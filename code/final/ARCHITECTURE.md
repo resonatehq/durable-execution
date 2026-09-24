@@ -12,14 +12,14 @@ flowchart TB
 
     subgraph container["one Cloud Run container"]
         direction TB
-        routes["<b>Routes</b> — app.py<br/>POST / · /execute · /sweep/&lt;origin&gt; · GET /ready"]
-        worker["<b>Worker</b> — runtime.py<br/>runs the function until it blocks"]
-        app["<b>demo.py</b> + <b>sdk.py</b><br/>@resonate, REGISTRY, TARGETS"]
-        engine["<b>Engine</b> — engine.py<br/>read · decide · write once"]
-        kernel["<b>kernel.py</b> — pure<br/>doc, request, now → effects, reply"]
+        routes["<b>Routes</b> — resonate/app.py<br/>POST / · /execute · /sweep/&lt;origin&gt; · GET /ready"]
+        worker["<b>Worker</b> — resonate/runtime.py<br/>runs the function until it blocks"]
+        app["<b>main.py</b> — the user's file<br/>@resonate, REGISTRY, TARGETS"]
+        engine["<b>Engine</b> — resonate/engine.py<br/>read · decide · write once"]
+        kernel["<b>resonate/kernel.py</b> — pure<br/>doc, request, now → effects, reply"]
     end
 
-    subgraph ports["two ports — ports.py, spec/"]
+    subgraph ports["two ports — resonate/ports.py, resonate/spec/"]
         direction LR
         store["<b>StoreP</b><br/>get put delete list"]
         queue["<b>QueueP</b><br/>create delete"]
@@ -67,7 +67,7 @@ right place.
 
 **Cloud Tasks pushes, so a worker is an endpoint.** There is no loop
 anywhere in this system waiting for work. The queue delivers by POSTing, and
-that single fact is why `app.py` exists, why `/execute` and `/sweep` are
+that single fact is why `resonate/app.py` exists, why `/execute` and `/sweep` are
 routes rather than functions, and why the whole thing fits in a container
 that may not exist between two steps of the same run.
 
@@ -76,7 +76,7 @@ that may not exist between two steps of the same run.
 Effects happen in an order: **arm the deadline → commit → disarm the old →
 send**. Every crash window in between leaves the run recoverable, which is
 the difference between durable and merely persistent. `SEQUENCE.md` draws
-it; `spec/engine.py` grades it.
+it; `resonate/spec/engine.py` grades it.
 
 ## What a run costs
 
@@ -84,4 +84,4 @@ One document per origin means one conditional write per transition, so a
 run's transitions are serialised on a single object. Measured against a real
 bucket: about two writes per second, and eight concurrent writers moved it
 no faster than one. A run needing more than that is a run whose fan-out
-should be its own origin. `store_gcp.py` carries the numbers.
+should be its own origin. `resonate/store_gcp.py` carries the numbers.

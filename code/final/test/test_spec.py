@@ -9,13 +9,13 @@ ever passed is a wish.
 
 from __future__ import annotations
 
-import engine as engine_module
+from resonate import engine as engine_module
 # The engine's spec, under the name the rest of this file uses for it.
-from spec import engine as spec
-from kernel import Execute, KernelCfg, PromiseCreate, PromiseGet, Reply, Value
-from queue_mem import Queue
-from spec.engine import EngineP, conformance
-from store_mem import Store
+from resonate.spec import engine as spec
+from resonate.kernel import Execute, KernelCfg, PromiseCreate, PromiseGet, Reply, Value
+from resonate.queue_mem import Queue
+from resonate.spec.engine import EngineP, conformance
+from resonate.store_mem import Store
 
 
 def test_the_engine_conforms():
@@ -59,7 +59,7 @@ def test_the_suite_rejects_an_engine_that_sends_before_it_commits():
     committed state, never of an intention."""
     class Eager(engine_module.Engine):
         def process(self, msg, now):
-            from wire import encode_message
+            from resonate.wire import encode_message
             self.queue.create("http://w", encode_message(Execute("run", 0)))
             return super().process(msg, now)
 
@@ -74,9 +74,9 @@ def test_the_suite_rejects_an_engine_that_sends_before_it_commits():
 def test_the_standard_script_exercises_what_it_claims_to():
     """A conformance script that never suspends a task, never expires a
     lease and never settles a timer grades nothing."""
-    from codec import decode, doc_key
-    from queue_mem import Queue
-    from store_mem import Store
+    from resonate.codec import decode, doc_key
+    from resonate.queue_mem import Queue
+    from resonate.store_mem import Store
     store = Store()
     e = engine_module.Engine(store, Queue(), spec.CFG)
     seen = set()
@@ -95,5 +95,5 @@ def test_the_engine_conforms_over_a_store_it_was_handed():
     the suite was given rather than the one it defaults to. Any module that
     passes `store.conformance` can be dropped in here — including
     `store_gcp` against a real bucket."""
-    import store_mem
+    from resonate import store_mem
     assert conformance(engine_module, store=store_mem.Store()) == []

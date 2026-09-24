@@ -1,0 +1,44 @@
+# Packaging, so that a user installs this rather than vendoring it.
+#
+# The whole point of the package boundary is the import line. `from app
+# import handler` asked a user to import a module called `app` that was not
+# their app, next to `sdk`, `kernel` and `engine` -- four of the most likely
+# names to already exist in somebody's project. A user's own `app.py` won
+# the lookup and the deploy failed pointing at *their* file; worse, an
+# `app.py` that happened to define `handler` imported silently and served
+# nothing. `from resonate import handler` cannot be shadowed.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resonate"
+dynamic = ["version"]
+description = "Durable execution in 5,000 lines: ordinary async/await, one decorator"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# The same list as `requirements.txt`, which stays because Google's
+# buildpack installs from it and not from this file. When they disagree,
+# `test_deploy.py` is what notices.
+dependencies = [
+    "google-cloud-storage",
+    "google-cloud-tasks",
+    "google-auth",
+    "functions-framework",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-gcp-trace",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "hypothesis", "jsonschema"]
+
+[tool.setuptools]
+# Explicit rather than discovered: `test`, `live` and the example `main.py`
+# sit beside the package and are not part of it.
+packages = ["resonate", "resonate.spec"]
+
+[tool.setuptools.dynamic]
+version = { attr = "resonate.__version__" }

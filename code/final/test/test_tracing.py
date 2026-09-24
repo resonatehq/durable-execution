@@ -35,16 +35,16 @@ from pathlib import Path
 
 import pytest
 
-import queue_mem
-import store_mem
-import tracing
-from app import Routes
-from kernel import KernelCfg, TAG_TARGET
-from runtime import Clock
-from sdk import dumps, route
-from spec import queue as queue_spec
-from spec import store as store_spec
-from spec.queue import SWEEP
+from resonate import queue_mem
+from resonate import store_mem
+from resonate import tracing
+from resonate.app import Routes
+from resonate.kernel import KernelCfg, TAG_TARGET
+from resonate.runtime import Clock
+from resonate.sdk import dumps, route
+from resonate.spec import queue as queue_spec
+from resonate.spec import store as store_spec
+from resonate.spec.queue import SWEEP
 from test_e2e import CALLS, ORIGIN, QUESTION, agent, research, search
 
 #: Where the code is, and where the tests are: a subprocess needs both
@@ -255,10 +255,10 @@ def test_the_entry_point_is_where_a_trace_starts(monkeypatch):
     """`Routes.handle` is morally the entry point, so it is the outermost
     frame — and the only one with no cause of its own, because it is the
     cause. Everything under it carries the route."""
-    import app
+    from resonate import app
 
     monkeypatch.setenv("SIMULATED", "1")
-    import local
+    from resonate import local
     local.reset()
     routes = app.from_environment()
     with tracing.recording() as t:

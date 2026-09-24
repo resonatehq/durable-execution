@@ -40,8 +40,8 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 
 say "0. what the trace will be called, derived here, before anything runs"
-TRACE="$(cd "$HERE" && python -c "import otel; print(otel.trace_id('$ORIGIN').hex())")"
-ROOT="$(cd "$HERE" && python -c "import otel; print(otel.span_id('$ORIGIN').hex())")"
+TRACE="$(cd "$HERE" && python -c "from resonate import otel; print(otel.trace_id('$ORIGIN').hex())")"
+ROOT="$(cd "$HERE" && python -c "from resonate import otel; print(otel.span_id('$ORIGIN').hex())")"
 echo "origin    $ORIGIN"
 echo "trace     $TRACE"
 echo "root span $ROOT"

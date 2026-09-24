@@ -17,9 +17,9 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from codec import encode
-from explore import BROAD, NARROW, explore
-from kernel import Document, Object, Promise, Task, Value
+from resonate.codec import encode
+from resonate.explore import BROAD, NARROW, explore
+from resonate.kernel import Document, Object, Promise, Task, Value
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "line.schema.json").read_text())
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
@@ -78,11 +78,11 @@ def test_the_engine_writes_lines_the_schema_accepts():
     """The kernel's documents pass above. This is the shell's header, which
     the kernel never touches: the generation, the armed deadline and the name
     the shell gave it."""
-    from codec import decode, doc_key
-    from spec import engine as spec
-    from engine import Engine
-    from queue_mem import Queue
-    from store_mem import Store
+    from resonate.codec import decode, doc_key
+    from resonate.spec import engine as spec
+    from resonate.engine import Engine
+    from resonate.queue_mem import Queue
+    from resonate.store_mem import Store
 
     store = Store()
     e = Engine(store, Queue(), spec.CFG)

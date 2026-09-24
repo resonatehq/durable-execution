@@ -37,16 +37,16 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from engine import Timeout
-import otel
-from kernel import (
+from .engine import Timeout
+from . import otel
+from .kernel import (
     REJECTED, RESOLVED, Execute, PromiseCreate, PromiseSettle, TAG_TARGET,
     TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend, Unblock, Value, origin_of,
 )
-from ports import Conflict, Unavailable
-from spec.queue import SWEEP
-from tracing import because, trace
-from sdk import (
+from .ports import Conflict, Unavailable
+from .spec.queue import SWEEP
+from .tracing import because, trace
+from .sdk import (
     _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
     loads, route,
 )
@@ -209,7 +209,7 @@ class Runtime:
         """What a client does to begin a run: create a promise with a
         target. Named as the route it would arrive on, because that is
         what it is."""
-        from sdk import TARGETS
+        from .sdk import TARGETS
         target = TARGETS.get(fn.name)
         if target is None:
             raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
@@ -234,7 +234,7 @@ class Runtime:
             self.swept += 1
             self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())
             return True
-        from wire import decode_message
+        from .wire import decode_message
 
         msg = decode_message(delivery.body)
         if isinstance(msg, Execute):

@@ -30,15 +30,15 @@ import pytest
 #: what the kernel and the simulators depend on, which is nothing.
 gcp = pytest.importorskip("google.api_core.exceptions")
 
-import queue_gcp
-import queue_mem
-from spec import queue as queue_spec
-from spec import store as store_spec
-import store_gcp
-import store_mem
-from ports import Unavailable
-from queue_gcp import HORIZON_MS
-from store_gcp import CONTENT_TYPE
+from resonate import queue_gcp
+from resonate import queue_mem
+from resonate.spec import queue as queue_spec
+from resonate.spec import store as store_spec
+from resonate import store_gcp
+from resonate import store_mem
+from resonate.ports import Unavailable
+from resonate.queue_gcp import HORIZON_MS
+from resonate.store_gcp import CONTENT_TYPE
 
 
 # ---------------------------------------------------------------------------

@@ -12,15 +12,15 @@ import json
 
 import pytest
 
-import queue_mem
-from spec import queue as queue_spec
-from codec import decode, doc_key
-from engine import Engine
-from kernel import KernelCfg
-from queue_mem import Delivery, Queue
-from spec.queue import SWEEP
-from runtime import Clock, Runtime, Worker
-from store_mem import Store
+from resonate import queue_mem
+from resonate.spec import queue as queue_spec
+from resonate.codec import decode, doc_key
+from resonate.engine import Engine
+from resonate.kernel import KernelCfg
+from resonate.queue_mem import Delivery, Queue
+from resonate.spec.queue import SWEEP
+from resonate.runtime import Clock, Runtime, Worker
+from resonate.store_mem import Store
 from test_e2e import (
     AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, agent, research, search,
 )

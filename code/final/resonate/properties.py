@@ -37,7 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from kernel import (
+from .kernel import (
     PENDING, REJECTED, REJECTED_CANCELED, REJECTED_TIMEDOUT, RESOLVED,
     T_ACQUIRED, T_FULFILLED, T_HALTED, T_PENDING, T_SUSPENDED,
     TAG_TARGET, Document, Execute, Object, Promise, Send, Task, Unblock,

@@ -21,17 +21,17 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-import properties as P
-from codec import decode, doc_key
-from engine import Engine
-from kernel import KernelCfg, PromiseRegisterListener, Send
-from ports import Crash, Fault
-from queue_mem import Queue
-from spec.queue import SWEEP
-from runtime import Clock, Runtime, Worker
-from store_mem import Store
-from wire import decode_message
-from sdk import Failed, gather, resonate
+from resonate import properties as P
+from resonate.codec import decode, doc_key
+from resonate.engine import Engine
+from resonate.kernel import KernelCfg, PromiseRegisterListener, Send
+from resonate.ports import Crash, Fault
+from resonate.queue_mem import Queue
+from resonate.spec.queue import SWEEP
+from resonate.runtime import Clock, Runtime, Worker
+from resonate.store_mem import Store
+from resonate.wire import decode_message
+from resonate.sdk import REGISTRY, Failed, gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)
 AGENT, SEARCH = "worker://agent", "worker://search"
@@ -80,6 +80,13 @@ ORIGIN = "research.1"
 def world(fault: Fault | None = None):
     """One store, one queue, one clock, two workers."""
     CALLS.clear()
+    # `@resonate` writes to a single global registry at import, and
+    # `main.py` -- the deployed example -- defines functions by these same
+    # names. Whichever module imported last owns them, so this file's
+    # versions, the ones that count their calls, are claimed here rather
+    # than left to the order pytest happens to collect in.
+    for fn in (research, agent, search):
+        REGISTRY[fn.name] = fn
     store, queue, clock = Store(fault), Queue(fault=fault), Clock()
     engine = Engine(store, queue, CFG)
     rt = Runtime(engine, queue, clock)

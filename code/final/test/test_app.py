@@ -18,16 +18,16 @@ import json
 
 import pytest
 
-from app import Routes
-from codec import doc_key
-from kernel import KernelCfg, TAG_TARGET
-from ports import Conflict, Unavailable
-from runtime import Clock
-from sdk import dumps, route
-from store_mem import Store
+from resonate.app import Routes
+from resonate.codec import doc_key
+from resonate.kernel import KernelCfg, TAG_TARGET
+from resonate.ports import Conflict, Unavailable
+from resonate.runtime import Clock
+from resonate.sdk import dumps, route
+from resonate.store_mem import Store
 from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
-from queue_mem import Queue
-from spec.queue import SWEEP
+from resonate.queue_mem import Queue
+from resonate.spec.queue import SWEEP
 
 CFG = KernelCfg(retry_timeout=30_000)
 
@@ -239,7 +239,7 @@ DONE = {"agent": 2, "search:durable execution": 1,
 
 
 def root(store, origin: str = ORIGIN):
-    from codec import decode
+    from resonate.codec import decode
 
     found = store.get(doc_key(origin))
     assert found, "nothing was ever written"

@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import json
 
-from kernel import (
+from .kernel import (
     Document, Object, Promise, Task, Value, dewey,
 )
 

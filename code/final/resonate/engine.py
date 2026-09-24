@@ -46,19 +46,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from codec import decode, doc_key, encode
-from kernel import (
+from .codec import decode, doc_key, encode
+from .kernel import (
     DelTimeout, Document, KernelCfg, PromiseCreate, PromiseGet, PromiseRegisterCallback,
     PromiseRegisterListener, PromiseSettle, Reply, Req, Send, SetDocument,
     SetTimeout, TaskAcquire, TaskContinue, TaskCreate, TaskFence, TaskFulfill,
     TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
     handle_external, handle_internal, origin_of,
 )
-import otel
-from spec.queue import SWEEP, QueueP
-from spec.store import StoreP
-from tracing import trace
-from wire import encode_message
+from . import otel
+from .spec.queue import SWEEP, QueueP
+from .spec.store import StoreP
+from .tracing import trace
+from .wire import encode_message
 
 
 @dataclass(frozen=True)

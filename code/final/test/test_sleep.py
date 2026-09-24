@@ -26,14 +26,14 @@ from __future__ import annotations
 
 import json
 
-from codec import decode, doc_key
-from engine import Engine
-from kernel import KernelCfg, TAG_TIMER
-from queue_mem import Queue
-from runtime import Clock, Runtime, Worker
-from sdk import resonate, sleep
-from spec.queue import SWEEP
-from store_mem import Store
+from resonate.codec import decode, doc_key
+from resonate.engine import Engine
+from resonate.kernel import KernelCfg, TAG_TIMER
+from resonate.queue_mem import Queue
+from resonate.runtime import Clock, Runtime, Worker
+from resonate.sdk import REGISTRY, resonate, sleep
+from resonate.spec.queue import SWEEP
+from resonate.store_mem import Store
 
 CFG = KernelCfg(retry_timeout=30_000)
 WORKER = "worker://napper"
@@ -59,6 +59,12 @@ async def nap(label: str):
 
 def world():
     RAN.clear()
+    # `@resonate` writes to a single global registry at import, and
+    # `main.py` -- the deployed example -- defines functions by these same
+    # names. Whichever module imported last owns them, so this file's
+    # `nap`, the one that records what ran, is claimed here rather
+    # than left to the order pytest happens to collect in.
+    REGISTRY[nap.name] = nap
     store, queue, clock = Store(), Queue(), Clock()
     engine = Engine(store, queue, CFG)
     rt = Runtime(engine, queue, clock)

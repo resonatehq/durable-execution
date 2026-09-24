@@ -12,8 +12,8 @@
 import copy
 from types import SimpleNamespace
 
-import properties as P
-from kernel import (
+from resonate import properties as P
+from resonate.kernel import (
     PENDING, REJECTED, REJECTED_TIMEDOUT, RESOLVED, T_ACQUIRED, T_FULFILLED,
     T_HALTED, T_PENDING, T_SUSPENDED, Document, Execute, KernelCfg, Object,
     Promise, PromiseCreate, PromiseGet, PromiseRegisterCallback,

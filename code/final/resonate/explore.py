@@ -23,8 +23,8 @@ from collections import deque
 from dataclasses import dataclass
 from itertools import combinations
 
-import properties as P
-from kernel import (
+from . import properties as P
+from .kernel import (
     PENDING, REJECTED, RESOLVED, T_ACQUIRED, T_HALTED, T_PENDING, T_SUSPENDED,
     Document, Execute, KernelCfg, PromiseCreate, PromiseGet,
     PromiseRegisterCallback, PromiseRegisterListener, PromiseSettle, Send,

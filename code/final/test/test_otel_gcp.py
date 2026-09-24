@@ -22,8 +22,8 @@ import pytest
 pytest.importorskip("opentelemetry.sdk.trace",
                     reason="pip install opentelemetry-sdk opentelemetry-exporter-gcp-trace")
 
-import otel  # noqa: E402
-import otel_gcp  # noqa: E402
+from resonate import otel  # noqa: E402
+from resonate import otel_gcp  # noqa: E402
 
 #: A real instant with a fractional second, so a truncation shows up.
 START = 1_758_700_000_123
@@ -136,12 +136,12 @@ class FakeTrace:
 
 def a_whole_run():
     """The README's agent, run to completion, with its spans collected."""
-    import demo
-    from engine import Engine
-    from kernel import KernelCfg
-    from queue_mem import Queue
-    from runtime import Clock, Runtime, Worker
-    from store_mem import Store
+    import main as demo
+    from resonate.engine import Engine
+    from resonate.kernel import KernelCfg
+    from resonate.queue_mem import Queue
+    from resonate.runtime import Clock, Runtime, Worker
+    from resonate.store_mem import Store
 
     class Ticking(Clock):
         """Moves a little on every read, so the spans have width."""

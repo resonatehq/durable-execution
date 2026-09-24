@@ -61,7 +61,7 @@ import os
 import threading
 from typing import Any
 
-import otel
+from . import otel
 
 log = logging.getLogger(__name__)
 

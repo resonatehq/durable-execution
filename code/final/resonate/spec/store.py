@@ -13,7 +13,7 @@ be handed an instance, because two implementations are configured
 differently and only the caller knows how. It is handed the module, and
 reaches for `Store`.
 
-    from spec.store import conformance
+    from ..store import conformance
     import store_mem, store_gcp
 
     assert conformance(store_mem) == []
@@ -87,7 +87,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ports import Conflict, Unavailable, Violation
+from ..ports import Conflict, Unavailable, Violation
 
 #: A refused precondition. The state moved: re-decide, never replay. Spelled
 #: as the engine's `Conflict` so there is one name for it in the codebase.

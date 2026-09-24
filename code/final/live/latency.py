@@ -24,8 +24,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import store_gcp  # noqa: E402
-from spec.store import PreconditionFailed  # noqa: E402
+from resonate import store_gcp  # noqa: E402
+from resonate.spec.store import PreconditionFailed  # noqa: E402
 
 BUCKET = os.environ.get("GCS_BUCKET", "de-contract-28425")
 N = int(os.environ.get("N", 30))

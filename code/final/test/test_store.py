@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import pytest
 
-from spec import store as store_spec
-import store_mem
-from ports import Crash, Fault
-from spec.store import PreconditionFailed
-from store_mem import Store
+from resonate.spec import store as store_spec
+from resonate import store_mem
+from resonate.ports import Crash, Fault
+from resonate.spec.store import PreconditionFailed
+from resonate.store_mem import Store
 
 
 def test_the_simulated_store_satisfies_the_contract():

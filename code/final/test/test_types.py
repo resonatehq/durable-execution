@@ -29,14 +29,14 @@ import pytest
 ROOT = Path(__file__).parent.parent
 
 if TYPE_CHECKING:
-    import engine
-    import queue_gcp
-    import queue_mem
-    import store_gcp
-    import store_mem
-    from spec import engine as spec
-    from spec import queue as queue_spec
-    from spec import store as store_spec
+    from resonate import engine
+    from resonate import queue_gcp
+    from resonate import queue_mem
+    from resonate import store_gcp
+    from resonate import store_mem
+    from resonate.spec import engine as spec
+    from resonate.spec import queue as queue_spec
+    from resonate.spec import store as store_spec
 
     # A module offers what its spec says it offers.
     an_engine: spec.EngineM = engine

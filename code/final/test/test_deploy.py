@@ -37,12 +37,13 @@ ROOT = Path(__file__).parent.parent
 
 #: Production is everything the container runs. `test/` is not in the image
 #: at all (see `.gcloudignore`), and `conftest.py` is pytest's.
-EXCLUDED = {"conftest.py"}
-
-
+#: Production is what the container runs: the package, and the `main.py`
+#: beside it that the buildpack loads. `test/` is not in the image at all
+#: (see `.gcloudignore`), `conftest.py` is pytest's, and the relative
+#: imports inside the package are skipped by `imported_modules` -- a
+#: `from .kernel import` names no distribution and never could.
 def production_files() -> list[Path]:
-    return sorted(p for p in list(ROOT.glob("*.py")) + list(ROOT.glob("spec/*.py"))
-                  if p.name not in EXCLUDED)
+    return sorted([*ROOT.glob("resonate/**/*.py"), ROOT / "main.py"])
 
 
 def imported_modules(path: Path) -> set[tuple[str, ...]]:
@@ -201,7 +202,7 @@ BORROWED = {"K_REVISION"}
 def configured_names() -> set[str]:
     """Every environment variable `app.py` reads."""
     names: set[str] = set()
-    tree = ast.parse((ROOT / "app.py").read_text())
+    tree = ast.parse((ROOT / "resonate" / "app.py").read_text())
     for node in ast.walk(tree):
         # os.environ.get("X") / os.environ.get("X", default)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
@@ -255,23 +256,28 @@ def test_a_worker_with_no_application_module_registers_nothing():
     anything are two different things, and only the second needs
     `ROUTES_APP`.
     """
-    import sdk
+    from resonate import sdk
 
     before = dict(sdk.REGISTRY)
     sdk.REGISTRY.clear()
     try:
         os.environ.pop("ROUTES_APP", None)
-        import app
+        from resonate import app
         app._route()
         assert sdk.REGISTRY == {}, "nothing should register without ROUTES_APP"
 
-        os.environ["ROUTES_APP"] = "demo"
+        # `ROUTES_APP` is the override, not the road: in the shape a user
+        # deploys, `main.py` *is* the module the platform loads, so importing
+        # it is what registers and there is nothing to name. This asserts the
+        # override still works, because a split deployment needs it.
+
+        os.environ["ROUTES_APP"] = "main"
         app._route()
         # Derived from the module, not listed here: a hardcoded set goes stale
         # the first time the example grows a function, and did.
-        import demo
+        import main as demo
         expected = {n for n, v in vars(demo).items() if isinstance(v, sdk.Durable)}
-        assert expected, "demo defines no durable functions"
+        assert expected, "the example defines no durable functions"
         assert set(sdk.REGISTRY) == expected, sorted(sdk.REGISTRY)
     finally:
         os.environ.pop("ROUTES_APP", None)
@@ -280,9 +286,10 @@ def test_a_worker_with_no_application_module_registers_nothing():
 
 
 def test_the_example_the_deployment_runs_is_the_one_in_the_readme():
-    """`demo.py` is what a deployed worker executes, so it has to stay the
-    program the project describes rather than drift into a second version."""
-    src = (ROOT / "demo.py").read_text()
+    """`main.py` is both the example a user copies and the thing this
+    project deploys, so it has to stay the program the README describes
+    rather than drift into a second version of it."""
+    src = (ROOT / "main.py").read_text()
     for step in ("Plan the searches", "Fan out the searches",
                  "Synthesize the results", "gather(search.rpc(q)"):
         assert step in src, step

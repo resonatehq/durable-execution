@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from kernel import (
+from .kernel import (
     Execute, PromiseCreate, PromiseGet, PromiseRegisterCallback,
     PromiseRegisterListener, PromiseSettle, Reply, Req, TaskAcquire,
     TaskContinue, TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt,
