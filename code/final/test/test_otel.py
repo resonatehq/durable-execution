@@ -127,6 +127,36 @@ def test_the_tree_is_connected():
     assert len(roots) == 1 and roots[0].span == otel.span_id("branch.1")
 
 
+def test_the_two_layers_have_two_different_parent_rules():
+    """The one place the scheme is not a single line, and the one thing
+    connectivity cannot check.
+
+    A logical span hangs off the promise *above* it: `o:2.1` under `o:2`,
+    by position. A physical span hangs off its own logical span, not off
+    the caller's -- the attempt is a run of *this* promise, not a step in
+    the one that awaited it.
+
+    Give physical spans the logical rule and every test still passes. The
+    tree stays connected, because the grandparent is a real span; it just
+    quietly flattens, and every attempt appears as a sibling of the promise
+    it was an attempt at. That is the shape this design exists to avoid, so
+    it is asserted rather than inferred.
+    """
+    spans, *_ = run("branch.1", branch, "q", functions=(branch, leaf))
+    for s in physical(spans):
+        id = s.attributes["de.promise"]
+        assert s.parent == otel.span_id(id), (
+            f"the attempt at {id} hangs off "
+            f"{'its caller' if s.parent == otel.span_id(otel.dewey_parent(id) or '') else 'nothing known'}, "
+            "not off the promise it was an attempt at")
+        assert s.span != otel.span_id(id), "an attempt and its promise share an id"
+
+    for s in logical(spans):
+        id = s.attributes["de.promise"]
+        above = otel.dewey_parent(id)
+        assert s.parent == (otel.span_id(above) if above else None)
+
+
 @pytest.mark.parametrize("id,parent", [
     ("o", None), ("o.1", None), ("o.1:2", "o.1"), ("o.1:2.3", "o.1:2"),
     ("o.1:2.3.4", "o.1:2.3"),
