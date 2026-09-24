@@ -53,8 +53,9 @@ from hypothesis.stateful import (
 
 from resonate.testing import properties as P
 from resonate.kernel import (
+    document_after,
     Document, KernelCfg, PENDING, REJECTED, REJECTED_CANCELED, RESOLVED, Send,
-    SetDocument, T_ACQUIRED, T_FULFILLED, T_HALTED, T_PENDING, T_SUSPENDED,
+    T_ACQUIRED, T_FULFILLED, T_HALTED, T_PENDING, T_SUSPENDED,
     check_invariants, handle_external, handle_internal,
 )
 from resonate.types import (
@@ -143,7 +144,7 @@ class KernelMachine(RuleBasedStateMachine):
     def _sweep(self):
         """The internal half, which every request runs first."""
         fx = handle_internal(self.s.doc, self.now, CFG)
-        doc = next(e.doc for e in fx if isinstance(e, SetDocument))
+        doc = document_after(self.s.doc, fx)
         sends = [e for e in fx if isinstance(e, Send)]
         mid = self.s.after(doc, sends)
         assert check_invariants(doc) is None, check_invariants(doc)
@@ -159,14 +160,14 @@ class KernelMachine(RuleBasedStateMachine):
         before = self.s
         mid = self._sweep()
         fx, reply = handle_external(mid.doc, req, self.now, CFG)
-        doc = next(e.doc for e in fx if isinstance(e, SetDocument))
+        doc = document_after(mid.doc, fx)
         sends = [e for e in fx if isinstance(e, Send)]
         after = mid.after(doc, sends)
         assert check_invariants(doc) is None, check_invariants(doc)
         assert P.state_failures(self.now, after) == [], P.state_failures(self.now, after)
         assert P.trans_failures(self.now, mid, after) == [], P.trans_failures(self.now, mid, after)
         fused, _ = handle_external(before.doc, req, self.now, CFG)
-        assert next(e.doc for e in fused if isinstance(e, SetDocument)) == doc, "fused != composed"
+        assert document_after(before.doc, fused) == doc, "fused != composed"
         self._tally(mid, after, sends, reply)
         event(f"{type(req).__name__} {reply.status}")
         self.s = after

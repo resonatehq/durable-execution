@@ -13,6 +13,7 @@ only.
 
 from resonate.testing.properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
 from resonate.kernel import (
+    document_after,
     DelTimeout, Document, KernelCfg, PENDING, REJECTED_TIMEDOUT, RESOLVED,
     Send, SetDocument, SetTimeout, TAG_TIMER, T_ACQUIRED, T_FULFILLED,
     T_PENDING, Task, check_invariants, dewey, handle_external,
@@ -27,13 +28,12 @@ CFG = KernelCfg(retry_timeout=30_000)
 def step(doc, req, now, legal_pre=True):
     """Apply a request: the new document, the sends, and the reply."""
     fx, reply = handle_external(doc, req, now, CFG)
-    docs = [e.doc for e in fx if isinstance(e, SetDocument)]
-    assert len(docs) == 1
-    assert check_invariants(docs[0]) is None, check_invariants(docs[0])
+    after = document_after(doc, fx)
+    assert check_invariants(after) is None, check_invariants(after)
     sends = [e for e in fx if isinstance(e, Send)]
     if legal_pre:
-        halves(doc, req, now, docs[0])
-    return docs[0], sends, reply, fx
+        halves(doc, req, now, after)
+    return after, sends, reply, fx
 
 
 def halves(doc, req, now, fused):
@@ -41,13 +41,13 @@ def halves(doc, req, now, fused):
     made of, and that the fused document is their composition."""
     before = State(doc)
     swept = handle_internal(doc, now, CFG)
-    mid = before.after(next(e.doc for e in swept if isinstance(e, SetDocument)), [e for e in swept if isinstance(e, Send)])
+    mid = before.after(document_after(doc, swept), [e for e in swept if isinstance(e, Send)])
     assert state_failures(now, before) == [], state_failures(now, before)
     assert state_failures(now, mid) == [], state_failures(now, mid)
     assert trans_failures(now, before, mid) == [], trans_failures(now, before, mid)
     assert internal_failures(now, before, mid) == [], internal_failures(now, before, mid)
     fx2, _ = handle_external(mid.doc, req, now, CFG)  # its own sweep is a no-op now
-    after = mid.after(next(e.doc for e in fx2 if isinstance(e, SetDocument)), [e for e in fx2 if isinstance(e, Send)])
+    after = mid.after(document_after(mid.doc, fx2), [e for e in fx2 if isinstance(e, Send)])
     assert state_failures(now, after) == [], state_failures(now, after)
     assert trans_failures(now, mid, after) == [], trans_failures(now, mid, after)
     assert after.doc == fused, "fused != composed"
@@ -114,7 +114,7 @@ def test_create_is_idempotent_on_the_id_alone():
     assert reply.data["promise"]["timeoutAt"] == 100_000
     assert nxt == doc
     assert sends == []
-    assert fx == [SetDocument(doc)]
+    assert fx == []
 
 
 def test_create_rejects_a_target_that_is_not_an_address():
@@ -211,23 +211,22 @@ def test_the_sweep_and_the_request_merge_to_one_timer_transition():
 
 def sweep(doc, now):
     fx = handle_internal(doc, now, CFG)
-    docs = [e.doc for e in fx if isinstance(e, SetDocument)]
-    assert len(docs) == 1
-    assert check_invariants(docs[0]) is None, check_invariants(docs[0])
+    swept = document_after(doc, fx)
+    assert check_invariants(swept) is None, check_invariants(swept)
     sends = [e for e in fx if isinstance(e, Send)]
-    before, after = State(doc), State(docs[0], sends)
+    before, after = State(doc), State(swept, sends)
     assert state_failures(now, before) == [], state_failures(now, before)
     assert state_failures(now, after) == [], state_failures(now, after)
     assert trans_failures(now, before, after) == [], trans_failures(now, before, after)
     assert internal_failures(now, before, after) == [], internal_failures(now, before, after)
-    return docs[0], sends, fx
+    return swept, sends, fx
 
 
 def test_an_empty_document_sweeps_to_nothing():
     nxt, sends, fx = sweep(Document(), 1_000_000)
     assert nxt == Document()
     assert sends == []
-    assert fx == [SetDocument(Document())]
+    assert fx == []
 
 
 def test_a_document_with_nothing_due_is_unchanged():
@@ -273,7 +272,7 @@ def test_a_sweep_that_fires_nothing_changes_nothing():
     doc = with_targeted("o:a", 100_000)
     for now in (0, 1, 29_999):
         nxt, sends, fx = sweep(doc, now)
-        assert nxt == doc and sends == [] and fx == [SetDocument(doc)]
+        assert nxt == doc and sends == [] and fx == []
 
 
 # ===========================================================================
@@ -329,7 +328,7 @@ def test_getting_an_expired_promise_settles_it_first():
 def test_getting_a_live_promise_changes_nothing():
     doc = with_targeted("o:a", 100_000)
     nxt, sends, reply, fx = step(doc, PromiseGet("o:a"), 1)
-    assert reply.status == 200 and nxt == doc and sends == [] and fx == [SetDocument(doc)]
+    assert reply.status == 200 and nxt == doc and sends == [] and fx == []
 
 
 # --- settle ----------------------------------------------------------------
@@ -450,7 +449,7 @@ def test_registering_against_a_settled_promise_registers_nothing():
     assert reply.data["promise"]["state"] == "resolved"
     t = nxt.get("o:a").task
     assert (t.state, t.resumes) == (T_ACQUIRED, set())
-    assert nxt == doc and sends == [] and fx == [SetDocument(doc)]
+    assert nxt == doc and sends == [] and fx == []
 
 
 def test_a_suspended_task_always_holds_a_rung_on_a_pending_promise():
@@ -734,7 +733,7 @@ def test_a_heartbeat_extends_the_lease_of_a_task_the_caller_owns():
 def test_a_heartbeat_from_another_process_changes_nothing():
     doc = with_acquired("o:a")
     nxt, _, _, fx = step(doc, TaskHeartbeat("someone-else", (("o:a", 1),)), 3_000)
-    assert nxt == doc and fx == [SetDocument(doc)]
+    assert nxt == doc and fx == []
 
 
 def test_a_heartbeat_at_a_stale_version_changes_nothing():
@@ -766,7 +765,7 @@ def test_halting_disarms_the_task():
 def test_halting_twice_is_idempotent():
     doc = apply(with_acquired("o:a"), TaskHalt("o:a"), 0)
     nxt, _, reply, fx = step(doc, TaskHalt("o:a"), 1)
-    assert reply == Reply(200, {}) and nxt == doc and fx == [SetDocument(doc)]
+    assert reply == Reply(200, {}) and nxt == doc and fx == []
 
 
 def test_halting_a_finished_task_is_a_conflict():

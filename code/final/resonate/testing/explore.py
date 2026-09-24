@@ -25,7 +25,8 @@ from itertools import combinations
 
 from . import properties as P
 from ..kernel import (
-    Document, KernelCfg, PENDING, REJECTED, RESOLVED, Send, SetDocument,
+    document_after,
+    Document, KernelCfg, PENDING, REJECTED, RESOLVED, Send,
     T_ACQUIRED, T_HALTED, T_PENDING, T_SUSPENDED, check_invariants,
     handle_external, handle_internal,
 )
@@ -165,7 +166,7 @@ def step(now, s, action, tally, ab=BROAD):
     if isinstance(action, Advance):
         return now + action.by, s
     swept = handle_internal(s.doc, now, CFG)
-    mid = s.after(next(e.doc for e in swept if isinstance(e, SetDocument)), [e for e in swept if isinstance(e, Send)])
+    mid = s.after(document_after(s.doc, swept), [e for e in swept if isinstance(e, Send)])
     bad = check_invariants(mid.doc)
     if bad or P.state_failures(now, mid) or P.trans_failures(now, s, mid) or P.internal_failures(now, s, mid):
         raise Violation(("sweep", bad, P.state_failures(now, mid), P.trans_failures(now, s, mid), P.internal_failures(now, s, mid)))
@@ -173,14 +174,14 @@ def step(now, s, action, tally, ab=BROAD):
         tally_edge(s, mid, [e for e in swept if isinstance(e, Send)], None, tally, internal=True)
         return now, mid
     fx, reply = handle_external(mid.doc, action, now, CFG)
-    doc = next(e.doc for e in fx if isinstance(e, SetDocument))
+    doc = document_after(mid.doc, fx)
     sends = [e for e in fx if isinstance(e, Send)]
     nxt = mid.after(doc, sends)
     bad = check_invariants(doc)
     if bad or P.state_failures(now, nxt) or P.trans_failures(now, mid, nxt):
         raise Violation(("request", bad, P.state_failures(now, nxt), P.trans_failures(now, mid, nxt)))
     fused, _ = handle_external(s.doc, action, now, CFG)
-    if next(e.doc for e in fused if isinstance(e, SetDocument)) != doc:
+    if document_after(s.doc, fused) != doc:
         raise Violation(("fused != composed",))
     tally_edge(mid, nxt, sends, reply, tally, internal=False)
     return now, nxt

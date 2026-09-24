@@ -204,19 +204,6 @@ STANDARD_SCRIPT: list[tuple[Msg, int]] = [
 # ---------------------------------------------------------------------------
 
 
-def _substance(doc: Document) -> tuple:
-    """What the write law compares: the objects and the armed deadline.
-
-    Not the bytes. The document's generation lives in its header, so a
-    wasted write changes the bytes while changing nothing that matters, and
-    a byte comparison would let it through. Not the engine's own notion of
-    substance either, on purpose: a specification that borrowed the
-    implementation's comparison would be checking that the implementation
-    agrees with itself.
-    """
-    return ([(o.id, o.promise, o.task) for o in doc.objects], doc.timer_at)
-
-
 def _kind(write: str) -> str:
     """What a line of the write log was.
 
@@ -308,7 +295,7 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
 
         if (bad := _effect_order(segment)) is not None:
             out.append(Violation(step, label, bad))
-        if _substance(doc) == _substance(before) and segment:
+        if (doc.objects, doc.timer_at) == (before.objects, before.timer_at) and segment:
             out.append(Violation(step, label, f"nothing changed, yet it wrote: {segment}"))
 
         if (bad := check_invariants(doc)) is not None:

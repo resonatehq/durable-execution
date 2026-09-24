@@ -273,14 +273,18 @@ def send_execute(tx: Tx, task_id: str, version: int) -> None:
 
 
 def handle_internal(doc: Document, now: int, cfg: KernelCfg) -> list[Effect]:
-    """Sweep every deadline at or before `now`, in one pass.
+    """Sweep every deadline at or before `now`, in one pass."""
+    tx = Tx(doc=copy.deepcopy(doc))
+    sweep(tx, now, cfg)
+    return commit(doc, tx)
 
-    Four phases, each reading the state the previous one left: settle every
+
+def sweep(tx: Tx, now: int, cfg: KernelCfg) -> None:
+    """Four phases, each reading the state the previous one left: settle every
     expired promise, run their settlement chains, re-dispatch pending tasks
     past their retry deadline, reclaim acquired tasks past their lease. A
     promise without a target expires here like any other; its chain simply
     has nobody to fulfil, wake, or notify, so it sends nothing."""
-    tx = Tx(doc=copy.deepcopy(doc))
 
     # Phase 1: settle first, all of them, so an awaiter that is itself expiring
     # is already settled when its awaited promise fans out, and is skipped
@@ -313,10 +317,18 @@ def handle_internal(doc: Document, now: int, cfg: KernelCfg) -> list[Effect]:
             t.arm_retry(now + cfg.retry_timeout)
             send_execute(tx, o.id, t.version)
 
-    # Linearize in the order the shell performs it: arm the new timer, commit
-    # the document, clear the old timer, send.
+
+def commit(doc: Document, tx: Tx) -> list[Effect]:
+    """The effects of a decision, in the order the shell performs them: arm
+    the new timer, write the document, clear the old timer, send.
+
+    A decision that changed nothing has no effects at all, so a read writes
+    nothing."""
     old, new = doc.timer_at, min_deadline(tx.doc)
     tx.doc.timer_at = new
+    if tx.doc.objects == doc.objects and old == new:
+        assert not tx.sends, "a decision that changed nothing owes no effects"
+        return []
     fx: list[Effect] = []
     if old != new and new is not None:
         fx.append(SetTimeout(new))
@@ -327,6 +339,11 @@ def handle_internal(doc: Document, now: int, cfg: KernelCfg) -> list[Effect]:
     return fx
 
 
+def document_after(doc: Document, fx: list[Effect]) -> Document:
+    """The document a decision leaves: the one it wrote, or `doc` unchanged."""
+    return next((e.doc for e in fx if isinstance(e, SetDocument)), doc)
+
+
 def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[list[Effect], Reply]:
     """Sweep, then decide one request against the swept document, then merge.
 
@@ -335,8 +352,9 @@ def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[
     intermediate deadline the request then moved is never armed. Sends keep
     their order, the sweep's first, then the request's, except that a sweep
     dispatch the request overtook is dropped."""
-    swept = handle_internal(doc, now, cfg)
-    tx = Tx(doc=next(e.doc for e in swept if isinstance(e, SetDocument)))
+    swept = Tx(doc=copy.deepcopy(doc))
+    sweep(swept, now, cfg)
+    tx = Tx(doc=swept.doc)
     match req:
         case PromiseGet():
             reply = promise_get(tx, req)
@@ -369,27 +387,19 @@ def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[
         case TaskContinue():
             reply = task_continue(tx, req, now, cfg)
 
-    old, new = doc.timer_at, min_deadline(tx.doc)
-    tx.doc.timer_at = new
-    fx: list[Effect] = []
-    if old != new and new is not None:
-        fx.append(SetTimeout(new))
-    fx.append(SetDocument(tx.doc))
-    if old != new and old is not None:
-        fx.append(DelTimeout(old))
-    for e in swept:
-        if not isinstance(e, Send):
-            continue
+    # The sweep's sends first, then the request's. A dispatch the request
+    # overtook is not sent: the task it names is no longer pending at that
+    # version (the request settled its promise, or acquired it), so the
+    # message could only be refused.
+    kept = []
+    for e in swept.sends:
         if isinstance(e.msg, Execute):
-            # A dispatch the request overtook is not sent: the task it names
-            # is no longer pending at that version (the request settled its
-            # promise, or acquired it), so the message could only be refused.
             o = tx.doc.get(e.msg.task_id)
             if o is None or o.task is None or o.task.state != T_PENDING or o.task.version != e.msg.version:
                 continue
-        fx.append(e)
-    fx.extend(tx.sends)
-    return fx, reply
+        kept.append(e)
+    tx.sends = kept + tx.sends
+    return commit(doc, tx), reply
 
 
 # ---------------------------------------------------------------------------

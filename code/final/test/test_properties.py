@@ -14,8 +14,9 @@ from types import SimpleNamespace
 
 from resonate.testing import properties as P
 from resonate.kernel import (
+    document_after,
     Document, KernelCfg, Object, PENDING, Promise, REJECTED,
-    REJECTED_TIMEDOUT, RESOLVED, Send, SetDocument, T_ACQUIRED, T_FULFILLED,
+    REJECTED_TIMEDOUT, RESOLVED, Send, T_ACQUIRED, T_FULFILLED,
     T_HALTED, T_PENDING, T_SUSPENDED, Task, check_invariants, handle_external,
     handle_internal,
 )
@@ -32,7 +33,7 @@ CFG = KernelCfg(retry_timeout=30_000)
 
 def run(doc, req, now):
     fx, reply = handle_external(doc, req, now, CFG)
-    doc = next(e.doc for e in fx if isinstance(e, SetDocument))
+    doc = document_after(doc, fx)
     return doc, [e for e in fx if isinstance(e, Send)], reply
 
 

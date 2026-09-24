@@ -81,12 +81,6 @@ def origin_of_msg(msg: Req | Timeout) -> str:
             raise TypeError(f"no origin for {type(msg).__name__}")
 
 
-def _substance(doc: Document) -> tuple:
-    """What the write law compares: the objects and the armed deadline. The
-    clock and the generation are excluded on purpose."""
-    return ([(o.id, o.promise, o.task) for o in doc.objects], doc.timer_at)
-
-
 class Engine:
     """Two ports and two dials.
 
@@ -116,12 +110,9 @@ class Engine:
             fx, reply = handle_internal(doc, now, self.cfg), Reply.ok({})
         else:
             fx, reply = handle_external(doc, msg, now, self.cfg)
-        new = next(e.doc for e in fx if isinstance(e, SetDocument))
-
-        if _substance(new) == _substance(doc):
-            assert not any(isinstance(e, (SetTimeout, Send)) for e in fx), \
-                "a decision that changed nothing owes no effects"
+        if not fx:
             return reply
+        new = next(e.doc for e in fx if isinstance(e, SetDocument))
 
         new.clock, new.gen = now, doc.gen + 1
         for e in fx:
