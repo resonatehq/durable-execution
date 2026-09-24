@@ -45,6 +45,7 @@ from resonate.codec import decode, doc_key
 from resonate.kernel import TAG_TARGET
 from resonate.spec.queue import SWEEP
 from exampleapp import path_to
+from resonate.ports import Conflict, Unavailable
 from resonate.sdk import dumps, route
 from test_e2e import (
     CALLS, EXPECTED, ORIGIN, QUESTION, counted_agent, counted_research,
@@ -75,13 +76,22 @@ def client(monkeypatch):
     # platform loads, and the re-exported `handler` in it is the only wiring
     # a user writes. An entry point that worked when imported directly and
     # not through an example would be a broken deployment with a green suite.
+    # A service built from *this* test's environment. `handler` caches one
+    # per container, which is right in production and wrong across tests:
+    # another module leaves that global set or cleared, and whichever test
+    # ran first would decide what this one is talking to.
+    from resonate import app as service
+
+    service.ROUTES = None
     app = functions_framework.create_app("handler", str(path_to("research-agent")))
+    client = app.test_client()
+    assert client.get("/ready").status_code == 200, "the service would not build"
     # Loading the example registers its own functions. These are different
     # ones -- `@resonate` refuses two registrations of a name, so they have
     # to be -- and they only need saying where they run.
     for fn in (counted_research, counted_agent, counted_search):
         route(fn, WORKER)
-    return app.test_client()
+    return client
 
 
 def post(client, kind, **data):
@@ -190,3 +200,85 @@ def test_the_research_agent_runs_end_to_end_over_http(client):
     r = post(client, "promise.get", id=ORIGIN)
     assert r.status_code == 200
     assert json.loads(r.get_json()["data"]["promise"]["value"]["data"]) == EXPECTED
+
+
+# --- routing, and what a failure becomes over HTTP -------------------------
+#
+# These used to live in `test_app.py`, against a `Routes.handle(method,
+# path, body)` that existed to be called that way. There is no such method
+# now: a Cloud Run function has one entry point, so the routing is a ladder
+# of `if`s in `handler` and the only honest way to exercise it is a real
+# request. Which is also the better way -- the old tests could agree with a
+# router that Flask never actually reached.
+
+
+def test_an_unknown_route_is_a_404(client):
+    assert client.post("/sweep", json={}).status_code == 404
+    assert client.post("/anything", json={}).status_code == 404
+
+
+def test_a_wrong_method_is_a_405(client):
+    assert client.get("/").status_code == 405
+    assert client.delete("/execute").status_code == 405
+
+
+@pytest.mark.parametrize("path", ["/execute", "/sweep/o"])
+def test_the_queue_s_routes_are_closed_to_anyone_it_did_not_sign_for(
+        client, monkeypatch, path):
+    """`verify` reads the account per request, so naming one here closes
+    both routes without rebuilding the service."""
+    monkeypatch.setenv("ROUTES_ACCOUNT", "queue@example.iam.gserviceaccount.com")
+    assert client.post(path, json={}).status_code == 401
+    assert local.STORE.objects == {}, "an unsigned request wrote something"
+
+
+def test_the_client_route_is_not_the_queue_s_to_sign(client, monkeypatch):
+    """`/` is fronted by whatever the deployment puts in front of it, not by
+    an OIDC token from Cloud Tasks. A client carries no queue signature, and
+    for a client that is normal."""
+    monkeypatch.setenv("ROUTES_ACCOUNT", "queue@example.iam.gserviceaccount.com")
+    answer = client.post("/", json={
+        "kind": "promise.create",
+        "data": {"id": "p.1", "timeoutAt": local.CLOCK() + 1_000}})
+    assert answer.status_code == 200
+
+
+def test_a_dispatch_that_is_not_a_message_is_a_400(client):
+    assert client.post("/execute", json={"kind": "lunch"}).status_code == 400
+
+
+class Refuses(local.STORE.__class__):
+    """A bucket that answers every write the same way."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    def put(self, key, body, **kw):
+        raise self.error
+
+
+@pytest.mark.parametrize("error,status", [
+    (Unavailable("no answer"), 503),
+    (Conflict("somebody else got there first"), 409),
+])
+def test_the_two_ways_a_bucket_refuses_are_two_statuses(client, error, status):
+    """503: nothing is known about whether the write landed, so the queue
+    retries and every operation is idempotent. 409: the decision was made
+    against a document that no longer exists, so the caller must ask again
+    and the kernel must decide again. One is a retry, the other is a
+    re-decision, and a single status for both would lose that."""
+    from resonate import app as service
+
+    engine = service.ROUTES.engine
+    was, engine.store = engine.store, Refuses(error)
+    try:
+        # An id of its own. `promise.create` is idempotent, so a create that
+        # another test already made would change nothing, write nothing, and
+        # never reach the bucket this one has broken.
+        answer = client.post("/", json={
+            "kind": "promise.create",
+            "data": {"id": f"refused-{status}.1", "timeoutAt": local.CLOCK() + 1_000}})
+    finally:
+        engine.store = was
+    assert answer.status_code == status, answer.get_json()

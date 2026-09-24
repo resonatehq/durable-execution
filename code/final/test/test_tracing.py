@@ -119,9 +119,11 @@ def deliver(routes, queue, clock, budget: int = 2_000) -> int:
         d = queue.take(clock())
         if d is None:
             return did
-        path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
-        body, status = routes.handle("POST", path, d.body)
-        assert status == 200, (path, status, body)
+        if d.url.startswith(SWEEP):
+            body, status = routes.sweep(d.url[len(SWEEP):])
+        else:
+            body, status = routes.execute(d.body)
+        assert status == 200, (d.url, status, body)
         queue.ack(d, clock())
     raise AssertionError("the queue never ran out of eligible work")
 
@@ -129,7 +131,7 @@ def deliver(routes, queue, clock, budget: int = 2_000) -> int:
 def run() -> tracing.Trace:
     routes, queue, clock = world()
     with tracing.recording() as t:
-        routes.handle("POST", "/", {
+        routes.protocol({
             "kind": "promise.create",
             "data": {"id": ORIGIN, "timeoutAt": 10 ** 12,
                      "param": {"data": dumps({"f": "counted_research", "a": [QUESTION]}).data},
@@ -146,7 +148,7 @@ def run() -> tracing.Trace:
 
 def test_nothing_is_recorded_unless_someone_is_recording():
     routes, queue, clock = world()
-    routes.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
+    routes.protocol({"kind": "promise.get", "data": {"id": "nothing"}})
     deliver(routes, queue, clock)
     with tracing.recording() as t:
         pass
@@ -188,7 +190,7 @@ def test_the_log_is_in_call_order_not_return_order():
     the order a stack unwinds and the opposite of what happened."""
     t = run()
     first = t.calls[0]
-    assert first.depth == 0 and first.name == "Routes.handle"
+    assert first.depth == 0 and first.name == "Routes.protocol"
     assert t.calls[1].depth == 1, "the parent's first call comes after the parent"
 
 
@@ -259,9 +261,14 @@ def test_every_call_knows_the_request_that_caused_it():
 
 
 def test_the_entry_point_is_where_a_trace_starts(monkeypatch):
-    """`Routes.handle` is morally the entry point, so it is the outermost
-    frame — and the only one with no cause of its own, because it is the
-    cause. Everything under it carries the route."""
+    """A route is the outermost frame — and the only one with no cause of
+    its own, because it is the cause. Everything under it carries the route.
+
+    The route rather than a router: `handler` picks which of the four this
+    is, from a Flask request whose repr carries a heap address, and nothing
+    with an address in it is recordable. So the trace starts one call in,
+    at the thing that was actually asked for, which is the more useful
+    name anyway."""
     from resonate import app
 
     monkeypatch.setenv("SIMULATED", "1")
@@ -269,10 +276,10 @@ def test_the_entry_point_is_where_a_trace_starts(monkeypatch):
     local.reset()
     routes = app.from_environment()
     with tracing.recording() as t:
-        routes.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
+        routes.protocol({"kind": "promise.get", "data": {"id": "nothing"}})
 
     first, rest = t.calls[0], t.calls[1:]
-    assert first.name == "Routes.handle" and first.depth == 0
+    assert first.name == "Routes.protocol" and first.depth == 0
     assert first.where == "", "the entry point is caused by nothing inside this system"
     assert rest and all(c.where == "POST /" for c in rest)
     assert t.of("Engine.process")[0].result.startswith("Reply(status=404")
@@ -331,8 +338,12 @@ def test_every_delivery_says_what_caused_it():
     assert trace.count("[POST /execute]") == 5, "and five deliveries from the queue"
     assert "[POST /sweep" not in trace, "no deadline fired; nothing ran late"
     mmd = DIAGRAM.read_text()
-    assert mmd.count("Routes: handle(method='POST'") == 6, \
-        "and the diagram says which route each arrival was"
+    # One protocol request and five dispatches, each named by the route it
+    # reached rather than by a dispatcher that no longer exists: `handler`
+    # chooses the route from a Flask request, and the trace starts at what
+    # was chosen.
+    assert mmd.count("CloudRun->>+Routes: protocol(") == 1
+    assert mmd.count("CloudRun->>+Routes: execute(") == 5
 
 
 def test_the_ports_are_left_out_rather_than_left_idle():
@@ -356,7 +367,7 @@ def test_the_diagram_names_the_hop_it_cannot_show():
     mmd = DIAGRAM.read_text()
     assert "Note over CloudRun,Engine:" in mmd
     assert "another process" in mmd
-    assert "handle(method='POST', path='/execute'" in mmd
+    assert "CloudRun->>+Routes: execute(" in mmd
 
 
 def test_mermaid_can_actually_read_the_diagram():
@@ -445,5 +456,5 @@ def test_a_different_run_has_a_different_fingerprint():
     one = run()
     routes, _, _ = world()
     with tracing.recording() as two:
-        routes.handle("POST", "/", {"kind": "promise.get", "data": {"id": "nothing"}})
+        routes.protocol({"kind": "promise.get", "data": {"id": "nothing"}})
     assert one.fingerprint() != two.fingerprint()

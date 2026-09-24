@@ -1,4 +1,4 @@
-"""The service: three routes and nothing else.
+"""The service: four routes and nothing else.
 
 Cloud Tasks is push-only, so a worker is not a loop, it is an endpoint.
 That is the whole reason this file exists, and it is why the shape of the
@@ -29,8 +29,18 @@ and had better mean it.
     SIMULATED=1 functions-framework --target=handler
 
 serves the whole protocol on localhost over the in-memory ports — same
-engine, same kernel, same codec. `main.py` is the entry point the
-buildpack insists on; it imports `handler` from here.
+engine, same kernel, same codec. An example's `main.py` is the entry point
+the buildpack insists on; it imports `handler` from here.
+
+## Where the routing is
+
+In `handler`, at the bottom, as one function and a ladder of `if`s. A Cloud
+Run function has exactly one entry point -- the framework hands you a Flask
+request and there are no route decorators to hang four paths off -- so any
+router is one you write, and writing it anywhere else means a reader has to
+go and find it. `Routes` holds what each route *does*, in methods that take
+plain values, which is what lets a test drive a whole research agent
+without a request object.
 
 ## What is verified
 
@@ -87,6 +97,9 @@ from .engine import Timeout
 from .kernel import KernelCfg
 from .ports import Conflict, Unavailable
 from .runtime import Clock, Worker
+import flask
+import functions_framework
+
 from .tracing import because, trace
 from .types import Invalid, decode_message, encode_reply, parse_request
 
@@ -109,10 +122,14 @@ class Routes:
     file, and the separation is what lets `test_app.py` drive every route
     and a whole research agent without Flask.
 
-    It does speak HTTP, though, which is worth admitting: 409 for a
-    `Conflict`, 503 for an `Unavailable`, 400 for a request that was never
-    a request. Those are this layer's vocabulary even though the transport
-    is somebody else's.
+    What it is not is the router. Which path reaches which of these is in
+    `handler` at the bottom of this file, in one function, in the order the
+    checks happen -- because that is the question a reader arrives with and
+    it should not take three files to answer.
+
+    Each route does speak HTTP, though, which is worth admitting: a status
+    comes back with every body. The mapping from *failures* to statuses is
+    `handler`'s, because a `Conflict` is not something a route decides.
     """
 
     def __init__(self, store, queue, cfg: KernelCfg, pid: str, ttl: int,
@@ -128,7 +145,12 @@ class Routes:
 
     # -- the routes --------------------------------------------------------
 
+    @trace
     def protocol(self, envelope: dict) -> tuple[dict, int]:
+        with because("POST /"):
+            return self._protocol(envelope)
+
+    def _protocol(self, envelope: dict) -> tuple[dict, int]:
         try:
             request = parse_request(envelope)
         except Invalid as e:
@@ -136,69 +158,37 @@ class Routes:
         reply = self.engine.process(request, self.clock())
         return encode_reply(reply), 200 if reply.status < 400 else reply.status
 
+    @trace
     def execute(self, body: dict) -> tuple[dict, int]:
         """A dispatch. A refused acquire is still a 2xx: somebody else has
         the task, and delivering this again would not change that."""
+        with because("POST /execute"):
+            return self._execute(body)
+
+    def _execute(self, body: dict) -> tuple[dict, int]:
         message = decode_message(body)
         outcome = self.worker.execute_until_blocked_outer(
             message.task_id, message.version)
         return {"outcome": outcome}, 200
 
+    @trace
     def sweep(self, origin: str) -> tuple[dict, int]:
         """A deadline. Idempotent, so a duplicate finds nothing due and
         writes nothing."""
+        with because(f"POST /sweep/{origin}"):
+            return self._sweep(origin)
+
+    def _sweep(self, origin: str) -> tuple[dict, int]:
         self.engine.process(Timeout(origin), self.clock())
         return {"swept": origin}, 200
 
+    @trace
     def ready(self) -> tuple[dict, int]:
         try:
             self.store.list("", 1)
         except Unavailable as e:
             return {"ready": False, "why": str(e)}, 503
         return {"ready": True, "simulated": bool(os.environ.get("SIMULATED"))}, 200
-
-    # -- what the routes have in common ------------------------------------
-
-    @trace
-    def handle(self, method: str, path: str, body: dict | None,
-               authorized: bool = True) -> tuple[dict, int]:
-        """Morally the entry point, so it is where a trace starts.
-
-        `handler` above it is transport and nothing else; everything that
-        makes this system what it is happens under this call. A trace that
-        began at the worker would not say what caused the worker.
-        """
-        with because(f"{method} {path}"):
-            return self._handle(method, path, body, authorized)
-
-    def _handle(self, method: str, path: str, body: dict | None,
-                authorized: bool) -> tuple[dict, int]:
-        if method == "GET" and path == "/ready":
-            return self.ready()
-        if method != "POST":
-            return {"error": "POST"}, 405
-        if path.startswith("/sweep/") or path == "/execute":
-            if not authorized:
-                return {"error": "unauthenticated"}, 401
-        try:
-            if path == "/":
-                return self.protocol(body or {})
-            if path == "/execute":
-                return self.execute(body or {})
-            if path.startswith("/sweep/"):
-                return self.sweep(path[len("/sweep/"):])
-        except Invalid as e:
-            return {"error": str(e)}, 400
-        except Conflict as e:
-            # The state moved under this decision. Nothing was written, and
-            # the caller — a client, or the queue — retries.
-            return {"error": str(e)}, 409
-        except Unavailable as e:
-            # Nothing is known about whether it landed. The queue will try
-            # again; every operation is idempotent.
-            return {"error": str(e)}, 503
-        return {"error": "no such route"}, 404
-
 
 # ---------------------------------------------------------------------------
 # Wiring
@@ -349,14 +339,60 @@ def verify(request) -> bool:
 ROUTES: Routes | None = None
 
 
+@functions_framework.http
 def handler(request):
-    """The entry point, reached via `main.py`.
+    """Every route this service has, in the order they are checked.
 
-        gcloud run deploy engine --source . --function handler
+    One function and a ladder of `if`s, because that is what a Cloud Run
+    function is: the framework hands you *one* entry point and a Flask
+    request, and there are no route decorators to hang four paths off. Any
+    router is therefore one you write, and writing it anywhere but here
+    means a reader has to find it.
+
+    The four cases below are the whole of the service's surface. What each
+    one does is a method on `Routes`, which takes plain values and knows
+    nothing about HTTP, so a test can drive a whole research agent without
+    a request object.
     """
     global ROUTES
     if ROUTES is None:
         ROUTES = from_environment()
-    body, status = ROUTES.handle(
-        request.method, request.path, request.get_json(silent=True), verify(request))
-    return json.dumps(body), status, {"Content-Type": "application/json"}
+
+    method, path = request.method, request.path
+    if method == "GET" and path == "/ready":
+        return answer(*ROUTES.ready())
+    if method != "POST":
+        return answer({"error": "POST"}, 405)
+
+    # The queue's two routes, and only they, must carry the OIDC token
+    # Cloud Tasks signed. `/` is a client endpoint: whatever fronts this
+    # service protects it, and `ROUTES_ACCOUNT` being unset says so out
+    # loud.
+    if (path == "/execute" or path.startswith("/sweep/")) and not verify(request):
+        return answer({"error": "unauthenticated"}, 401)
+
+    body = request.get_json(silent=True) or {}
+    try:
+        if path == "/":
+            return answer(*ROUTES.protocol(body))
+        if path == "/execute":
+            return answer(*ROUTES.execute(body))
+        if path.startswith("/sweep/"):
+            return answer(*ROUTES.sweep(path[len("/sweep/"):]))
+    except Invalid as e:
+        # Never a request. Nothing was read and nothing written.
+        return answer({"error": str(e)}, 400)
+    except Conflict as e:
+        # The state moved under this decision. Nothing was written, and
+        # the caller -- a client, or the queue -- retries.
+        return answer({"error": str(e)}, 409)
+    except Unavailable as e:
+        # Nothing is known about whether it landed. The queue will try
+        # again; every operation is idempotent.
+        return answer({"error": str(e)}, 503)
+    return answer({"error": "no such route"}, 404)
+
+
+def answer(body: dict, status: int):
+    """A route's plain values, as an HTTP response."""
+    return flask.jsonify(body), status

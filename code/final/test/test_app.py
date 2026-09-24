@@ -61,9 +61,14 @@ def deliver(svc: Routes, queue: Queue, clock: Clock, budget: int = 2_000) -> int
         d = queue.take(clock())
         if d is None:
             return did
-        path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
-        body, status = svc.handle("POST", path, d.body)
-        assert status == 200, (path, status, body)
+        # Which route a delivery is for, decided the way `handler` decides
+        # it -- the load balancer turns a URL into a path, and that is all
+        # it does.
+        if d.url.startswith(SWEEP):
+            body, status = svc.sweep(d.url[len(SWEEP):])
+        else:
+            body, status = svc.execute(d.body)
+        assert status == 200, (d.url, status, body)
         queue.ack(d, clock())
     raise AssertionError("the queue never ran out of eligible work")
 
@@ -76,7 +81,7 @@ def settle(svc, queue, clock, rounds: int = 12) -> None:
 
 
 def post(svc: Routes, kind: str, **data):
-    return svc.handle("POST", "/", {"kind": kind, "data": data})
+    return svc.protocol({"kind": kind, "data": data})
 
 
 # --- the protocol endpoint -------------------------------------------------
@@ -107,46 +112,9 @@ def test_the_status_the_kernel_chose_is_the_status_the_client_sees():
 ])
 def test_a_malformed_request_is_a_400_and_never_reaches_the_bucket(envelope):
     svc, store, _, _ = service()
-    body, status = svc.handle("POST", "/", envelope)
+    body, status = svc.protocol(envelope)
     assert status == 400, body
     assert store.objects == {}, "a request that was never understood wrote something"
-
-
-# --- the routing -----------------------------------------------------------
-
-
-def test_an_unknown_route_is_a_404():
-    svc, _, _, _ = service()
-    assert svc.handle("POST", "/sweep", {})[1] == 404
-    assert svc.handle("POST", "/anything", {})[1] == 404
-
-
-def test_a_wrong_method_is_a_405():
-    svc, _, _, _ = service()
-    assert svc.handle("GET", "/", None)[1] == 405
-    assert svc.handle("DELETE", "/execute", None)[1] == 405
-
-
-@pytest.mark.parametrize("path", ["/execute", "/sweep/o"])
-def test_the_queue_s_routes_are_closed_to_anyone_the_queue_did_not_sign_for(path):
-    svc, store, _, _ = service()
-    body, status = svc.handle("POST", path, {}, authorized=False)
-    assert status == 401 and store.objects == {}
-
-
-def test_the_client_route_is_not_the_queue_s_to_sign():
-    """`/` is fronted by whatever the deployment puts in front of it, not by
-    an OIDC token from Cloud Tasks. Passing `authorized=False` says the
-    request carried no queue signature, which for a client is normal."""
-    svc, _, _, clock = service()
-    assert svc.handle("POST", "/", {
-        "kind": "promise.create",
-        "data": {"id": "p.1", "timeoutAt": clock() + 1_000}}, authorized=False)[1] == 200
-
-
-def test_a_dispatch_that_is_not_a_message_is_a_400():
-    svc, _, _, _ = service()
-    assert svc.handle("POST", "/execute", {"kind": "lunch"})[1] == 400
 
 
 # --- readiness -------------------------------------------------------------
@@ -161,41 +129,12 @@ class Unreachable(Store):
 
 def test_ready_says_whether_the_bucket_answers():
     svc, _, _, _ = service()
-    body, status = svc.handle("GET", "/ready", None)
+    body, status = svc.ready()
     assert status == 200 and body["ready"] is True
 
     svc.store = Unreachable()
-    body, status = svc.handle("GET", "/ready", None)
+    body, status = svc.ready()
     assert status == 503 and body["ready"] is False
-
-
-# --- what the two failures of a bucket mean over HTTP ----------------------
-
-
-class Refuses(Store):
-    def __init__(self, error):
-        super().__init__()
-        self.error = error
-
-    def put(self, key, body, **kw):
-        raise self.error
-
-
-def test_a_bucket_that_cannot_be_reached_is_a_503():
-    """Nothing is known about whether the write landed. The queue retries,
-    and every operation is idempotent, so retrying is safe."""
-    svc, _, _, clock = service()
-    svc.engine.store = Refuses(Unavailable("no answer"))
-    assert post(svc, "promise.create", id="p.1", timeoutAt=clock() + 1_000)[1] == 503
-
-
-def test_a_decision_the_state_moved_under_is_a_409():
-    """Not a retry of the same write: the decision was made against a
-    document that no longer exists, so the caller must ask again and the
-    kernel must decide again."""
-    svc, _, _, clock = service()
-    svc.engine.store = Refuses(Conflict("somebody else got there first"))
-    assert post(svc, "promise.create", id="p.1", timeoutAt=clock() + 1_000)[1] == 409
 
 
 # --- the queue's routes ----------------------------------------------------
@@ -212,9 +151,9 @@ def test_a_duplicate_dispatch_is_answered_rather_than_retried():
     dispatch = queue.take(clock())
     assert dispatch is not None and dispatch.url == WORKER
 
-    first, status = svc.handle("POST", "/execute", dispatch.body)
+    first, status = svc.execute(dispatch.body)
     assert status == 200 and first["outcome"] == "done"
-    second, status = svc.handle("POST", "/execute", dispatch.body)
+    second, status = svc.execute(dispatch.body)
     assert status == 200 and second["outcome"] == "not mine"
     assert CALLS["search:sagas"] == 1, "the duplicate was paid for"
 
@@ -224,13 +163,13 @@ def test_a_sweep_with_nothing_due_writes_nothing():
     post(svc, "promise.create", id="p.1", timeoutAt=clock() + 1_000_000)
     before = store.get(doc_key("p"))
 
-    assert svc.handle("POST", "/sweep/p", None) == ({"swept": "p"}, 200)
+    assert svc.sweep("p") == ({"swept": "p"}, 200)
     assert store.get(doc_key("p")) == before, "an idle sweep wrote a new generation"
 
 
 def test_a_sweep_for_an_origin_that_has_never_existed_is_still_a_200():
     svc, store, _, _ = service()
-    assert svc.handle("POST", "/sweep/ghost", None)[1] == 200
+    assert svc.sweep("ghost")[1] == 200
     assert store.objects == {}
 
 
@@ -291,8 +230,11 @@ def test_it_still_runs_over_a_queue_that_is_late_out_of_order_and_lossy(seed):
             if queue.loses_this_one():
                 queue.nack(d, clock())
                 continue
-            path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
-            assert svc.handle("POST", path, d.body)[1] == 200
+            if d.url.startswith(SWEEP):
+                status = svc.sweep(d.url[len(SWEEP):])[1]
+            else:
+                status = svc.execute(d.body)[1]
+            assert status == 200
             queue.ack(d, clock())
         clock.advance(40_000)
     assert json.loads(root(store).value.data) == EXPECTED
