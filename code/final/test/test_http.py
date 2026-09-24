@@ -225,7 +225,7 @@ def test_a_wrong_method_is_a_405(client):
 
 
 @pytest.mark.parametrize("message", [
-    {"kind": "execute", "task": {"id": "p.1", "version": 1}},
+    {"kind": "execute", "taskId": "p.1", "version": 1},
     {"kind": "timeout", "origin": "p"},
 ])
 def test_the_queue_s_messages_are_refused_from_anyone_it_did_not_sign_for(build, message):
@@ -250,7 +250,7 @@ def test_an_unknown_kind_is_a_400(client):
 
 
 @pytest.mark.parametrize("message", [{"kind": "execute"}, {"kind": "timeout"},
-                                     {"kind": "execute", "task": {"id": "p.1"}}])
+                                     {"kind": "execute", "taskId": "p.1"}])
 def test_a_malformed_queue_message_is_a_400_not_a_500(client, message):
     assert client.post("/", json=message).status_code == 400
 

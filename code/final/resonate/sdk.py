@@ -64,7 +64,7 @@ from typing import Any, Callable
 from .kernel import (
     PENDING, REJECTED, RESOLVED, TAG_EXTERNAL, TAG_TARGET, TAG_TIMER,
 )
-from .types import PromiseCreate, PromiseSettle, TaskFence, Value
+from .types import PromiseCreate, PromiseSettle, TaskFence, Value, adapter, record
 from .errors import Conflict, Unavailable
 
 #: How long a promise this SDK creates has to settle before it times out.
@@ -173,24 +173,33 @@ def dumps(x: Any) -> Value:
     return Value(data=json.dumps(x))
 
 
-def call_param(fn: "Durable", args: tuple) -> Value:
-    """What a promise records about the call it stands for.
+@dataclass
+class Call:
+    """What a promise records about the call it stands for: the function's
+    name, its arguments, and its version. `v` is left out at version zero."""
 
-    `v` is omitted at version zero, deliberately. A project that never
-    versions anything writes the same bytes it always did, so documents
-    from before versions existed still decode, the checked-in trace does
-    not move, and the feature costs nothing to the people not using it.
-    """
-    call: dict[str, Any] = {"f": fn.name, "a": args}
-    if fn.version != UNVERSIONED:
-        call["v"] = fn.version
-    return dumps(call)
+    f: str
+    a: list[Any]
+    v: int = UNVERSIONED
+
+
+@dataclass
+class Rejection:
+    """What a rejected promise records: the exception's type and message."""
+
+    type: str = "rejected"
+    message: str = ""
+
+
+def call_param(fn: "Durable", args: tuple) -> Value:
+    call = Call(fn.name, list(args), fn.version)
+    return dumps(adapter(Call).dump_python(call, mode="json", exclude_defaults=True))
 
 
 def called(param: dict) -> tuple[str, int, list]:
-    """The other direction: what a worker was handed. A parameter with no
-    `v` was written by a function with no version, which is zero."""
-    return param["f"], param.get("v", UNVERSIONED), param["a"]
+    """The other direction: what a worker was handed."""
+    call = adapter(Call).validate_python(param)
+    return call.f, call.v, call.a
 
 
 def lookup(name: str, version: int = UNVERSIONED) -> "Durable":
@@ -215,17 +224,16 @@ def loads(v: dict) -> Any:
 
 
 def describe(e: BaseException) -> dict:
-    """A rejection, as something that survives a round trip through JSON and
-    still says what went wrong."""
-    return {"type": type(e).__name__, "message": str(e)}
+    return record(Rejection(type(e).__name__, str(e)))
 
 
-def read_back(record: dict) -> Any:
+def read_back(settled: dict) -> Any:
     """What a settled promise returns to the code that awaited it."""
-    if record["state"] == RESOLVED:
-        return loads(record["value"])
-    why = loads(record["value"]) or {}
-    raise Failed(f"{record['id']}: {why.get('type', 'rejected')}: {why.get('message', '')}")
+    value = loads(settled["value"])
+    if settled["state"] == RESOLVED:
+        return value
+    why = adapter(Rejection).validate_python(value if isinstance(value, dict) else {})
+    raise Failed(f"{settled['id']}: {why.type}: {why.message}")
 
 
 # ---------------------------------------------------------------------------

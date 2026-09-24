@@ -262,10 +262,9 @@ def test_the_version_travels_with_the_dispatch():
     rt, store = world(job, job_v1, versioned_leaf)
     rt.start("job.3", job_v1, "widgets")
 
-    body = json.loads(next(
-        e.body["task"] and json.dumps(e.body) for e in rt.queue.entries.values()
-        if e.body and e.body.get("kind") == "execute"))
-    assert body["task"]["id"] == "job.3"
+    body = next(e.body for e in rt.queue.entries.values()
+                if e.body and e.body.get("kind") == "execute")
+    assert body["taskId"] == "job.3"
 
     param = json.loads(document(store, "job.3").get("job.3").promise.param.data)
     assert param["v"] == 1, param

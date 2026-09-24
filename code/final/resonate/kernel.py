@@ -27,7 +27,7 @@ from .types import (
     Reply, Req, TaskAcquire, TaskContinue,
     TaskCreate, TaskFence, TaskFulfill, TaskGet,
     TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
-    Unblock, Value,
+    Unblock, Value, record, wire,
 )
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,7 @@ class KernelCfg:
 # ---------------------------------------------------------------------------
 
 
+@wire
 @dataclass
 class Promise:
     state: str = PENDING
@@ -104,20 +105,11 @@ class Promise:
         return self.state == PENDING and self.is_external()
 
     def to_record(self, id: str) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "id": id,
-            "state": self.state,
-            "param": self.param.to_json(),
-            "value": self.value.to_json(),
-            "tags": dict(self.tags),
-            "timeoutAt": self.timeout_at,
-            "createdAt": self.created_at,
-        }
-        if self.settled_at is not None:
-            out["settledAt"] = self.settled_at
-        return out
+        """This promise as a reply carries it: its public fields, and its id."""
+        return {"id": id, **record(self, exclude={"callbacks", "listeners"})}
 
 
+@wire
 @dataclass
 class Task:
     state: str = T_PENDING
@@ -141,19 +133,11 @@ class Task:
         self.retry_at = None
 
     def to_record(self, id: str) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "id": id,
-            "state": self.state,
-            "version": self.version,
-            "resumes": len(self.resumes),
-        }
-        if self.ttl is not None:
-            out["ttl"] = self.ttl
-        if self.pid is not None:
-            out["pid"] = self.pid
-        return out
+        """This task as a reply carries it: its public fields, and its id."""
+        return {"id": id, **record(self, exclude={"retry_at", "lease_at"})}
 
 
+@wire
 @dataclass
 class Object:
     """One promise, and its task if it has a target. A task's id is its promise's id."""
@@ -171,6 +155,7 @@ def dewey(id: str) -> tuple[tuple[int, Any], ...]:
     )
 
 
+@wire
 @dataclass
 class Document:
     """One origin's entire state. `objects` is kept sorted by `dewey(id)`."""

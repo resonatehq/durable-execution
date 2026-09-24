@@ -36,8 +36,9 @@ go and nowhere else.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BeforeValidator, ConfigDict, Field, StrictInt, StringConstraints, TypeAdapter,
@@ -50,27 +51,33 @@ from pydantic.alias_generators import to_camel
 # What a payload is
 # ---------------------------------------------------------------------------
 
+#: Everything on a wire is JSON in the protocol's camelCase (`timeoutAt`,
+#: `corrId`), and every dataclass that goes on one says so with `@wire`.
+wire = with_config(ConfigDict(alias_generator=to_camel))
+
+
+@functools.cache
+def adapter(cls: type) -> TypeAdapter:
+    return TypeAdapter(cls)
+
+
+def record(x: Any, exclude: set[str] = frozenset()) -> dict[str, Any]:
+    """A dataclass as the wire writes it: camelCase, JSON types, no nulls."""
+    return adapter(type(x)).dump_python(
+        x, mode="json", by_alias=True, exclude_none=True, exclude=exclude)
+
+
+@wire
 @dataclass
 class Value:
     headers: dict[str, str] | None = None
     data: str | None = None
-
-    def to_json(self) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        if self.headers is not None:
-            out["headers"] = dict(self.headers)
-        if self.data is not None:
-            out["data"] = self.data
-        return out
 
 # ---------------------------------------------------------------------------
 # Requests
 # ---------------------------------------------------------------------------
 
 PROTOCOL_VERSION = "2026-04-01"
-
-#: Requests arrive as JSON in the protocol's camelCase (`timeoutAt`, `corrId`).
-wire = with_config(ConfigDict(alias_generator=to_camel))
 
 #: A non-empty string: every id, pid, address and state.
 Id = Annotated[str, StringConstraints(strict=True, min_length=1)]
@@ -219,24 +226,33 @@ Req = (
 # What comes back, and what a queue carries
 # ---------------------------------------------------------------------------
 
+@wire
 @dataclass(frozen=True)
 class Execute:
-    task_id: str
-    version: int
+    task_id: Id
+    version: StrictInt
+    kind: Literal["execute"] = "execute"
 
 
+@wire
 @dataclass(frozen=True)
 class Unblock:
     promise: dict[str, Any]
+    kind: Literal["unblock"] = "unblock"
 
 
+@wire
 @dataclass(frozen=True)
 class Timeout:
     """The internal message: a deadline for this origin came due. Not a
     protocol request — no client can send one — but a transition on the
     origin's document all the same."""
 
-    origin: str
+    origin: Id
+    kind: Literal["timeout"] = "timeout"
+
+
+Message = Annotated[Execute | Unblock | Timeout, Field(discriminator="kind")]
 
 
 #: The address of this service's own endpoint, for a message the service
@@ -271,29 +287,14 @@ class Invalid(Exception):
 
 
 def encode_message(msg: Execute | Unblock | Timeout) -> dict:
-    match msg:
-        case Execute():
-            return {"kind": "execute", "task": {"id": msg.task_id, "version": msg.version}}
-        case Unblock():
-            return {"kind": "unblock", "promise": msg.promise}
-        case Timeout():
-            return {"kind": "timeout", "origin": msg.origin}
+    return record(msg)
 
 
 def decode_message(body: dict) -> Execute | Unblock | Timeout:
     try:
-        match body.get("kind"):
-            case "execute":
-                task = body["task"]
-                return Execute(task["id"], task["version"])
-            case "unblock":
-                return Unblock(body["promise"])
-            case "timeout":
-                return Timeout(body["origin"])
-            case other:
-                raise Invalid(f"unknown message kind {other!r}")
-    except (KeyError, TypeError) as e:
-        raise Invalid(f"malformed {body.get('kind')} message: missing {e}") from None
+        return adapter(Message).validate_python(body)
+    except ValidationError as e:
+        raise Invalid(str(e)) from None
 
 
 # ---------------------------------------------------------------------------

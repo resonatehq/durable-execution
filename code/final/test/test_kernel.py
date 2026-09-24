@@ -507,7 +507,7 @@ def test_getting_an_unknown_task_is_a_404():
 
 def test_getting_a_task_whose_promise_expired_reports_it_fulfilled():
     _, _, reply, _ = step(with_targeted("o:a", 1_000), TaskGet("o:a"), 2_000)
-    assert reply.data == {"task": {"id": "o:a", "state": "fulfilled", "version": 0, "resumes": 0}}
+    assert reply.data == {"task": {"id": "o:a", "state": "fulfilled", "version": 0, "resumes": []}}
 
 
 def task_create(id, timeout_at=100_000, ttl=5_000, tags=None):
@@ -578,7 +578,7 @@ def test_acquiring_takes_the_lease_and_drops_buffered_resumes():
     t = nxt.get("o:a").task
     assert (t.state, t.version, t.pid, t.ttl, t.resumes, t.lease_at, t.retry_at) == (
         T_ACQUIRED, 1, PID, 5_000, set(), 5_100, None)
-    assert reply.data["task"] == {"id": "o:a", "state": "acquired", "version": 1, "resumes": 0, "ttl": 5_000, "pid": PID}
+    assert reply.data["task"] == {"id": "o:a", "state": "acquired", "version": 1, "resumes": [], "ttl": 5_000, "pid": PID}
     assert fx[0] == SetTimeout(5_100) and DelTimeout(30_000) in fx and sends == []
 
 

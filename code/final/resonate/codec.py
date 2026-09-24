@@ -21,7 +21,7 @@ def doc_key(origin: str, prefix: str = "") -> str:
 
 
 def encode(doc: Document) -> bytes:
-    return DOCUMENT.dump_json(doc)
+    return DOCUMENT.dump_json(doc, by_alias=True)
 
 
 def decode(raw: bytes) -> Document:

@@ -157,7 +157,7 @@ sequenceDiagram
         participant E as Engine
     end
 
-    Q->>+H: POST / {kind: execute, task: {id, version}}
+    Q->>+H: POST / {kind: execute, taskId, version}
     H->>+W: run(id, version)
     W->>E: task.acquire(id, version, pid, ttl)
 
