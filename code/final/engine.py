@@ -54,6 +54,7 @@ from kernel import (
     TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
     handle_external, handle_internal, origin_of,
 )
+import otel
 from spec.queue import SWEEP, QueueP
 from spec.store import StoreP
 from tracing import trace
@@ -161,6 +162,12 @@ class Engine:
             # else's disarm.
             if isinstance(e, DelTimeout) and doc.timer_name is not None:
                 self.queue.delete(doc.timer_name)
+        # After the commit, because a span for a settlement that was never
+        # written would be the one kind of lie a trace must not tell. Before
+        # the sends only in the sense that it is cheap and cannot fail the
+        # request: `emit` swallows nothing, but the sink is the shell's and
+        # off by default.
+        otel.settled(doc, new, origin)
         for e in fx:
             if isinstance(e, Send):
                 # No schedule: deliver as soon as you can, which is what an

@@ -15,3 +15,9 @@ google-cloud-storage
 google-cloud-tasks
 google-auth
 functions-framework
+
+# Only reached when `TRACE` is set, and shipped anyway: turning tracing on
+# in an incident is worth an environment variable and not worth a redeploy.
+# `otel_gcp.py` is the one file that imports them, at the edge.
+opentelemetry-sdk
+opentelemetry-exporter-gcp-trace

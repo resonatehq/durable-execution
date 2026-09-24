@@ -77,6 +77,7 @@ the expensive one.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -214,6 +215,7 @@ def from_environment() -> Routes:
     `handler`. `/ready` reports it, because a deployment that set it by
     accident would look healthy while losing every run.
     """
+    _trace()
     if os.environ.get("SIMULATED"):
         import local
 
@@ -223,6 +225,29 @@ def from_environment() -> Routes:
                        ttl=int(os.environ.get("LEASE", 60_000)),
                        clock=local.CLOCK)
     return _from_gcp()
+
+
+def _trace() -> None:
+    """`TRACE=1` sends spans to Cloud Trace, and nothing else changes.
+
+    Off is the default and off is free: `otel.py`'s hooks are one lookup
+    and a return, and the engine, the worker and the SDK behave identically
+    either way. That is why this is an environment variable rather than a
+    build: turning it on during an incident should not require a deploy.
+
+    A tracer that cannot start is logged and dropped rather than raised.
+    Refusing to boot because the observability is unavailable would mean
+    the observability can take the service down, which is the one thing it
+    must never do.
+    """
+    if not os.environ.get("TRACE"):
+        return
+    try:
+        import otel_gcp
+
+        otel_gcp.install()
+    except Exception as e:  # pragma: no cover - needs a broken environment
+        logging.getLogger(__name__).warning("tracing is off: %s", e)
 
 
 def _cfg() -> KernelCfg:

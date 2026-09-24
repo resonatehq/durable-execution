@@ -61,10 +61,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import otel
 from tracing import trace
 from kernel import (
     PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
-    TAG_TIMER, TaskFence, Value,
+    TAG_TIMER, TaskFence, Value, origin_of,
 )
 from ports import Conflict, Unavailable
 
@@ -229,15 +230,29 @@ class Durable:
             return read_back(record)
 
         token = _FRAME.set(_Call(id))
+        # A local call runs inside its caller's attempt and inherits its
+        # invocation id, so the whole nested set of physical spans is one
+        # process's run of one body. On a replay this is not reached at all:
+        # the promise is already settled and read back above, which is why
+        # counting physical spans counts executions rather than awaits.
         try:
-            value, state = dumps(await self.invoke(*args)), RESOLVED
-        except (Blocked, *PLATFORM):
-            # Not an answer. Nothing is recorded, and the attempt unwinds.
-            raise
-        except Exception as e:
-            # An answer, and an unwelcome one. Recorded, so the next run
-            # reads the same rejection rather than calling again.
-            value, state = dumps(describe(e)), REJECTED
+            with otel.attempt(id, origin_of(id), inv.now, benign=(Blocked,),
+                              name=self.name) as span:
+                try:
+                    value, state = dumps(await self.invoke(*args)), RESOLVED
+                    span["status"], span["de.outcome"] = otel.OK, "resolved"
+                except (Blocked, *PLATFORM) as e:
+                    # Not an answer. Nothing is recorded, and the attempt
+                    # unwinds -- `Blocked` is ordinary, the rest is not.
+                    span["de.outcome"] = (
+                        "suspended" if isinstance(e, Blocked) else "released")
+                    raise
+                except Exception as e:
+                    # An answer, and an unwelcome one. Recorded, so the next
+                    # run reads the same rejection rather than calling again.
+                    value, state = dumps(describe(e)), REJECTED
+                    span["status"], span["de.outcome"] = otel.ERROR, "rejected"
+                    span["de.error"] = type(e).__name__
         finally:
             _FRAME.reset(token)
         # Settle from what the store returns, never from the local result: if
