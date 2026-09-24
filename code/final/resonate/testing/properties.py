@@ -7,8 +7,9 @@ the shell has accumulated from the kernel's `Send` effects. Two shapes:
     state(now, s)      true at every state the kernel passes through
     trans(now, a, b)   true at every pair of consecutive states, one step apart
 
-`state_failures`, `trans_failures`, `internal_failures` and `gap_failures`
-run a catalogue and return the NAMES of the properties that broke. The names
+`state_failures` (which includes the known `GAPS`), `trans_failures` and
+`internal_failures` run a catalogue and return the NAMES of the properties
+that broke. The names
 are the specification's own, so a violation means the same thing here as in
 Lean, Go or TypeScript.
 
@@ -23,7 +24,7 @@ step, but a task that suspends on a promise, is halted, continued,
 re-acquired, and suspends on the same promise again registers nothing new,
 because registration is idempotent in the specification's own `taskSuspend`.
 The specification samples that entry on scripts of length three, which never
-reach the five-step path; our walk did. The adapted form asks that the task
+reach that five-step path. The adapted form asks that the task
 hold a registration on a pending promise after the step. The originals are
 kept beside them as `SPEC_ONLY` for reference and are not walked.
 

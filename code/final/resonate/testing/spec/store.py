@@ -1,7 +1,8 @@
 """What a store is, and what it has to do to be one.
 
-Three layers, the same three `spec.py` draws around an engine, because
-there are three things to name and they are not the same thing:
+Three layers, the same three `engine.py` draws around an engine, because
+there are three things to name and they are not the same thing. `StoreP`
+itself is defined in `ports.py`, where the engine imports it from:
 
     StoreP   a store, once it exists: four operations
     StoreC   how one is made: its configuration in, a store out
@@ -13,8 +14,9 @@ be handed an instance, because two implementations are configured
 differently and only the caller knows how. It is handed the module, and
 reaches for `Store`.
 
-    from ...store import conformance
-    import store_mem, store_gcp
+    from resonate.testing.spec.store import conformance
+    from resonate import store_gcp
+    from resonate.testing import store_mem
 
     assert conformance(store_mem) == []
     assert conformance(store_gcp, bucket="runs", prefix="t/") == []
@@ -31,12 +33,8 @@ offer these four and a version token, and every one of them offers the
 conditional writes the whole design rests on. An adapter should be nearly
 empty; if it is not, this interface is wrong.
 
-JSON in, JSON out. Not because a bucket cares — it stores bytes — but
-because a seam where the value is a string of JSON is a seam something else
-can stand at and read. A store that can decode what passes through it can
-check it, and the checking gets the one thing a test cannot buy: it happens
-on every write in every run, including the ones nobody wrote with checking
-in mind.
+Text in, text out: the engine hands the store the codec's JSON, and a
+bucket stores bytes, so the store does not interpret the body.
 
 `get` returns the body and its version, or `None` when nothing is there.
 
@@ -45,19 +43,17 @@ and passing both is a programming error:
 
   - `if_match="..."` replaces exactly the version named, and fails otherwise.
   - `if_absent=True` creates, and fails if anything is there.
-  - neither is an unconditional overwrite, which is only ever correct when
-    the *key* carries the whole value — a deadline named by its instant,
-    say, where writing the same key twice is writing the same fact twice.
+  - neither is an unconditional overwrite. The engine never uses it; it is
+    in the contract because every real store offers it.
 
 `delete` removes, and removing what is not there succeeds. Idempotent,
-because a collector that crashed and ran again must not fail.
+because a caller that crashed and ran again must not fail.
 
 `list` returns at most `limit` keys under `prefix`, **lexicographically
-ascending**. The order is load-bearing rather than incidental: a deadline
-zero-padded into its key sorts into time order, so the nearest deadlines
-are a capped listing and finding what is due costs no index. Real stores
-differ here — S3 and GCS list lexicographically, while some client
-libraries promise nothing — so an adapter that cannot guarantee it sorts.
+ascending**, so a zero-padded key sorts in numeric order and a capped
+listing is the smallest. Real stores differ here — S3 and GCS list
+lexicographically, while some client libraries promise nothing — so an
+adapter that cannot guarantee it sorts.
 
 ## The two errors
 
@@ -103,8 +99,8 @@ __all__ = ["StoreP", "StoreC", "StoreM", "Unavailable",
 class StoreC(Protocol):
     """How a store is made — and the one layer that cannot be pinned down.
 
-    `spec.EngineC` names its arguments, and means it: every engine takes
-    the same three ports, because ports are an interface. A store's
+    `engine.EngineC` names its arguments, and means it: every engine takes
+    the same two ports, because ports are an interface. A store's
     arguments are not an interface, they are a deployment — the simulated
     one needs nothing, the real one needs a bucket, a client and a prefix,
     and no third implementation will need those either. Forcing a shape on
@@ -125,7 +121,7 @@ class StoreM(Protocol):
 
     A read-only property rather than a plain attribute: a protocol's
     mutable attribute is invariant, and `Store: StoreC` is a claim no class
-    can satisfy. See `spec.py`, and `test_types.py`, which checks it.
+    can satisfy. See `engine.py`, and `test_types.py`, which checks it.
     """
 
     @property
@@ -206,7 +202,7 @@ def _unconditional(store: StoreP, p: str) -> None:
 
 @claim("removing is idempotent")
 def _delete(store: StoreP, p: str) -> None:
-    store.delete(p + "gone")  # a collector that crashed and ran again
+    store.delete(p + "gone")  # a caller that crashed and ran again
     store.put(p + "o", "one", if_absent=True)
     store.delete(p + "o")
     store.delete(p + "o")

@@ -1,41 +1,30 @@
 """What a queue is, and what it has to do to be one.
 
-The same three layers `spec.py` draws around an engine and `store.py`
-around a store:
+The same three layers `engine.py` draws around an engine and `store.py`
+around a store. `QueueP` itself is defined in `ports.py`:
 
     QueueP   a queue, once it exists: two operations
     QueueC   how one is made: its configuration in, a queue out
     QueueM   a module that offers one, under the name `Queue`
 
-    from ...queue import conformance
-    import queue_mem, queue_gcp
+    from resonate.testing.spec.queue import conformance
+    from resonate import queue_gcp
+    from resonate.testing import queue_mem
 
     assert conformance(queue_mem) == []
     assert conformance(queue_gcp, project="p", location="l", queue="q",
                        base_url="https://svc") == []
 
-The file is plural and the concept is not. `queue.py` shadows the standard
-library's own `queue`, and anything that imports the real one — Hypothesis,
-for a start — breaks the moment it is on the path. The implementations need
-no such apology: nothing is called `queue_mem`.
+## One port for deadlines and dispatches
 
-## One port, because there was only ever one thing
-
-The engine used to take two: `timers`, to arm and disarm a deadline, and
-`transport`, to send a message. They were the same thing wearing two
-names. A deadline is a task with an HTTP target and a time before which it
-must not be delivered; a dispatch is a task whose time is now. Both are
-`create`, and the only difference is what the caller does with the name it
-gets back: a deadline's is recorded in the document, because cancelling is
-by name, and a dispatch's is dropped, because a dispatch is never
-cancelled.
-
-The tell was in the service's wiring, which built the two ports out of the same object
-and handed it to the engine twice. So there is one port now, named for
-what it is. What a deadline and a dispatch still do *not* share is when
-they happen — arm before the commit, send after — and that is stated where
-it belongs, in the kernel's effects (`SetTimeout`, `DelTimeout`, `Send`)
-rather than in the shape of the world.
+A deadline is a task with an HTTP target and a time before which it must
+not be delivered; a dispatch is a task whose time is now. Both are
+`create`, told apart by the message's `kind` (`timeout` or `execute`), and
+by what the caller does with the name it gets back: a deadline's is
+recorded in the document, because cancelling is by name, and a dispatch's
+is dropped, because a dispatch is never cancelled. When each happens — arm
+before the commit, send after — is stated in the kernel's effects
+(`SetTimeout`, `DelTimeout`, `Send`), not in the shape of the port.
 
 ## What the interface is not
 

@@ -14,9 +14,9 @@ from ..worker import Worker
 
 @dataclass
 class Clock:
-    """Time, as something a test can move. A worker reads it; nothing else
-    may, because a durable function that reads a clock between two calls is
-    the one thing this model asks you not to do."""
+    """Time, as something a test can move. The runtime and the workers read
+    it; a durable function must not, because reading a clock between two
+    calls is the one thing this model asks you not to do."""
 
     now: int = 0
 
@@ -39,12 +39,6 @@ class Runtime:
 
     A handler that answers is acknowledged. One that cannot is not, and the
     queue decides whether to try again or give up, exactly as it would.
-
-    There used to be a second runtime here, carrying messages in a list and
-    firing deadlines from a heap. It existed only because the engine had
-    two ports and they had two well-behaved in-memory gadgets. The engine
-    has one port now, so there is one runtime, and it is the one whose
-    failures are real.
     """
 
     engine: Any
@@ -71,7 +65,9 @@ class Runtime:
             {TAG_TARGET: target}), self.clock())
 
     def handle(self, delivery) -> bool:
-        """Deliver one task. Returns whether the handler answered."""
+        """Deliver one task, by what its body is: a timeout goes to the
+        engine, an execute to the worker served at its URL, an unblock is
+        recorded in `notified`. Returns whether the handler answered."""
         msg = decode_message(delivery.body)
         if isinstance(msg, Timeout):
             self.swept += 1

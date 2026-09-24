@@ -9,8 +9,8 @@ from dataclasses import dataclass
 class Violation:
     """One claim an implementation did not honour.
 
-    There are three conformance suites — `spec.py` for an engine,
-    `store.py` for a store, `queues.py` for a queue — and they report the
+    There are three conformance suites — `engine.py` for an engine,
+    `store.py` for a store, `queue.py` for a queue — and they report the
     same way, so a caller can collect from all three and a reader learns
     one format. `step` is where in the suite it happened: which message of
     a script, or which claim of a contract.

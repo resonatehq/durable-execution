@@ -17,7 +17,7 @@ Every one of those is a knob, off by default so a test can turn on one at a
 time and say which one it is about. Deterministic under a seed, so a run
 that finds something can be run again and find it again.
 
-`take`, `ack` and `nack` are not part of `queues.QueueP` and could not be:
+`take`, `ack` and `nack` are not part of `ports.QueueP` and could not be:
 Cloud Tasks is push-only, and taking delivery belongs to whatever is being
 delivered to. They are here because something has to play the queue's own
 side in a test.
@@ -25,12 +25,13 @@ side in a test.
 ## What giving up costs, and it is worth stating plainly
 
 A dropped `execute` is recoverable: the task's retry deadline was committed
-before the message left, so the sweep offers it again. A dropped *sweep* is
-not recoverable by anything in this design — the deadline it carried is the
-only thing that was going to fire. A deployment needs either a retry policy
-generous enough that this does not happen, or a periodic sweep over the
-bucket that does not depend on any single queued task. `test_queue.py`
-demonstrates the hole rather than pretending it is not there.
+before the message left, so the timeout offers it again. A dropped
+*timeout* is not recoverable by anything in this design — the deadline it
+carried is the only thing that was going to fire. A deployment needs either
+a retry policy generous enough that this does not happen, or a periodic
+sweep over the bucket that does not depend on any single queued task.
+`test_queue.py` demonstrates the hole rather than pretending it is not
+there.
 """
 
 from __future__ import annotations

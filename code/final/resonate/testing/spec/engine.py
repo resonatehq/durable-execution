@@ -17,8 +17,7 @@ that is not a style choice: a protocol's mutable attribute is invariant, so
 `Engine: EngineC` demands a value that is *exactly* `EngineC` and a type
 checker rejects `class Engine:` for it. A property is covariant, and a class
 object satisfies it by being callable with the right arguments, with no
-adapter. `test_types.py` is what says so; the earlier, plainer form passed
-every test in this project and was still wrong.
+adapter. `test_types.py` checks it with mypy.
 
 The types alone say nothing about behaviour. The rest of this file is the
 part that does: `conformance` drives an engine through a script and holds
@@ -263,12 +262,15 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
       conditional write per poll, and on a store with a per-object write
       rate that is the difference between working and not.
 
+    The write law compares `(doc.objects, doc.timer_at)` before and after:
+    the document's clock is not state, so advancing it alone owes no write.
+
     `store` is the world the engine is given. It defaults to the simulated
     one; hand it `store_gcp.Store` and the same suite grades the same engine
     through the seam it will really run on.
     """
     from .. import queue_mem
-    from .. import store_mem  # here, so `store.py` may import this module's Violation
+    from .. import store_mem
 
     script = STANDARD_SCRIPT if script is None else script
     fault = Fault()  # not injecting: used here only as the log of what was written

@@ -11,7 +11,7 @@ abstract halves, the sweep as an internal step and the operation as an
 external step, and a timeout edge as an internal step. Any failure stops the
 search with the path that reached it.
 
-    python explore.py --depth 5          # states and edges per depth, then the tally
+    python -m resonate.testing.explore --depth 5   # states and edges per depth, then the tally
 """
 
 from __future__ import annotations
@@ -220,9 +220,8 @@ def explore(depth, limit=None, log=None, ab=BROAD, visit=None):
     """Breadth-first to `depth`. Returns (states per depth, edges, tally).
 
     `visit(now, doc)` is called once per state first reached, which is how
-    something other than the catalogue gets handed
-    every document the kernel can produce rather than the few a script
-    happens to build."""
+    something other than the catalogue gets handed every document the kernel
+    can produce rather than the few a script happens to build."""
     start = (0, P.State(Document(), retry_timeout=CFG.retry_timeout))
     seen = {key(*start): 0}
     if visit is not None:
