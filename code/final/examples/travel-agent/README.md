@@ -114,7 +114,7 @@ curl -sX POST localhost:8080/ -H 'content-type: application/json' -d '{
   "kind": "promise.create",
   "data": {"id": "trip.1", "timeoutAt": 99999999999999,
            "param": {"data": "{\"f\": \"chat\", \"a\": []}"},
-           "tags": {"resonate:target": "http://localhost:8080/execute"}}}'
+           "tags": {"resonate:target": "http://localhost:8080/"}}}'
 ```
 
 Find what it is waiting for — the pending promise tagged

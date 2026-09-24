@@ -33,7 +33,6 @@ from resonate.queue_mem import Queue
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
 from resonate.sdk import resonate, sleep
-from resonate.types import SWEEP
 from resonate.store_mem import Store
 
 CFG = KernelCfg(retry_timeout=30_000)
@@ -80,7 +79,7 @@ def root(store: Store):
 def sweeps(rt) -> list[int]:
     """When the queue has been told to come back, for this origin."""
     return sorted(e.not_before for n, e in rt.queue.entries.items()
-                  if e.url.startswith(SWEEP))
+                  if e.body["kind"] == "timeout")
 
 
 # --- it waits --------------------------------------------------------------

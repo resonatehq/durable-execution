@@ -46,7 +46,6 @@ from resonate.testing.sim import Clock
 from resonate.sdk import dumps, route
 from resonate.spec import queue as queue_spec
 from resonate.spec import store as store_spec
-from resonate.types import SWEEP
 from test_e2e import (
     CALLS, ORIGIN, QUESTION, counted_agent, counted_research, counted_search,
 )
@@ -79,7 +78,7 @@ CALLER = "CloudRun"
 
 #: Where this deployment answers. One service runs every function, which is
 #: the smallest shape that is still the real one.
-WORKER = "https://svc-abc.a.run.app/execute"
+WORKER = "https://svc-abc.a.run.app/"
 
 #: The hop the picture cannot show. A task created on the queue arrives
 #: later as a new request, and Cloud Tasks makes that request from another
@@ -122,10 +121,7 @@ def deliver(routes, queue, clock, budget: int = 2_000) -> int:
         d = queue.take(clock())
         if d is None:
             return did
-        if d.url.startswith(SWEEP):
-            body, status = routes.sweep(d.url[len(SWEEP):])
-        else:
-            body, status = routes.execute(d.body)
+        body, status = routes.dispatch("POST", "/", d.body, "")
         assert status == 200, (d.url, status, body)
         queue.ack(d, clock())
     raise AssertionError("the queue never ran out of eligible work")
@@ -214,7 +210,7 @@ def test_the_deadline_is_armed_and_disarmed_as_it_moves():
     """With a lease shorter than the retry timeout the timer transition
     happens for real, rather than every deadline landing on one instant."""
     t = run()
-    arms = [c for c in t.of("queue.create") if "sweep/" in c.args]
+    arms = [c for c in t.of("queue.create") if "'kind': 'timeout'" in c.args]
     assert len(arms) > 1, "the deadline never moved; the fixture is too kind"
     assert t.of("queue.delete"), "armed and never disarmed"
 
@@ -255,12 +251,12 @@ def test_a_document_body_is_in_the_trace_by_its_identity_not_its_bulk():
 
 def test_every_call_knows_the_request_that_caused_it():
     with tracing.recording() as t:
-        with tracing.because("POST /execute"):
+        with tracing.because("POST / execute"):
             @tracing.trace
             def inner():
                 return 1
             inner()
-    assert [c.where for c in t.calls] == ["POST /execute"]
+    assert [c.where for c in t.calls] == ["POST / execute"]
 
 
 def test_the_entry_point_is_where_a_trace_starts():
@@ -318,7 +314,7 @@ def test_the_reviewed_path_says_what_we_think_it_says():
     assert want.count("= !Blocked") == 2, "and then blocks, out through both halves"
     assert want.count(", 'v15')") == 5 and want.count("if_match='v15'") == 1, \
         "the replay reads five promises back at one version and writes once"
-    assert want.count("url='sweep/research.1'") == 10 and want.count("\u2192 queue.delete(") == 10, \
+    assert want.count("'kind': 'timeout', 'origin': 'research.1'") == 10 and want.count("\u2192 queue.delete(") == 10, \
         "the deadline is re-armed and the old one collected, every time it moves"
 
 
@@ -331,17 +327,15 @@ def test_the_diagram_is_drawn_from_the_same_run():
 
 def test_every_delivery_says_what_caused_it():
     """Six arrivals: one client request and five queue deliveries. They
-    are separate arrivals even though five share a route, so the heading
-    prints per arrival rather than per distinct route."""
+    are separate arrivals even though five share a kind, so the heading
+    prints per arrival rather than per distinct kind."""
     trace = GOLDEN.read_text()
     assert trace.count("[POST /]") == 1, "the client starting the run"
-    assert trace.count("[POST /execute]") == 5, "and five deliveries from the queue"
-    assert "[POST /sweep" not in trace, "no deadline fired; nothing ran late"
+    assert trace.count("[POST / execute]") == 5, "and five deliveries from the queue"
+    assert "[POST / timeout" not in trace, "no deadline fired; nothing ran late"
     mmd = DIAGRAM.read_text()
-    # One protocol request and five dispatches, each named by the route it
-    # reached rather than by a dispatcher that no longer exists: `handler`
-    # chooses the route from a Flask request, and the trace starts at what
-    # was chosen.
+    # One protocol request and five dispatches, each named by the method
+    # `dispatch` chose: the trace starts at what was chosen.
     assert mmd.count("CloudRun->>+Server: protocol(") == 1
     assert mmd.count("CloudRun->>+Server: execute(") == 5
 

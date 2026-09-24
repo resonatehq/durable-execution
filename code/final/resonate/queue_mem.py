@@ -99,7 +99,7 @@ class Queue:
 
     def create(self, url: str, body: Any, *, not_before: int = 0) -> str:
         if self.fault is not None:
-            self.fault.tick(f"create {url}")
+            self.fault.tick(f"create {body.get('kind')} {url}")
         self._n += 1
         self.created.append((url, body))
         name = f"task-{self._n}"

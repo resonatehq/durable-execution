@@ -44,7 +44,7 @@ from ..errors import Conflict
 from ..kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
 from ..testing.faults import Fault
 from ..types import (
-    SWEEP, PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
+    PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
     TaskAcquire, TaskFulfill, TaskSuspend, Timeout, Value, decode_message,
 )
 from .queue import QueueP
@@ -92,8 +92,9 @@ class _Watched:
         self.inner, self.sent = inner, []
 
     def create(self, url, body, *, not_before=0):
-        if not url.startswith(SWEEP):
-            self.sent.append(Send(url, decode_message(body)))
+        message = decode_message(body)
+        if not isinstance(message, Timeout):
+            self.sent.append(Send(url, message))
         return self.inner.create(url, body, not_before=not_before)
 
     def delete(self, name):
@@ -221,16 +222,15 @@ def _kind(write: str) -> str:
     """What a line of the write log was.
 
     An arm and a send are the same call to the same port — `create` — so
-    they are told apart the way the deployment tells them apart: by where
-    the task is addressed. That is a better question than which method the
-    engine reached for, because it is what the queue will actually see.
+    they are told apart the way the deployment tells them apart: by the kind
+    of message the task carries.
     """
     if write.startswith("commit "):
         return "commit"
     if write.startswith("delete "):
         return "disarm"
     if write.startswith("create "):
-        return "arm" if write[len("create "):].startswith(SWEEP) else "send"
+        return "arm" if write.startswith("create timeout ") else "send"
     return "?"
 
 

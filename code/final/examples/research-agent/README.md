@@ -51,7 +51,7 @@ curl -sX POST localhost:8080/ -H 'content-type: application/json' -d '{
   "kind": "promise.create",
   "data": {"id": "research.1", "timeoutAt": 99999999999999,
            "param": {"data": "{\"f\": \"research\", \"a\": [\"What is durable execution?\"]}"},
-           "tags": {"resonate:target": "http://localhost:8080/execute"}}}'
+           "tags": {"resonate:target": "http://localhost:8080/"}}}'
 ```
 
 ## Deploying it

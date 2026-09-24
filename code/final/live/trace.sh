@@ -63,7 +63,7 @@ curl -sS -X POST "$URL/" \
         \"id\":\"$ORIGIN\",
         \"timeoutAt\":$(( NOW + 3600000 )),
         \"param\":{\"data\":\"$PARAM\"},
-        \"tags\":{\"resonate:target\":\"$URL/execute\"}}}" | head -c 300
+        \"tags\":{\"resonate:target\":\"$URL/\"}}}" | head -c 300
 echo
 
 say "3. let it finish, and let the exporter flush ($WAIT s)"

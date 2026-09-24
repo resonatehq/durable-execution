@@ -31,14 +31,14 @@ from test_e2e import (
     counted_search,
 )
 from resonate.queue_mem import Queue
-from resonate.types import SWEEP
+from resonate.types import Timeout
 
 CFG = KernelCfg(retry_timeout=30_000)
 
 #: Where this service answers. One service runs every function here, which
 #: is the smallest deployment that is still the real shape: the queue calls
 #: back in over HTTP rather than handing anything to a loop.
-WORKER = "https://svc-abc.a.run.app/execute"
+WORKER = "https://svc-abc.a.run.app/"
 
 
 def service(**knobs):
@@ -53,23 +53,12 @@ def service(**knobs):
 
 
 def deliver(svc: Server, queue: Queue, clock: Clock, budget: int = 2_000) -> int:
-    """Cloud Tasks, as the only thing it is: a POST to a URL.
-
-    A delivery's url is either this service's `/execute` or the sweep path
-    for an origin. Turning it back into a path is what the load balancer
-    does in production and all it does.
-    """
+    """Cloud Tasks, as the only thing it is: a POST of the task's body."""
     for did in range(budget):
         d = queue.take(clock())
         if d is None:
             return did
-        # Which route a delivery is for, decided the way `handler` decides
-        # it -- the load balancer turns a URL into a path, and that is all
-        # it does.
-        if d.url.startswith(SWEEP):
-            body, status = svc.sweep(d.url[len(SWEEP):])
-        else:
-            body, status = svc.execute(d.body)
+        body, status = svc.dispatch("POST", "/", d.body, "")
         assert status == 200, (d.url, status, body)
         queue.ack(d, clock())
     raise AssertionError("the queue never ran out of eligible work")
@@ -133,25 +122,25 @@ def test_a_duplicate_dispatch_is_answered_rather_than_retried():
     dispatch = queue.take(clock())
     assert dispatch is not None and dispatch.url == WORKER
 
-    first, status = svc.execute(dispatch.body)
+    first, status = svc.dispatch("POST", "/", dispatch.body, "")
     assert status == 200 and first["outcome"] == "done"
-    second, status = svc.execute(dispatch.body)
+    second, status = svc.dispatch("POST", "/", dispatch.body, "")
     assert status == 200 and second["outcome"] == "not mine"
     assert CALLS["search:sagas"] == 1, "the duplicate was paid for"
 
 
-def test_a_sweep_with_nothing_due_writes_nothing():
+def test_a_timeout_with_nothing_due_writes_nothing():
     svc, store, _, clock = service()
     post(svc, "promise.create", id="p.1", timeoutAt=clock() + 1_000_000)
     before = store.get(doc_key("p"))
 
-    assert svc.sweep("p") == ({"swept": "p"}, 200)
-    assert store.get(doc_key("p")) == before, "an idle sweep wrote a new generation"
+    assert svc.timeout(Timeout("p")) == ({"timeout": "p"}, 200)
+    assert store.get(doc_key("p")) == before, "an idle timeout wrote a new generation"
 
 
-def test_a_sweep_for_an_origin_that_has_never_existed_is_still_a_200():
+def test_a_timeout_for_an_origin_that_has_never_existed_is_still_a_200():
     svc, store, _, _ = service()
-    assert svc.sweep("ghost")[1] == 200
+    assert svc.timeout(Timeout("ghost"))[1] == 200
     assert store.objects == {}
 
 
@@ -212,10 +201,7 @@ def test_it_still_runs_over_a_queue_that_is_late_out_of_order_and_lossy(seed):
             if queue.loses_this_one():
                 queue.nack(d, clock())
                 continue
-            if d.url.startswith(SWEEP):
-                status = svc.sweep(d.url[len(SWEEP):])[1]
-            else:
-                status = svc.execute(d.body)[1]
+            status = svc.dispatch("POST", "/", d.body, "")[1]
             assert status == 200
             queue.ack(d, clock())
         clock.advance(40_000)

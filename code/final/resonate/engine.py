@@ -60,7 +60,7 @@ from . import otel
 from .spec.queue import QueueP
 from .spec.store import StoreP
 from .tracing import trace
-from .types import SWEEP, Timeout, encode_message
+from .types import HERE, Timeout, encode_message
 
 
 def origin_of_msg(msg: Req | Timeout) -> str:
@@ -133,11 +133,11 @@ class Engine:
         new.clock, new.gen = now, doc.gen + 1
         for e in fx:
             if isinstance(e, SetTimeout):
-                # A deadline is a task addressed to this service's own sweep
-                # route, and the name it comes back with is the only handle
-                # anyone will ever have on it.
+                # A deadline is a timeout message to this service itself, and
+                # the name it comes back with is the only handle anyone will
+                # ever have on it.
                 new.timer_name = self.queue.create(
-                    f"{SWEEP}{origin}", {"origin": origin}, not_before=e.at)
+                    HERE, encode_message(Timeout(origin)), not_before=e.at)
         if new.timer_at is None:
             # The name names the armed deadline. With nothing armed there is
             # nothing to name, and a leftover name is a handle on something

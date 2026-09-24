@@ -13,7 +13,7 @@ at the bottom of a user's `main.py`, after their `@resonate` functions.
                      unless ROUTES_WORKERS says otherwise
     ROUTES_WORKERS   JSON {function name: worker url}, for a split deployment
     ROUTES_ACCOUNT   the service account the queue signs with; unset turns
-                     auth off on /execute and /sweep
+                     auth off for execute and timeout messages
     AUDIENCE         the audience that token is checked against
     RETRY_TIMEOUT    ms a claimed task may go quiet before it is offered again
     LEASE            ms a worker holds a task
@@ -85,7 +85,7 @@ def register_targets(env: Mapping[str, str]) -> None:
     base = env.get("BASE_URL", "").rstrip("/")
     if base:
         for name, _version in REGISTRY:
-            TARGETS.setdefault(name, f"{base}/execute")
+            TARGETS.setdefault(name, f"{base}/")
     for name, url in json.loads(env.get("ROUTES_WORKERS", "{}")).items():
         TARGETS[name] = url
 

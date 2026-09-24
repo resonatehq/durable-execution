@@ -132,7 +132,7 @@ the queue and the bucket together rather than through a log the engine
 kept:
 
 ```
-schedule sweep/research.1 at 30000     the deadline, first
+schedule /                at 30000     the deadline, first
 commit   wf/research.1                 then the state
 schedule worker://agent  at 0          then the message
 ```
@@ -167,7 +167,7 @@ should not have to pretend.
 | `resonate/testing/faults.py` | the fault injector that cuts power between two effects |
 | `resonate/spec/violation.py` | what all three contracts report |
 | `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
-| `resonate/server.py` | `Server`: the three routes — `POST /`, `POST /execute`, `POST /sweep/<origin>` — over one engine and one worker |
+| `resonate/server.py` | `Server`: one route, `POST /`, dispatching on the body's `kind` — a protocol request, an `execute`, or a `timeout` — over one engine and one worker |
 | `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
 | `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler = serve()` on the last line. The program above, and the one every test drives, so the example and the thing under test are one file |
 | `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
@@ -622,7 +622,7 @@ rest for tests.
 - **Who retries a `409`.** The SDK, with backoff, since every operation is
   idempotent and reports current state. The function never loops.
 - **Authentication.** Cloud Tasks signs with an OIDC token for a service
-  account; the worker and the sweep route verify it and accept nothing else.
+  account; `execute` and `timeout` messages must carry it, and nothing else is accepted for them.
 - **The 30-day clamp.** Settled: `CloudTasksQueue.create` clamps to
   `min(at, now + 30d)`, a no-op sweep re-arms, and it has its own test,
   because a bug there makes a promise never time out.
@@ -688,14 +688,14 @@ user's own `app.py` won the lookup, and the deploy failed pointing at
 silently and served nothing.
 
 One service, because Cloud Tasks is push-only: a worker is not a loop, it
-is an endpoint. Three routes, and the shape falls out of the queue rather
-than out of a preference.
+is an endpoint. One route, `POST /`, and the body's `kind` says what
+arrived:
 
-| route | who calls it |
+| kind | who sends it |
 |---|---|
-| `POST /` | a client that does not embed the engine. One protocol request, one reply |
-| `POST /execute` | the queue, delivering a dispatch |
-| `POST /sweep/<origin>` | the queue, delivering a deadline |
+| a protocol request (`promise.create`, ...) | a client that does not embed the engine. One request, one reply |
+| `execute` | the queue, delivering a dispatch |
+| `timeout` | the queue, delivering a deadline. Internal: no client sends one |
 
 Everything a container needs comes from its environment, and
 `resonate/config.py` is the one place that reads it:
@@ -705,11 +705,11 @@ BUCKET           the bucket documents live in
 PROJECT          \
 LOCATION          | the queue both timers and dispatches go through
 QUEUE            /
-BASE_URL         where this service answers, so a sweep can be addressed
-ROUTES_ACCOUNT  whose OIDC token the queue signs with, and /execute and
-                 /sweep verify. Unset says the network is the protection,
+BASE_URL         where this service answers, so a deadline can be addressed
+ROUTES_ACCOUNT  whose OIDC token the queue signs with, and execute and
+                 timeout messages must carry. Unset says the network is the protection,
                  and a deployment had better mean it
-ROUTES_WORKERS   {"search": "https://search-xyz.a.run.app/execute"} — the
+ROUTES_WORKERS   {"search": "https://search-xyz.a.run.app/"} — the
                  only thing in the system that knows the deployment's
                  shape, and needed only when that shape is more than one
                  service. Every registered function otherwise routes to

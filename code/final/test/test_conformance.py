@@ -276,16 +276,16 @@ def faked_queue(now=0, service_account=None):
 
 def test_a_dispatch_carries_no_schedule():
     q, client = faked_queue()
-    q.create("execute", {"kind": "execute"})
+    q.create("/", {"kind": "execute"})
     task = client.created[0]
     assert "schedule_time" not in task
-    assert task["http_request"]["url"] == "https://worker.example.com/execute"
+    assert task["http_request"]["url"] == "https://worker.example.com/"
     assert json.loads(task["http_request"]["body"]) == {"kind": "execute"}
 
 
 def test_a_deadline_carries_the_instant_it_is_for():
     q, client = faked_queue(now=1_000)
-    q.create("sweep/o", {"origin": "o"}, not_before=61_000)
+    q.create("/", {"kind": "timeout", "origin": "o"}, not_before=61_000)
     assert client.created[0]["schedule_time"].timestamp() == pytest.approx(61.0)
 
 
@@ -295,13 +295,13 @@ def test_a_deadline_past_the_horizon_is_clamped_rather_than_refused():
     nothing due and re-arms. A bug in this line makes a promise never time
     out, which is why it has a test of its own."""
     q, client = faked_queue(now=0)
-    q.create("sweep/o", {}, not_before=10 * HORIZON_MS)
+    q.create("/", {}, not_before=10 * HORIZON_MS)
     assert client.created[0]["schedule_time"].timestamp() == pytest.approx(HORIZON_MS / 1_000)
 
 
 def test_oidc_is_attached_when_a_service_account_is_named():
     q, client = faked_queue(service_account="worker@p.iam.gserviceaccount.com")
-    q.create("execute", {})
+    q.create("/", {})
     assert client.created[0]["http_request"]["oidc_token"] == {
         "service_account_email": "worker@p.iam.gserviceaccount.com"}
 
@@ -310,7 +310,7 @@ def test_without_a_service_account_nothing_is_signed():
     """Then the handler has to be unreachable from outside, and a
     deployment has to say which of the two it relies on."""
     q, client = faked_queue()
-    q.create("execute", {})
+    q.create("/", {})
     assert "oidc_token" not in client.created[0]["http_request"]
 
 
@@ -318,17 +318,17 @@ def test_throttling_a_create_is_unavailable():
     q, client = faked_queue()
     client.raises = gcp.ServiceUnavailable("try later")
     with pytest.raises(Unavailable):
-        q.create("execute", {})
+        q.create("/", {})
 
 
 def test_a_worker_somewhere_else_is_reached_at_its_own_url():
-    """A sweep is a path on this service. A worker is wherever it is, which
+    """A timeout goes to this service. A worker is wherever it is, which
     on Cloud Run is a different service with a different hostname, and the
     address the kernel emitted already says so."""
     q, client = faked_queue()
-    q.create("sweep/o", {})
-    q.create("https://search-abc.a.run.app/execute", {})
+    q.create("/", {})
+    q.create("https://search-abc.a.run.app/", {})
     assert [task["http_request"]["url"] for task in client.created] == [
-        "https://worker.example.com/sweep/o",
-        "https://search-abc.a.run.app/execute",
+        "https://worker.example.com/",
+        "https://search-abc.a.run.app/",
     ]

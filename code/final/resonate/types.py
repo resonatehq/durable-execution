@@ -185,11 +185,6 @@ class Unblock:
     promise: dict[str, Any]
 
 
-#: The URL a deadline is delivered to. Everything after it is the origin to
-#: sweep, exactly as a Cloud Run route would read it.
-SWEEP = "sweep/"
-
-
 @dataclass(frozen=True)
 class Timeout:
     """The internal message: a deadline for this origin came due. Not a
@@ -197,6 +192,11 @@ class Timeout:
     origin's document all the same."""
 
     origin: str
+
+
+#: The address of this service's own endpoint, for a message the service
+#: sends to itself. A queue resolves it against its base URL.
+HERE = "/"
 
 
 @dataclass(frozen=True)
@@ -225,21 +225,30 @@ class Invalid(Exception):
 # ---------------------------------------------------------------------------
 
 
-def encode_message(msg: Execute | Unblock) -> dict:
-    if isinstance(msg, Execute):
-        return {"kind": "execute", "task": {"id": msg.task_id, "version": msg.version}}
-    return {"kind": "unblock", "promise": msg.promise}
+def encode_message(msg: Execute | Unblock | Timeout) -> dict:
+    match msg:
+        case Execute():
+            return {"kind": "execute", "task": {"id": msg.task_id, "version": msg.version}}
+        case Unblock():
+            return {"kind": "unblock", "promise": msg.promise}
+        case Timeout():
+            return {"kind": "timeout", "origin": msg.origin}
 
 
-def decode_message(body: dict) -> Execute | Unblock:
-    match body.get("kind"):
-        case "execute":
-            task = body["task"]
-            return Execute(task["id"], task["version"])
-        case "unblock":
-            return Unblock(body["promise"])
-        case other:
-            raise Invalid(f"unknown message kind {other!r}")
+def decode_message(body: dict) -> Execute | Unblock | Timeout:
+    try:
+        match body.get("kind"):
+            case "execute":
+                task = body["task"]
+                return Execute(task["id"], task["version"])
+            case "unblock":
+                return Unblock(body["promise"])
+            case "timeout":
+                return Timeout(body["origin"])
+            case other:
+                raise Invalid(f"unknown message kind {other!r}")
+    except (KeyError, TypeError) as e:
+        raise Invalid(f"malformed {body.get('kind')} message: missing {e}") from None
 
 
 # ---------------------------------------------------------------------------

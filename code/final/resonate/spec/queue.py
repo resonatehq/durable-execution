@@ -66,7 +66,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ..types import SWEEP
+from ..types import HERE
 from .violation import Violation
 
 
@@ -139,7 +139,7 @@ def refused(error: type[BaseException], why: str):
 
 
 def _make(queue: QueueP, made: list[str], **kw) -> str:
-    name = queue.create(f"{SWEEP}o", {"origin": "o"}, not_before=LATER, **kw)
+    name = queue.create(HERE, {"kind": "timeout", "origin": "o"}, not_before=LATER, **kw)
     made.append(name)
     return name
 
@@ -177,19 +177,19 @@ def _cancel_ghost(queue: QueueP, made: list[str]) -> None:
 
 @claim("a dispatch carries no schedule and is still a task")
 def _immediate(queue: QueueP, made: list[str]) -> None:
-    name = queue.create("https://nowhere.invalid/execute", {"kind": "execute"})
+    name = queue.create("https://nowhere.invalid/", {"kind": "execute"})
     made.append(name)
     assert isinstance(name, str) and name
 
 
 @claim("a schedule in the past is accepted rather than refused")
 def _past(queue: QueueP, made: list[str]) -> None:
-    made.append(queue.create("https://nowhere.invalid/execute", {}, not_before=1))
+    made.append(queue.create("https://nowhere.invalid/", {}, not_before=1))
 
 
 @claim("a schedule past any horizon is clamped rather than refused")
 def _horizon(queue: QueueP, made: list[str]) -> None:
-    made.append(queue.create(f"{SWEEP}o", {}, not_before=10 ** 15))
+    made.append(queue.create(HERE, {}, not_before=10 ** 15))
 
 
 def conformance(module: QueueM, **config: Any) -> list[Violation]:

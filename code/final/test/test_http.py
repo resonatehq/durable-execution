@@ -41,7 +41,6 @@ import pytest
 from resonate import store_mem
 from resonate.codec import decode, doc_key
 from resonate.kernel import TAG_TARGET
-from resonate.types import SWEEP
 from exampleapp import path_to
 from resonate.errors import Conflict, Unavailable
 from resonate.sdk import dumps, route
@@ -52,7 +51,7 @@ from test_e2e import (
 
 #: Where this service answers. One service runs every function, which is the
 #: smallest deployment that is still the real shape.
-WORKER = "https://svc-abc.a.run.app/execute"
+WORKER = "https://svc-abc.a.run.app/"
 
 #: `create_app` resolves its source relative to the working directory, and
 #: pytest's is wherever it was started from.
@@ -154,9 +153,9 @@ def test_the_queue_routes_refuse_an_unsigned_request(build):
     bearer token before it ever calls Google — so the refusal is testable
     even though the acceptance is not."""
     client, _ = build(ROUTES_ACCOUNT="worker@p.iam.gserviceaccount.com")
-    assert client.post("/execute", json={}).status_code == 401
-    assert client.post("/sweep/o", json={}).status_code == 401
-    # The client route is not the queue's to sign.
+    assert client.post("/", json={"kind": "execute"}).status_code == 401
+    assert client.post("/", json={"kind": "timeout"}).status_code == 401
+    # A protocol request is not the queue's to sign.
     assert post(client, "promise.get", id="nothing").status_code == 404
 
 
@@ -174,9 +173,8 @@ def pump(client, server, budget: int = 2_000) -> int:
         d = queue.take(clock())
         if d is None:
             return did
-        path = "/" + d.url if d.url.startswith(SWEEP) else "/execute"
-        r = client.post(path, json=d.body)
-        assert r.status_code == 200, (path, r.status_code, r.get_data(as_text=True))
+        r = client.post("/", json=d.body)
+        assert r.status_code == 200, (d.body, r.status_code, r.get_data(as_text=True))
         queue.ack(d, clock())
     raise AssertionError("the queue never ran out of eligible work")
 
@@ -216,27 +214,30 @@ def test_the_research_agent_runs_end_to_end_over_http(client, server):
 # agree with a router that Flask never actually reached.
 
 
-def test_an_unknown_route_is_a_404(client):
-    assert client.post("/sweep", json={}).status_code == 404
-    assert client.post("/anything", json={}).status_code == 404
+def test_there_is_one_route(client):
+    for path in ("/execute", "/sweep/o", "/anything"):
+        assert client.post(path, json={}).status_code == 404, path
 
 
 def test_a_wrong_method_is_a_405(client):
     assert client.get("/").status_code == 405
-    assert client.delete("/execute").status_code == 405
+    assert client.delete("/").status_code == 405
 
 
-@pytest.mark.parametrize("path", ["/execute", "/sweep/o"])
-def test_the_queue_s_routes_are_closed_to_anyone_it_did_not_sign_for(build, path):
+@pytest.mark.parametrize("message", [
+    {"kind": "execute", "task": {"id": "p.1", "version": 1}},
+    {"kind": "timeout", "origin": "p"},
+])
+def test_the_queue_s_messages_are_refused_from_anyone_it_did_not_sign_for(build, message):
     client, server = build(ROUTES_ACCOUNT="queue@example.iam.gserviceaccount.com")
-    assert client.post(path, json={}).status_code == 401
+    assert client.post("/", json=message).status_code == 401
     assert server.engine.store.objects == {}, "an unsigned request wrote something"
 
 
-def test_the_client_route_is_not_the_queue_s_to_sign(build):
-    """`/` is fronted by whatever the deployment puts in front of it, not by
-    an OIDC token from Cloud Tasks. A client carries no queue signature, and
-    for a client that is normal."""
+def test_a_protocol_request_is_not_the_queue_s_to_sign(build):
+    """A protocol request is protected by whatever the deployment puts in
+    front of the service, not by an OIDC token from Cloud Tasks. A client
+    carries no queue signature, and for a client that is normal."""
     client, server = build(ROUTES_ACCOUNT="queue@example.iam.gserviceaccount.com")
     answer = client.post("/", json={
         "kind": "promise.create",
@@ -244,8 +245,14 @@ def test_the_client_route_is_not_the_queue_s_to_sign(build):
     assert answer.status_code == 200
 
 
-def test_a_dispatch_that_is_not_a_message_is_a_400(client):
-    assert client.post("/execute", json={"kind": "lunch"}).status_code == 400
+def test_an_unknown_kind_is_a_400(client):
+    assert client.post("/", json={"kind": "lunch"}).status_code == 400
+
+
+@pytest.mark.parametrize("message", [{"kind": "execute"}, {"kind": "timeout"},
+                                     {"kind": "execute", "task": {"id": "p.1"}}])
+def test_a_malformed_queue_message_is_a_400_not_a_500(client, message):
+    assert client.post("/", json=message).status_code == 400
 
 
 class Refuses(store_mem.Store):

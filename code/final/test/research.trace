@@ -1,25 +1,25 @@
-→ Server.protocol(envelope={'kind': 'promise.create', 'data': {'id': 'research.1', 'timeoutAt': 1000000000000, 'param': {'data': <a7f98add 62b>}, 'tags': {'resonate:target': 'https://svc-abc.a.run.app/execute'}}})
+→ Server.protocol(envelope={'kind': 'promise.create', 'data': {'id': 'research.1', 'timeoutAt': 1000000000000, 'param': {'data': <a7f98add 62b>}, 'tags': {'resonate:target': 'https://svc-abc.a.run.app/'}}})
 [POST /]
   → Engine.process(msg=PromiseCreate(id='research.1', ...), now=0)
     → store.get(key='wf/research.1')
     ← store.get = None
-    → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=30000)
+    → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=30000)
     ← queue.create = 'task-1'
-    → store.put(key='wf/research.1', body=<16b95610 330b>, if_absent=True)
+    → store.put(key='wf/research.1', body=<145302ab 323b>, if_absent=True)
     ← store.put = 'v1'
-    → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
+    → queue.create(url='https://svc-abc.a.run.app/', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
     ← queue.create = 'task-2'
   ← Engine.process = Reply(status=200, ...)
 ← Server.protocol = ({'head': {'status': 200}, 'data': {'promise': {7 keys}}}, 200)
-→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
-[POST /execute]
+→ Server.execute(message=Execute(task_id='research.1', version=0))
+[POST / execute]
   → Worker.run(task_id='research.1', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<16b95610 330b>, 'v1')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=20000)
+      ← store.get = (<145302ab 323b>, 'v1')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=20000)
       ← queue.create = 'task-3'
-      → store.put(key='wf/research.1', body=<dd46a3aa 357b>, if_match='v1')
+      → store.put(key='wf/research.1', body=<44ed0b65 350b>, if_match='v1')
       ← store.put = 'v2'
       → queue.delete(name='task-1')
       ← queue.delete = None
@@ -28,65 +28,65 @@
       → Durable.invoke(args=('What is durable execution?'))
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<dd46a3aa 357b>, 'v2')
-          → store.put(key='wf/research.1', body=<b8b08592 527b>, if_match='v2')
+          ← store.get = (<44ed0b65 350b>, 'v2')
+          → store.put(key='wf/research.1', body=<a6706dc5 520b>, if_match='v2')
           ← store.put = 'v3'
         ← Engine.process = Reply(status=200, ...)
         → Durable.invoke(args=(<1a6def33 49b>))
         ← Durable.invoke = ['durable execution', 'workflow recovery', 'sagas']
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<b8b08592 527b>, 'v3')
-          → store.put(key='wf/research.1', body=<7341729f 606b>, if_match='v3')
+          ← store.get = (<a6706dc5 520b>, 'v3')
+          → store.put(key='wf/research.1', body=<2c0c9f03 599b>, if_match='v3')
           ← store.put = 'v4'
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<7341729f 606b>, 'v4')
-          → store.put(key='wf/research.1', body=<36132806 844b>, if_match='v4')
+          ← store.get = (<2c0c9f03 599b>, 'v4')
+          → store.put(key='wf/research.1', body=<9c0a4904 830b>, if_match='v4')
           ← store.put = 'v5'
-          → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1:2', 'version': 0}})
+          → queue.create(url='https://svc-abc.a.run.app/', body={'kind': 'execute', 'task': {'id': 'research.1:2', 'version': 0}})
           ← queue.create = 'task-4'
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<36132806 844b>, 'v5')
-          → store.put(key='wf/research.1', body=<147e4b1e 1082b>, if_match='v5')
+          ← store.get = (<9c0a4904 830b>, 'v5')
+          → store.put(key='wf/research.1', body=<96834f8a 1061b>, if_match='v5')
           ← store.put = 'v6'
-          → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1:3', 'version': 0}})
+          → queue.create(url='https://svc-abc.a.run.app/', body={'kind': 'execute', 'task': {'id': 'research.1:3', 'version': 0}})
           ← queue.create = 'task-5'
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<147e4b1e 1082b>, 'v6')
-          → store.put(key='wf/research.1', body=<4e8d6be7 1308b>, if_match='v6')
+          ← store.get = (<96834f8a 1061b>, 'v6')
+          → store.put(key='wf/research.1', body=<9a80d37d 1280b>, if_match='v6')
           ← store.put = 'v7'
-          → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1:4', 'version': 0}})
+          → queue.create(url='https://svc-abc.a.run.app/', body={'kind': 'execute', 'task': {'id': 'research.1:4', 'version': 0}})
           ← queue.create = 'task-6'
         ← Engine.process = Reply(status=200, ...)
       ← Durable.invoke = !Blocked
     ← Worker._attempt = !Blocked
     → Engine.process(msg=TaskSuspend(id='research.1', ...), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<4e8d6be7 1308b>, 'v7')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=30000)
+      ← store.get = (<9a80d37d 1280b>, 'v7')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=30000)
       ← queue.create = 'task-7'
-      → store.put(key='wf/research.1', body=<c62b5a8a 1332b>, if_match='v7')
+      → store.put(key='wf/research.1', body=<79cd2a5d 1304b>, if_match='v7')
       ← store.put = 'v8'
       → queue.delete(name='task-3')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, data={})
   ← Worker.run = 'suspended'
 ← Server.execute = ({'outcome': 'suspended'}, 200)
-→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:2', 'version': 0}})
-[POST /execute]
+→ Server.execute(message=Execute(task_id='research.1:2', version=0))
+[POST / execute]
   → Worker.run(task_id='research.1:2', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:2', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<c62b5a8a 1332b>, 'v8')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=20000)
+      ← store.get = (<79cd2a5d 1304b>, 'v8')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=20000)
       ← queue.create = 'task-8'
-      → store.put(key='wf/research.1', body=<f4bccba8 1359b>, if_match='v8')
+      → store.put(key='wf/research.1', body=<48791356 1331b>, if_match='v8')
       ← store.put = 'v9'
       → queue.delete(name='task-7')
       ← queue.delete = None
@@ -97,27 +97,27 @@
     ← Worker._attempt = 'finding about durable execution'
     → Engine.process(msg=TaskFulfill(id='research.1:2', ...), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<f4bccba8 1359b>, 'v9')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=30000)
+      ← store.get = (<48791356 1331b>, 'v9')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=30000)
       ← queue.create = 'task-9'
-      → store.put(key='wf/research.1', body=<ae4b9873 1392b>, if_match='v9')
+      → store.put(key='wf/research.1', body=<3d1a7f2f 1364b>, if_match='v9')
       ← store.put = 'v10'
       → queue.delete(name='task-8')
       ← queue.delete = None
-      → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
+      → queue.create(url='https://svc-abc.a.run.app/', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
       ← queue.create = 'task-10'
     ← Engine.process = Reply(status=200, ...)
   ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)
-→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:3', 'version': 0}})
-[POST /execute]
+→ Server.execute(message=Execute(task_id='research.1:3', version=0))
+[POST / execute]
   → Worker.run(task_id='research.1:3', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:3', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<ae4b9873 1392b>, 'v10')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=20000)
+      ← store.get = (<3d1a7f2f 1364b>, 'v10')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=20000)
       ← queue.create = 'task-11'
-      → store.put(key='wf/research.1', body=<b4fed1dc 1420b>, if_match='v10')
+      → store.put(key='wf/research.1', body=<37904a35 1392b>, if_match='v10')
       ← store.put = 'v11'
       → queue.delete(name='task-9')
       ← queue.delete = None
@@ -128,25 +128,25 @@
     ← Worker._attempt = 'finding about workflow recovery'
     → Engine.process(msg=TaskFulfill(id='research.1:3', ...), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<b4fed1dc 1420b>, 'v11')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=30000)
+      ← store.get = (<37904a35 1392b>, 'v11')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=30000)
       ← queue.create = 'task-12'
-      → store.put(key='wf/research.1', body=<c50f1c59 1436b>, if_match='v11')
+      → store.put(key='wf/research.1', body=<dab465cf 1408b>, if_match='v11')
       ← store.put = 'v12'
       → queue.delete(name='task-11')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
   ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)
-→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:4', 'version': 0}})
-[POST /execute]
+→ Server.execute(message=Execute(task_id='research.1:4', version=0))
+[POST / execute]
   → Worker.run(task_id='research.1:4', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:4', version=0, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<c50f1c59 1436b>, 'v12')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=20000)
+      ← store.get = (<dab465cf 1408b>, 'v12')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=20000)
       ← queue.create = 'task-13'
-      → store.put(key='wf/research.1', body=<38c8f8b6 1463b>, if_match='v12')
+      → store.put(key='wf/research.1', body=<498ce577 1435b>, if_match='v12')
       ← store.put = 'v13'
       → queue.delete(name='task-12')
       ← queue.delete = None
@@ -157,25 +157,25 @@
     ← Worker._attempt = 'finding about sagas'
     → Engine.process(msg=TaskFulfill(id='research.1:4', ...), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<38c8f8b6 1463b>, 'v13')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=30000)
+      ← store.get = (<498ce577 1435b>, 'v13')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=30000)
       ← queue.create = 'task-14'
-      → store.put(key='wf/research.1', body=<1eac07b1 1467b>, if_match='v13')
+      → store.put(key='wf/research.1', body=<a00057fb 1439b>, if_match='v13')
       ← store.put = 'v14'
       → queue.delete(name='task-13')
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
   ← Worker.run = 'done'
 ← Server.execute = ({'outcome': 'done'}, 200)
-→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
-[POST /execute]
+→ Server.execute(message=Execute(task_id='research.1', version=1))
+[POST / execute]
   → Worker.run(task_id='research.1', version=1)
     → Engine.process(msg=TaskAcquire(id='research.1', version=1, pid='rev-1', ttl=20000), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<1eac07b1 1467b>, 'v14')
-      → queue.create(url='sweep/research.1', body={'origin': 'research.1'}, not_before=20000)
+      ← store.get = (<a00057fb 1439b>, 'v14')
+      → queue.create(url='/', body={'kind': 'timeout', 'origin': 'research.1'}, not_before=20000)
       ← queue.create = 'task-15'
-      → store.put(key='wf/research.1', body=<25183b1b 1442b>, if_match='v14')
+      → store.put(key='wf/research.1', body=<ec99561e 1414b>, if_match='v14')
       ← store.put = 'v15'
       → queue.delete(name='task-14')
       ← queue.delete = None
@@ -184,40 +184,40 @@
       → Durable.invoke(args=('What is durable execution?'))
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<25183b1b 1442b>, 'v15')
+          ← store.get = (<ec99561e 1414b>, 'v15')
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<25183b1b 1442b>, 'v15')
+          ← store.get = (<ec99561e 1414b>, 'v15')
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<25183b1b 1442b>, 'v15')
+          ← store.get = (<ec99561e 1414b>, 'v15')
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<25183b1b 1442b>, 'v15')
+          ← store.get = (<ec99561e 1414b>, 'v15')
         ← Engine.process = Reply(status=200, ...)
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<25183b1b 1442b>, 'v15')
-          → store.put(key='wf/research.1', body=<7fb96323 1706b>, if_match='v15')
+          ← store.get = (<ec99561e 1414b>, 'v15')
+          → store.put(key='wf/research.1', body=<c83e5511 1678b>, if_match='v15')
           ← store.put = 'v16'
         ← Engine.process = Reply(status=200, ...)
         → Durable.invoke(args=(<f931ea27 143b>))
         ← Durable.invoke = {'report': <f931ea27 143b>}
         → Engine.process(msg=TaskFence(id='research.1', ...), now=0)
           → store.get(key='wf/research.1')
-          ← store.get = (<7fb96323 1706b>, 'v16')
-          → store.put(key='wf/research.1', body=<49ef90d3 1889b>, if_match='v16')
+          ← store.get = (<c83e5511 1678b>, 'v16')
+          → store.put(key='wf/research.1', body=<13a7162d 1861b>, if_match='v16')
           ← store.put = 'v17'
         ← Engine.process = Reply(status=200, ...)
       ← Durable.invoke = {'report': <f931ea27 143b>}
     ← Worker._attempt = {'report': <f931ea27 143b>}
     → Engine.process(msg=TaskFulfill(id='research.1', ...), now=0)
       → store.get(key='wf/research.1')
-      ← store.get = (<49ef90d3 1889b>, 'v17')
-      → store.put(key='wf/research.1', body=<e5a18b9b 2010b>, if_match='v17')
+      ← store.get = (<13a7162d 1861b>, 'v17')
+      → store.put(key='wf/research.1', body=<d985b557 1982b>, if_match='v17')
       ← store.put = 'v18'
       → queue.delete(name='task-15')
       ← queue.delete = None

@@ -1,8 +1,9 @@
-"""The HTTP service: three routes over one engine and one worker.
+"""The HTTP service: one route over one engine and one worker.
 
-    POST /                the protocol, for clients
-    POST /execute         a task dispatched by the queue
-    POST /sweep/<origin>  a deadline fired by the queue
+    POST /   the body's `kind` says what it is:
+               execute   a task dispatched by the queue
+               timeout   a deadline fired by the queue
+               anything else is a protocol request from a client
 
 `config.py` builds a `Server` from the environment.
 """
@@ -17,7 +18,9 @@ import flask
 from .engine import Engine
 from .errors import Conflict, Unavailable
 from .tracing import because, trace
-from .types import Invalid, Timeout, decode_message, encode_reply, parse_request
+from .types import (
+    Execute, Invalid, Timeout, decode_message, encode_reply, parse_request,
+)
 from .worker import Worker
 
 
@@ -48,15 +51,17 @@ class Server:
                  authorization: str) -> tuple[dict, int]:
         if method != "POST":
             return {"error": "POST"}, 405
-        if path == "/":
-            return self.protocol(body)
-        if not self.authorized(authorization):
-            return {"error": "unauthenticated"}, 401
-        if path == "/execute":
-            return self.execute(body)
-        if path.startswith("/sweep/"):
-            return self.sweep(path.removeprefix("/sweep/"))
-        return {"error": "no such route"}, 404
+        if path != "/":
+            return {"error": "no such route"}, 404
+        match body.get("kind"):
+            case "execute" | "timeout" if not self.authorized(authorization):
+                return {"error": "unauthenticated"}, 401
+            case "execute":
+                return self.execute(decode_message(body))
+            case "timeout":
+                return self.timeout(decode_message(body))
+            case _:
+                return self.protocol(body)
 
     @trace
     def protocol(self, envelope: dict) -> tuple[dict, int]:
@@ -69,18 +74,16 @@ class Server:
             return encode_reply(reply), 200 if reply.status < 400 else reply.status
 
     @trace
-    def execute(self, body: dict) -> tuple[dict, int]:
-        with because("POST /execute"):
-            message = decode_message(body)
-            outcome = self.worker.run(
-                message.task_id, message.version)
+    def execute(self, message: Execute) -> tuple[dict, int]:
+        with because("POST / execute"):
+            outcome = self.worker.run(message.task_id, message.version)
             return {"outcome": outcome}, 200
 
     @trace
-    def sweep(self, origin: str) -> tuple[dict, int]:
-        with because(f"POST /sweep/{origin}"):
-            self.engine.process(Timeout(origin), self.clock())
-            return {"swept": origin}, 200
+    def timeout(self, message: Timeout) -> tuple[dict, int]:
+        with because(f"POST / timeout {message.origin}"):
+            self.engine.process(message, self.clock())
+            return {"timeout": message.origin}, 200
 
     def authorized(self, authorization: str) -> bool:
         """Whether the request carries an OIDC token for `account`."""

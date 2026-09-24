@@ -96,9 +96,8 @@ class Queue:
         from google.api_core import exceptions as gcp
         from google.cloud import tasks_v2
 
-        # A sweep is a path on this service; a worker is wherever it is,
-        # which may be another service entirely. Both arrive here as the
-        # address the kernel emitted, so both are honoured.
+        # A timeout goes to this service (a relative address); a worker is
+        # wherever it is, which may be another service entirely.
         target = url if url.startswith(("http://", "https://")) \
             else f"{self.base_url}/{url.lstrip('/')}"
         request: dict = {

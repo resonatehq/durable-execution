@@ -1,6 +1,6 @@
 # The Cloud Run function, in sequence
 
-Three routes, one engine, and one rule about the order effects happen in.
+One route, one engine, and one rule about the order effects happen in.
 Everything below is what `server.py`, `engine.py` and `worker.py` actually
 do; where a diagram says a name, it is the name in the code.
 
@@ -18,11 +18,11 @@ anything.
 
 | lifeline | what it actually is |
 |---|---|
-| **Cloud Tasks** | the queue, and the only thing that calls `/execute` and `/sweep`. A deadline and a dispatch are both tasks in it |
+| **Cloud Tasks** | the queue, and the only thing that sends `execute` and `timeout` messages. A deadline and a dispatch are both tasks in it |
 | **GCS** | one object per origin, at `wf/{origin}`. The whole state of a run |
 | `handler` / `Server` | `server.py`. The HTTP entry point: `serve()` in `main.py` builds one `Server` per container at import |
 | `Worker` | `worker.Worker` — **an object, not a service**. `Server.worker`, built beside the engine in the same container and called in-process. `run` claims the task and decides what the run meant, `_attempt` runs the function from the top |
-| `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._run`. Ordinary async Python that mentions no promise, task or lease |
+| `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._attempt`. Ordinary async Python that mentions no promise, task or lease |
 | `Engine.process` | `engine.Engine`, in the same container again. The only thing that does I/O |
 | `kernel` | `handle_external` / `handle_internal`. A pure function: a document in, effects out |
 | `store_gcp`, `queue_gcp` | the two adapters, in-process clients for the two services that are not |
@@ -56,13 +56,13 @@ sequenceDiagram
     F->>S: one conditional write
     F-->>-C: 200 {head, data}
 
-    Q->>+F: POST /execute — a dispatch
+    Q->>+F: POST / {kind: execute} — a dispatch
     F-->>-Q: 200 {outcome}
 
-    Q->>+F: POST /sweep/{origin} — a deadline
-    F-->>-Q: 200 {swept}
+    Q->>+F: POST / {kind: timeout} — a deadline
+    F-->>-Q: 200 {timeout}
 
-    Note over Q,F: /execute and /sweep carry an OIDC token<br/>for ROUTES_ACCOUNT. / does not: a client<br/>is not the queue, and whatever fronts the<br/>service protects it instead.
+    Note over Q,F: execute and timeout carry an OIDC token<br/>for ROUTES_ACCOUNT. Protocol requests do not:<br/>a client is not the queue, and whatever fronts<br/>the service protects it instead.
 ```
 
 ---
@@ -103,7 +103,7 @@ sequenceDiagram
     alt the objects and the deadline are unchanged
         Note over E,S: the write law: nothing is written at all,<br/>so a read costs no conditional write
     else a transition
-        E->>T: 1. arm — create("sweep/{origin}", not_before=at)
+        E->>T: 1. arm — create("/", {kind: timeout, origin}, not_before=at)
         T-->>E: task name, recorded in the document
         E->>S: 2. commit — put("wf/{origin}", bytes, if_match=generation)
         S-->>E: new generation
@@ -143,7 +143,7 @@ how many times, how long, whether a re-decided request is the same request
 
 ---
 
-## 3. `POST /execute` — a worker running to its block
+## 3. `execute` — a worker running to its block
 
 The outer half of post 002, in the protocol's own words. The function is
 run from the top every time; what stops it running twice is not memory but
@@ -160,7 +160,7 @@ sequenceDiagram
         participant E as Engine
     end
 
-    Q->>+H: POST /execute {task: {id, version}}
+    Q->>+H: POST / {kind: execute, task: {id, version}}
     H->>+W: run(id, version)
     W->>E: task.acquire(id, version, pid, ttl)
 
@@ -211,7 +211,7 @@ The other three ways out of the loop:
 
 ---
 
-## 4. `POST /sweep/{origin}` — a deadline coming due
+## 4. `timeout` — a deadline coming due
 
 The only message no client can send. It is the same `process`, consulting
 `handle_internal` instead, and it is idempotent: a duplicate finds nothing
@@ -228,7 +228,7 @@ sequenceDiagram
     end
     participant S as GCS
 
-    Q->>+H: POST /sweep/{origin}
+    Q->>+H: POST / {kind: timeout, origin}
     H->>+E: process(Timeout(origin), now)
     E->>S: get("wf/{origin}")
     E->>+K: handle_internal(doc, now, cfg)
@@ -244,11 +244,11 @@ sequenceDiagram
         E->>Q: dispatch whatever was re-pended
     end
     E-->>-H: Reply
-    H-->>-Q: 200 {swept}
+    H-->>-Q: 200 {timeout}
 ```
 
-A dropped `/execute` is recoverable: the task's retry deadline was
-committed before the message left. A dropped `/sweep` is not, because the
+A dropped `execute` is recoverable: the task's retry deadline was
+committed before the message left. A dropped `timeout` is not, because the
 deadline it carried is the only thing that was going to fire. A deployment
 owes this either a generous retry policy or a periodic sweep over the
 bucket that depends on no single queued task — `test_queue.py` demonstrates
@@ -275,25 +275,25 @@ sequenceDiagram
     F->>Q: create(agent url, execute research.1)
     F-->>C: 200 pending
 
-    Q->>F: POST /execute research.1
+    Q->>F: POST / execute research.1
     Note over F: acquire → run → the fan-out's<br/>creates dispatch three searches<br/>→ Blocked → suspend
     F->>S: put(if_match) — suspended, awaiting three
     F->>Q: create(search url, execute) ×3
 
     par three searches, three containers
-        Q->>F: POST /execute research.1:2
+        Q->>F: POST / execute research.1:2
         F->>S: put — resolved
     and
-        Q->>F: POST /execute research.1:3
+        Q->>F: POST / execute research.1:3
         F->>S: put — resolved
     and
-        Q->>F: POST /execute research.1:4
+        Q->>F: POST / execute research.1:4
         F->>S: put — resolved, and this one was last
     end
     Note over F,S: the last settlement consumes the parent's<br/>callback and re-pends its task, in the same write
 
     F->>Q: create(agent url, execute research.1)
-    Q->>F: POST /execute research.1
+    Q->>F: POST / execute research.1
     Note over F: runs from the top again. Every call<br/>before the block reads its promise back<br/>instead of running: the model is prompted<br/>twice for the whole run, never three times.
     F->>S: put — resolved
     F->>Q: create(listener url, unblock) — for whoever asked

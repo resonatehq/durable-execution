@@ -109,18 +109,18 @@ def test_rpc_routes_itself_with_no_table(user_repo):
     that shape the routing table is derivable from `BASE_URL`."""
     assert "ROUTES_WORKERS" not in os.environ
     load(user_repo)
-    assert TARGETS["lookup"] == f"{BASE}/execute"
-    assert TARGETS["define"] == f"{BASE}/execute"
+    assert TARGETS["lookup"] == f"{BASE}/"
+    assert TARGETS["define"] == f"{BASE}/"
 
 
 def test_a_split_deployment_still_overrides(user_repo, monkeypatch):
     """Naming one function says where it lives without saying anything
     about the rest, which is what makes the default safe to have."""
     monkeypatch.setenv("ROUTES_WORKERS", json.dumps(
-        {"lookup": "https://lookup-svc.a.run.app/execute"}))
+        {"lookup": "https://lookup-svc.a.run.app/"}))
     load(user_repo)
-    assert TARGETS["lookup"] == "https://lookup-svc.a.run.app/execute"
-    assert TARGETS["define"] == f"{BASE}/execute", "the default was lost"
+    assert TARGETS["lookup"] == "https://lookup-svc.a.run.app/"
+    assert TARGETS["define"] == f"{BASE}/", "the default was lost"
 
 
 def test_a_whole_run_from_a_file_a_user_wrote(user_repo):
@@ -130,7 +130,7 @@ def test_a_whole_run_from_a_file_a_user_wrote(user_repo):
     started = client.post("/", json={"kind": "promise.create", "data": {
         "id": "define.1", "timeoutAt": clock() + 3_600_000,
         "param": {"data": dumps({"f": "define", "a": [["ping", "pong"]]}).data},
-        "tags": {TAG_TARGET: f"{BASE}/execute"}}})
+        "tags": {TAG_TARGET: f"{BASE}/"}}})
     assert started.status_code == 200, started.get_json()
 
     # Play the part Cloud Tasks plays: deliver what the queue is holding.

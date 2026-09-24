@@ -9,7 +9,7 @@ from typing import Any
 from ..kernel import TAG_TARGET
 from ..sdk import call_param, route
 from ..tracing import because
-from ..types import SWEEP, Execute, PromiseCreate, Timeout, Unblock
+from ..types import Execute, PromiseCreate, Timeout, Unblock, decode_message
 from ..worker import Worker
 
 
@@ -34,8 +34,8 @@ class Runtime:
     """One process playing the parts Cloud Run and Cloud Tasks play.
 
     Everything is a delivery to a URL, which is what Cloud Tasks does: a
-    deadline is a POST to the sweep endpoint for an origin, a dispatch is a
-    POST to a worker. The runtime is then only a loop that takes what the
+    deadline is a timeout message to this service, a dispatch is an execute
+    message to a worker. The runtime is then only a loop that takes what the
     queue offers, calls the handler, and says whether it worked.
 
     A handler that answers is acknowledged. One that cannot is not, and the
@@ -85,13 +85,11 @@ class Runtime:
             return self._handle(delivery)
 
     def _handle(self, delivery) -> bool:
-        if delivery.url.startswith(SWEEP):
-            self.swept += 1
-            self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())
-            return True
-        from ..types import decode_message
-
         msg = decode_message(delivery.body)
+        if isinstance(msg, Timeout):
+            self.swept += 1
+            self.engine.process(msg, self.clock())
+            return True
         if isinstance(msg, Execute):
             worker = self.workers.get(delivery.url)
             if worker is not None:

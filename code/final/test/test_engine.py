@@ -24,7 +24,6 @@ from resonate.types import (
 from resonate.errors import Conflict
 from resonate.testing.faults import Crash, Fault
 from resonate.queue_mem import Queue
-from resonate.types import SWEEP
 from resonate.store_mem import Store
 from resonate.types import decode_message
 
@@ -41,18 +40,18 @@ def armed(q):
     """The deadlines the queue is holding, by name.
 
     A deadline and a dispatch are the same kind of task, so what tells them
-    apart here is what tells them apart in production: where the task is
-    addressed. `sweep/{origin}` comes back to this service.
+    apart here is what tells them apart in production: the message it
+    carries. A timeout comes back to this service.
     """
-    return {n: (e.url[len(SWEEP):], e.not_before)
-            for n, e in q.entries.items() if e.url.startswith(SWEEP)}
+    return {n: (e.body["origin"], e.not_before)
+            for n, e in q.entries.items() if e.body["kind"] == "timeout"}
 
 
 def sent(q):
     """The dispatches, decoded, and taken off the queue."""
     out = [(e.url, decode_message(e.body)) for e in q.entries.values()
-           if not e.url.startswith(SWEEP)]
-    for n in [n for n, e in q.entries.items() if not e.url.startswith(SWEEP)]:
+           if e.body["kind"] != "timeout"]
+    for n in [n for n, e in q.entries.items() if e.body["kind"] != "timeout"]:
         q.entries.pop(n)
     return out
 
@@ -162,13 +161,13 @@ def test_the_effects_go_in_the_order_every_crash_window_survives():
     e.process(create("o:a"), 0)
     # An arm and a send are the same call to the same port, told apart the
     # way the deployment tells them apart: by where the task is addressed.
-    assert fault.log == ["create sweep/o", f"commit {doc_key('o')}", "create http://w"]
+    assert fault.log == ["create timeout /", f"commit {doc_key('o')}", "create execute http://w"]
 
     fault.log = []
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 100)
     # The lease is armed before the commit, and the retry it replaces is only
     # removed once the commit that owned it is gone.
-    assert fault.log == ["create sweep/o", f"commit {doc_key('o')}", "delete task-1"]
+    assert fault.log == ["create timeout /", f"commit {doc_key('o')}", "delete task-1"]
     assert list(armed(q).values()) == [("o", 5_100)], "one deadline per origin"
 
 

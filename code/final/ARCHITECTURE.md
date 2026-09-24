@@ -12,7 +12,7 @@ flowchart TB
 
     subgraph container["one Cloud Run container"]
         direction TB
-        routes["<b>Server</b> — resonate/server.py<br/>POST / · /execute · /sweep/&lt;origin&gt;"]
+        routes["<b>Server</b> — resonate/server.py<br/>POST /: protocol · execute · timeout"]
         worker["<b>Worker</b> — resonate/worker.py<br/>runs the function until it blocks"]
         app["<b>examples/*/main.py</b> — the user's file<br/>@resonate, REGISTRY, TARGETS"]
         engine["<b>Engine</b> — resonate/engine.py<br/>read · decide · write once"]
@@ -43,8 +43,8 @@ flowchart TB
     store --> gcs
     queue --> tasks
 
-    tasks -->|"POST /execute"| routes
-    tasks -->|"POST /sweep/&lt;origin&gt;"| routes
+    tasks -->|"POST / execute"| routes
+    tasks -->|"POST / timeout"| routes
 
     store -.->|"in a test"| storemem["store_mem"]
     queue -.->|"in a test"| queuemem["queue_mem"]
@@ -67,8 +67,8 @@ right place.
 
 **Cloud Tasks pushes, so a worker is an endpoint.** There is no loop
 anywhere in this system waiting for work. The queue delivers by POSTing, and
-that single fact is why `resonate/server.py` exists, why `/execute` and `/sweep` are
-routes rather than functions, and why the whole thing fits in a container
+that single fact is why `resonate/server.py` exists, why `execute` and `timeout` are
+messages to an endpoint rather than function calls, and why the whole thing fits in a container
 that may not exist between two steps of the same run.
 
 ## The one rule the arrows do not show

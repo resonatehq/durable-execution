@@ -29,7 +29,6 @@ from resonate.queue_mem import Queue
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
 from resonate.sdk import Failed, dumps, external, resonate
-from resonate.types import SWEEP
 from resonate.store_mem import Store
 
 CFG = KernelCfg(retry_timeout=30_000)
@@ -159,7 +158,7 @@ def test_the_deadline_is_armed_so_it_cannot_hang_for_ever():
     rt.drain()
 
     armed = sorted(e.not_before for e in rt.queue.entries.values()
-                   if e.url.startswith(SWEEP))
+                   if e.body["kind"] == "timeout")
     assert armed, "no sweep armed at all"
     assert min(armed) == clock() + PATIENCE, (
         f"earliest sweep is {min(armed)}, not the question's deadline "

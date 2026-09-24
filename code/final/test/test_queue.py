@@ -18,7 +18,7 @@ from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
 from resonate.queue_mem import Delivery, Queue
-from resonate.types import SWEEP
+from resonate.types import HERE
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
 from resonate.store_mem import Store
@@ -41,7 +41,7 @@ def test_the_simulated_queue_satisfies_the_contract():
 
 def test_nothing_is_eligible_before_its_time():
     q = Queue()
-    q.create("sweep/o", {}, not_before=500)
+    q.create(HERE, {}, not_before=500)
     assert q.take(499) is None
     assert q.take(500) is not None
 
@@ -81,7 +81,7 @@ def test_a_task_that_is_never_answered_is_eventually_dropped():
 
 def test_deleting_cancels_a_deadline():
     q = Queue()
-    name = q.create("sweep/o", {}, not_before=100)
+    name = q.create(HERE, {}, not_before=100)
     q.delete(name)
     assert q.take(1_000) is None
 
@@ -170,11 +170,11 @@ def test_out_of_order_and_late_and_sometimes_lost(seed):
 
 
 class DropsEverySweep(Queue):
-    """A queue that gives up on the sweep endpoint and only on that."""
+    """A queue that gives up on every deadline and only on those."""
 
     def take(self, now):
         d = super().take(now)
-        if d is not None and d.url.startswith(SWEEP):
+        if d is not None and d.body["kind"] == "timeout":
             self.entries.pop(d.name, None)
             self.dropped.append(d.name)
             return self.take(now)
@@ -213,8 +213,8 @@ def test_a_periodic_sweep_recovers_what_the_queue_lost():
     for _ in range(12):
         rt.drain()
         clock.advance(40_000)
-        # What a Cloud Scheduler job hitting /sweep/<origin> would do.
-        rt.handle(Delivery("periodic", f"{SWEEP}{ORIGIN}", {}, 1))
+        # What a Cloud Scheduler job posting a timeout would do.
+        rt.handle(Delivery("periodic", HERE, {"kind": "timeout", "origin": ORIGIN}, 1))
     rt.drain()
     assert answer(store) == EXPECTED and dict(CALLS) == DONE
 
@@ -262,7 +262,7 @@ def test_the_deadline_is_scheduled_before_the_document_commits():
     CALLS.clear()
     rt.start(ORIGIN, counted_research, QUESTION)
     assert log == [
-        f"schedule {SWEEP}{ORIGIN} at 30000",   # the deadline, first
+        f"schedule {HERE} at 30000",            # the deadline, first
         "commit",                               # then the state
         f"schedule {AGENT} at 0",               # then the message
     ]
@@ -277,5 +277,5 @@ def test_only_deadlines_carry_a_schedule():
     rt, store, queue, clock = cloud()
     rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock)
-    scheduled = [(e.url, e.not_before) for e in queue.entries.values()]
-    assert all(not_before == 0 or url.startswith(SWEEP) for url, not_before in scheduled), scheduled
+    scheduled = [(e.body["kind"], e.not_before) for e in queue.entries.values()]
+    assert all(not_before == 0 or kind == "timeout" for kind, not_before in scheduled), scheduled

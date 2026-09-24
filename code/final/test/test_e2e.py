@@ -28,7 +28,6 @@ from resonate.kernel import KernelCfg, Send
 from resonate.types import PromiseRegisterListener
 from resonate.testing.faults import Crash, Fault
 from resonate.queue_mem import Queue
-from resonate.types import SWEEP
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
 from resonate.store_mem import Store
@@ -92,10 +91,9 @@ def world(fault: Fault | None = None):
 
 def dispatched(rt) -> list[Send]:
     """Every message the run put on the queue, decoded. A deadline is a
-    task too, and it is not one of these: what tells them apart is where
-    they are addressed."""
+    task too, and it is not one of these: it carries a timeout message."""
     return [Send(url, decode_message(body)) for url, body in rt.queue.created
-            if not url.startswith(SWEEP)]
+            if body["kind"] != "timeout"]
 
 
 def document(store: Store, origin: str = ORIGIN):

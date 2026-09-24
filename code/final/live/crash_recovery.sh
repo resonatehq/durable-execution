@@ -50,7 +50,7 @@ curl -sS -X POST "$URL/" \
         \"id\":\"$ORIGIN\",
         \"timeoutAt\":$(( NOW + 3600000 )),
         \"param\":{\"data\":\"$PARAM\"},
-        \"tags\":{\"resonate:target\":\"$URL/execute\"}}}" | head -c 400
+        \"tags\":{\"resonate:target\":\"$URL/\"}}}" | head -c 400
 echo
 
 say "2. pause, so nothing else is delivered while we interfere"
@@ -63,16 +63,20 @@ gcloud tasks list --queue="$QUEUE" --location="$REGION" --project="$PROJECT" \
 
 say "4. destroy every dispatch, keep the deadline"
 DELETED=0
-while read -r NAME URL_; do
-  case "$URL_" in
-    */execute)
+# Both kinds go to the same URL; the body says which is which.
+while read -r NAME; do
+  BODY=$(gcloud tasks describe "$NAME" --queue="$QUEUE" --location="$REGION" \
+           --project="$PROJECT" --response-view=full \
+           --format="value(httpRequest.body)" | base64 -d)
+  case "$BODY" in
+    *'"kind": "execute"'*)
       gcloud tasks delete "$NAME" --queue="$QUEUE" --location="$REGION" \
         --project="$PROJECT" --quiet
       DELETED=$(( DELETED + 1 ))
       ;;
   esac
 done < <(gcloud tasks list --queue="$QUEUE" --location="$REGION" \
-           --project="$PROJECT" --format="value(name,httpRequest.url)")
+           --project="$PROJECT" --format="value(name.basename())")
 echo "destroyed $DELETED dispatch(es)"
 if [ "$DELETED" -eq 0 ]; then
   echo "NOTHING WAS DESTROYED -- the dispatch was delivered before the pause."
