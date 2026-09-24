@@ -116,3 +116,98 @@ def test_a_batch_is_held_until_it_is_full():
     assert sent == [3], "a request per span would cost more than the run"
     exporter.flush()
     assert sent == [3, 1] and exporter.sent == 4
+
+
+# --- the whole way out -----------------------------------------------------
+
+
+class FakeTrace:
+    """Cloud Trace's client, as far as the exporter can tell. The library
+    builds protobufs and calls one method; this keeps what it was given."""
+
+    def __init__(self) -> None:
+        self.batches: list = []
+
+    def batch_write_spans(self, request=None, **kw):
+        # The library passes a `BatchWriteSpansRequest` protobuf, not a dict.
+        got = request if request is not None else kw
+        self.batches.append(list(getattr(got, "spans", None) or got["spans"]))
+
+
+def a_whole_run():
+    """The README's agent, run to completion, with its spans collected."""
+    import demo
+    from engine import Engine
+    from kernel import KernelCfg
+    from queue_mem import Queue
+    from runtime import Clock, Runtime, Worker
+    from store_mem import Store
+
+    class Ticking(Clock):
+        """Moves a little on every read, so the spans have width."""
+        def __call__(self):
+            self.now += 7
+            return self.now
+
+    store, queue, clock = Store(), Queue(), Ticking()
+    engine = Engine(store, queue, KernelCfg(retry_timeout=30_000))
+    rt = Runtime(engine, queue, clock)
+    rt.serve("worker://w", Worker(engine, clock, "w-1"),
+             demo.research, demo.search, demo.agent)
+    with otel.collecting() as spans:
+        rt.start("research.1", demo.research, "What is durable execution?")
+        rt.drain()
+    return spans
+
+
+def test_the_library_accepts_a_whole_run():
+    """Everything short of the network, on a real run rather than a fixture.
+
+    The library does its own translation into Cloud Trace's protobufs, and
+    that is where an attribute of a type it will not carry, an id of the
+    wrong width, or an end before its start stops being our problem and
+    starts being a rejected batch in production. `test_otel.py` cannot see
+    any of it: it asserts our records, and this asserts what becomes of
+    them.
+    """
+    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+    from opentelemetry.sdk.resources import Resource
+
+    spans = a_whole_run()
+    assert len(spans) == 13, len(spans)
+
+    client = FakeTrace()
+    exporter = CloudTraceSpanExporter(project_id="p", client=client)
+    result = exporter.export([otel_gcp._readable(s, Resource.create({})) for s in spans])
+    assert result.name == "SUCCESS", result
+
+    sent = client.batches[0]
+    assert len(sent) == len(spans), "the library dropped some"
+
+    # One trace, and every parent link still resolves after the round trip
+    # through hex strings -- which is the form Cloud Trace actually stores.
+    traces = {s.name.split("/traces/")[1].split("/")[0] for s in sent}
+    assert traces == {otel.trace_id("research.1").hex()}
+    ids = {s.span_id for s in sent}
+    for s in sent:
+        assert not s.parent_span_id or s.parent_span_id in ids, s.name
+
+    assert {s.display_name.value for s in sent} == {"research", "agent", "search"}
+
+
+def test_the_run_reads_as_two_layers_at_the_far_end():
+    """The pair, after everything: one promise, more than one attempt."""
+    spans = a_whole_run()
+    by = {}
+    for s in spans:
+        by.setdefault(s.attributes["de.promise"], []).append(s.attributes["de.span"])
+    assert by["research.1"].count("logical") == 1
+    assert by["research.1"].count("physical") == 2, by["research.1"]
+
+    root = next(s for s in spans if s.attributes["de.promise"] == "research.1"
+                and s.attributes["de.span"] == "logical")
+    worked = sum(s.duration_ms for s in spans
+                 if s.attributes["de.promise"] == "research.1"
+                 and s.attributes["de.span"] == "physical")
+    assert root.duration_ms > worked, (
+        "the run was never idle, so the two layers said the same thing")

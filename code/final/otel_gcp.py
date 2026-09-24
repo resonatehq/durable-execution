@@ -23,6 +23,22 @@ parent ran in another process. So the spans arrive already built, with
 their ids and their ends already decided, and this constructs the
 `ReadableSpan` an exporter consumes directly.
 
+## The exporter is deprecated, and is used anyway
+
+`CloudTraceSpanExporter` carries a deprecation warning as of
+`opentelemetry-exporter-gcp-trace` 1.15.0, which is its latest release.
+Google's migration guide points at OTLP against `telemetry.googleapis.com`
+instead.
+
+It is used regardless, for one reason: this path has been driven
+end-to-end -- a whole run of the research agent, through the library's own
+translation into Cloud Trace's protobufs, thirteen spans accepted with
+every parent link intact -- and the OTLP path has not. Swapping a verified
+adapter for an unverified one to avoid a warning is a trade in the wrong
+direction, and the swap is about twenty lines when somebody can test it.
+`test_otel_gcp.py` is what would grade the replacement, and `otel.py` does
+not change either way.
+
 ## Sending
 
 `CloudTraceSpanExporter` batches per call, so spans are buffered and
