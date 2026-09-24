@@ -1,109 +1,18 @@
 # final — the engine, end to end, in Python, on GCP
 
-This folder is where the engine gets built for real. This document is the plan:
-what we learned from the two posts, from `resonatehq/resonate`, and from the
-design chat, and how the pieces fit end to end. Every non-obvious decision
-below should grow an entry in `notes/` as it gets implemented.
+This folder is where the engine gets built for real: a durable-execution
+runtime, `resonate`, that runs as one Cloud Run service over a Cloud Storage
+bucket and a Cloud Tasks queue. Section 0 is what exists. Sections 1–5 are
+the original plan, kept as history. Section 6 is how to deploy.
 
 ## 0. What exists
 
-The whole thing, end to end, and now with the outside wired: the GCS and
-Cloud Tasks implementations of the ports, and the Cloud Run service that
-turns a queue delivery into a call.
-
-Three interfaces, and each one is a module that says what it is, beside two
-modules that are it:
-
-```
-spec/engine.py   EngineP  EngineC  EngineM    engine.py
-spec/store.py    StoreP   StoreC   StoreM     store_mem.py   store_gcp.py
-spec/queue.py    QueueP   QueueC   QueueM     queue_mem.py   queue_gcp.py
-```
-
-```
-python -m resonate.testing.spec.check
-```
-
-walks all three, top to bottom, and for each implementation asks three
-questions in order: does the module offer what its spec names, does the
-thing have the operations, does it behave. What it cannot answer without
-credentials it reports as a skip rather than a pass.
-
-Two ports, and the engine takes exactly those two:
+### What a user writes
 
 ```python
-Engine(store, queue, cfg, prefix)
-```
+# main.py
+from resonate import gather, resonate, serve
 
-It used to take three. `timers` and `transport` were the same thing
-wearing two names — a deadline is a task with a time before which it must
-not be delivered, a dispatch is a task whose time is now, and both are
-`create` on the same queue. The tell was in the service's wiring, which built two
-ports out of one object and handed the engine the same thing twice. What
-keeps a deadline and a dispatch apart is not two ports but the kernel's
-effects (`SetTimeout`, `DelTimeout`, `Send`) and the order they are
-performed in.
-
-The interface files live in `spec/`, one per interface, which also fixes a
-wart: a top-level `queue.py` shadows the standard library's own and breaks
-anything that imports the real one, but `resonate/testing/spec/queue.py` is only ever
-reachable as `spec.queue`, so the name is free again.
-
-The same three layers each time. `…P` is the thing once it exists, `…C` is
-how one is made, and `…M` is a module that offers one under an agreed name
-— `Engine`, `Store`, `Timer`. A contract cannot be handed a class, because
-an implementation may choose its class at import time, and it cannot be
-handed an instance, because only the caller knows how to configure one. It
-is handed the module.
-
-Only one of the three `…C` layers pins a signature down, and the asymmetry
-is the interesting part. `EngineC` names its arguments and means it: every
-engine takes the same three ports, because a port is an interface.
-`StoreC` and `QueueC` name nothing, because their arguments are not an
-interface but a deployment — the simulated store needs nothing, the bucket
-needs a bucket, a client and a prefix, and no third implementation will
-need those either. A common shape forced over that would only move the
-differences somewhere less honest, like a dict, so what they say instead is
-the one thing that is true of both: a store is made by calling something.
-
-`test_types.py` is what holds the three specs to that, by running a type
-checker over them — an oracle that is not ours. It
-found one: `Engine: EngineC` had been a plain attribute, which is
-invariant, so no class object could ever satisfy it. Every test in this
-project passed with it, and none of them could have caught it.
-
-Which is why the contract lives in the interface's own module rather than
-beside an implementation: a suite that shipped with the simulator would be
-grading the bucket against a rival instead of against a contract.
-
-```python
-assert spec.conformance(engine) == []
-assert store.conformance(store_mem) == []
-assert store.conformance(store_gcp, bucket="runs", prefix="t/") == []
-assert queues.conformance(queue_mem) == []
-```
-
-The simulators are still what every test runs on, because a simulator can be
-made unkind and a real service cannot. The adapters are held to the same
-claims rather than to a separate set of tests: `test_conformance.py` runs
-each contract against the simulated implementation, against the real one
-over a double that raises the libraries' own exceptions, and — only when
-`GCS_BUCKET` names a bucket this machine can reach — against Google Cloud
-Storage itself.
-
-Which means the honest status is: **the store has run on GCP; nothing else
-has.** On 2026-09-22 all eleven store claims passed against a real bucket, so
-generation preconditions do behave as `resonate/store_gcp.py` reads them, and the
-measurements that run produced — what one object's write rate actually is,
-and what happens to eight writers racing for it — are recorded in that file's
-docstring. The queue has not: `queue_gcp` still reports a skip, and so does
-Cloud Run. For those two the contract still only says what the adapter must
-do and the fake client still only says they do it when the library behaves as
-documented, so a green suite still does not imply a live one.
-
-The program the tests run is the one from this repository's README:
-
-```python
 @resonate
 async def research(question: str):
     # Plan the searches
@@ -114,34 +23,17 @@ async def research(question: str):
 
     # Synthesize the results
     return await agent(f"Write a cited report. {question}: {results}")
+
+handler = serve()
 ```
 
-Character for character, which is the point. Nothing in it mentions
-promises, tasks, leases, retries or recovery. It runs to completion over a
-simulated bucket, calls the model twice and the search index three times and
-never more, and when the power is cut at any of the 25 writes the run
-performs it finishes anyway with the same answer.
-
-One queue, not two mechanisms. A deadline and a dispatch are the same
-object in Cloud Tasks: a task with an HTTP target and a time before which it
-must not be delivered. Only deadlines carry a time. A dispatch is never
-deferred, because anything that must wait waits by having a deadline.
-
-The order is the whole crash story, and `test_queue.py` watches it through
-the queue and the bucket together rather than through a log the engine
-kept:
-
-```
-schedule /                at 30000     the deadline, first
-commit   wf/research.1                 then the state
-schedule worker://agent  at 0          then the message
-```
-
-A committed document whose deadline was never scheduled is the one state
-nothing repairs, so the task goes in first and a queue that will not take it
-fails the request rather than committing anyway. A dispatch goes the other
-way, after the commit, so a message is always a consequence of committed
-state rather than of an intention.
+Nothing in it mentions promises, tasks, leases, retries or recovery. The
+public surface is `serve`, `resonate`, `gather`, `sleep`, `external`,
+`Failed` and `Durable`, and that is all of `resonate/__init__.py`.
+`examples/research-agent/main.py` is this program in full. `test_e2e.py`
+runs the same program over a simulated bucket and cuts the power at every
+write the run performs. Each time it still finishes with the same answer,
+and at most the in-flight call is repeated.
 
 Async is not a detail. `gather` has to dispatch every branch before anything
 blocks, or the branches run one at a time, and in async that falls out: each
@@ -150,233 +42,307 @@ there yet, and only then is there anything to wait for. A leaf that only
 prompts a model may be a plain `def`, because it has nothing to await and
 should not have to pretend.
 
-| file | |
+### The service
+
+`handler = serve()` builds a `Server` (`resonate/server.py`) from the
+environment. `resonate/config.py` holds `serve` and `build`, and it is the
+only module that reads environment variables. The server has one route,
+`POST /`, and the body's `kind` says what arrived:
+
+| kind | what happens |
 |---|---|
-| `resonate/kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
-| `resonate/engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send. The only method, and the only place that does I/O |
-| `resonate/testing/spec/engine.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
-| `resonate/testing/spec/store.py` | the same three protocols for a store, the four operations, and the eleven claims every store is held to |
-| `resonate/testing/store_mem.py` | a store in a dict, with a power cut |
-| `resonate/store_gcp.py` | a store in Google Cloud Storage, with generation preconditions and the two failures mapped |
-| `resonate/testing/spec/queue.py` | the same three protocols for a queue, the two operations, and the eight claims every queue is held to |
-| `resonate/testing/spec/check.py` | every interface against every implementation, top to bottom, in one command |
-| `resonate/testing/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
-| `resonate/queue_gcp.py` | a queue in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
-| `resonate/codec.py` | the document as JSON, through Pydantic, and the key it lives under |
-| `resonate/ports.py` | the two interfaces the engine is written against, `StoreP` and `QueueP` |
-| `resonate/errors.py` | the two ways a store or queue refuses: `Conflict` and `Unavailable` |
-| `resonate/testing/faults.py` | the fault injector that cuts power between two effects |
-| `resonate/testing/spec/violation.py` | what all three contracts report |
-| `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
-| `resonate/server.py` | `Server`: one route, `POST /`, dispatching on the body's `kind` — a protocol request, an `execute`, or a `timeout` — over one engine and one worker |
-| `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
-| `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler = serve()` on the last line. The program above, and the one every test drives, so the example and the thing under test are one file |
-| `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
-| `resonate/__init__.py` | the public surface, and the whole of it: `serve`, `resonate`, `gather`, `sleep`, `Failed` |
-| `pyproject.toml` | what makes `from resonate import ...` an install rather than a copy of somebody else's repository |
-| `test/test_userapp.py` | that a user's whole repository is `main.py` and a one-line `requirements.txt`, asserted by building one |
-| `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
-| `resonate/worker.py` | a worker: `run` claims the task and decides what the outcome means, `_attempt` runs the function from the top |
-| `resonate/testing/sim.py` | a clock a test can move, and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
-| `resonate/testing/properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
-| `resonate/testing/explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
-| `test/test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
-| `test/test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
-| `test/test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
-| `test/test_explore.py` | the search at two profiles, broad and shallow, narrow and deep |
-| `test/test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
-| `test/test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
-| `test/test_store.py` | what only a simulated store has: the power cut, and where in a write it happens |
-| `test/test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
-| `test/test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
-| `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
-| `test/test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
-| `test/test_check.py` | that `resonate.testing.spec.check` sees all five implementations, admits what it skipped, and can say no |
-| `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
-| `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Server` |
-| `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
+| `execute` | the queue delivers a dispatch; the worker runs the task |
+| `timeout` | the queue delivers a deadline; the engine sweeps that origin |
+| anything else | a protocol request (`promise.create`, `task.acquire`, ...), parsed by `parse_request` |
 
-The kernel's one dependency is Pydantic, which `resonate/types.py` uses to
-validate requests and `resonate/codec.py` uses to read and write documents.
-Everything else the kernel is made of — `resonate/engine.py`,
-`resonate/errors.py`, `resonate/ports.py`, `resonate/sdk.py`,
-`resonate/worker.py` and everything under `resonate/testing/` — imports
-nothing but the standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the auth check in
-`resonate/server.py` reach for Google's libraries, and they are the three files that
-cannot be tested without them. `requirements-dev.txt` has both groups,
-separately; `python -m pytest` runs 317 tests in about ninety seconds, and
-320 in about two and a quarter minutes when `GCS_BUCKET` names a bucket,
-those three being the ones that need one. The tests live in `test/`;
-`conftest.py` at the root is what puts the code on their path.
+When `ROUTES_ACCOUNT` is set, `execute` and `timeout` must carry the queue's
+OIDC token. Any other path is a 404, and any other method is a 405.
 
-Two campaigns are opt-in because they take minutes rather than seconds:
+The queue carries three messages (`resonate/types.py`): `Execute(task_id,
+version)`, `Unblock(promise)` and `Timeout(origin)`. They form one Pydantic
+union, discriminated on `kind`. On the wire they look like
+`{"kind":"execute","taskId":...,"version":...}` and
+`{"kind":"timeout","origin":...}`. A deadline is a timeout message the
+service sends to itself:
+`queue.create(HERE, {"kind":"timeout","origin":...}, not_before=...)`,
+where `HERE = "/"` and the queue resolves it against `BASE_URL`.
 
-```
-DEEP=1 python -m pytest test_machine.py -k deep --hypothesis-show-statistics
-python explore.py --depth 7 --alphabet narrow
-hypothesis fuzz -- -k TestKernelMachine      # needs hypofuzz; runs until stopped
-```
+### Kernel and engine
 
-Four layers of evidence, each answering something the others cannot:
+The **kernel** (`resonate/kernel.py`) is the protocol's state machine as
+pure functions, modeled on the Lean implementation in `resonatehq/s3`.
+Each operation is `(doc, req, ...) -> (Reply, Commands)`. `Commands` holds
+`add`, the new versions of the objects the operation changed, and `send`,
+the messages to send. An operation never mutates the document it reads.
+`sweep(doc, now, cfg)` makes four passes: it expires promises, runs their
+settlement chains, re-dispatches tasks past their retry deadline, and
+reclaims tasks past their lease. Commands merge in sequence, and each step
+reads `c.view(doc)`. `commit(doc, c)` turns the result into effects. If
+`add` is empty there are none, so a read writes nothing. Otherwise the
+effects are `[SetTimeout?, SetDocument, DelTimeout?, Send...]`. Each document
+has one deadline (`min_deadline`) and is written whole. The entry points are
+`handle_external` (sweep, then one request) and `handle_internal` (sweep
+only).
 
-- **The unit tests** pin each operation's branches against the Rust kernel's
-  own test suite, which we transcribed from.
-- **The catalogue** runs on every step of every test. A kernel step is two
-  abstract steps, the sweep and the operation, so each is checked on its own
-  and the fused result is held equal to their composition.
-- **The exhaustive search** proves reachability. 70 869 states and 270 994
-  edges at depth 4 on the broad alphabet; 11 579 states at depth 5 on the
-  narrow one, which is where the long chains live.
-- **The Hypothesis machine** goes further than any bound, and shrinks what it
-  finds.
-
-### Steering the search
-
-Three mechanisms, and only one of them steers.
-
-`event()` labels a test case and shows in `--hypothesis-show-statistics`.
-Every request emits one, which is how the ratio of real work to refusals is
-read off a campaign. It is observational and changes nothing.
-
-`target()` is the signal. Hypothesis hill-climbs to maximize what it is
-given, so `teardown` hands it the widest the document got during the script,
-under two labels: tasks in flight, and obligations registered between them.
-A document can be wide in either way independently. Two constraints shape
-where the call goes: at most one per label per test case, so it cannot live
-inside a rule; and it needs volume to bite, noticeably above a thousand test
-cases and obviously around ten thousand per label. The default campaign runs
-four hundred, so targeting earns its keep only in the deep profile, which
-runs ten thousand and takes about nine minutes.
-
-The rules are grouped by what they need rather than by which operation they
-send, with the operation drawn inside. Hypothesis samples a rule and then
-filters it against its preconditions, so a rule gated on a task state the
-document rarely holds costs a retry every time it is drawn. Collapsing
-twenty such rules into five coarse groups moved the share of steps reaching
-the kernel rather than a door from 45% to 64% on the same budget, and
-brought the wake and the halted awaiter's buffered resume into every
-campaign instead of the lucky ones.
-
-Beyond all of this is **HypoFuzz**, which runs the same state machine as a
-coverage-guided campaign using real branch coverage rather than a metric we
-invented, for as long as it is left running. It needs no change to the
-tests. A short run found nothing, which is worth exactly what a short fuzz
-run is worth.
-
-Three entries in the catalogue are adapted to our shape and marked in the
-source, with the specification's own form kept beside them: two because we
-fuse the wake and its dispatch into one step, one because the specification
-samples it on scripts too short to reach a re-suspension.
-
-### The engine
-
-One method, because there is one thing to do. A protocol request and a
-deadline coming due differ in which kernel function decides them and in
-nothing else, so `process` takes either and the caller never has to know
-which shell it is talking to.
+The **engine** (`resonate/engine.py`) is the only place that does I/O:
 
 ```python
-def process(self, msg: Req | Timeout, now: int) -> Reply:
-    origin = origin_of_msg(msg)
-    raw, generation = self.store.load(doc_key(origin))
-    doc = decode(raw, origin) if raw is not None else Document()
-    now = max(now, doc.clock)
-    fx, reply = (handle_internal(doc, now, cfg), Reply.ok({})) if isinstance(msg, Timeout) \
-        else handle_external(doc, msg, now, cfg)
-    ...  # write law, then: arm, commit, disarm, send
+Engine(store, queue, cfg, prefix)
+engine.process(msg, now) -> Reply      # msg is a protocol request or a Timeout
 ```
 
-Four rules carry the whole design, and each one is a test:
+It reads the document, calls the kernel, and returns early if there are no
+effects (`if not fx: return reply`). Otherwise it arms, makes a conditional
+put, disarms, and sends. A deadline and a dispatch are the same object in
+Cloud Tasks: a task with an HTTP target and a time before which it must not
+be delivered. So both go through one queue port, and only the order of the
+effects keeps them apart. Four rules carry the design, and each one is a
+test:
 
 - **Arm before the commit.** A committed document whose deadline was never
   armed is the one state nothing repairs. A failed arm fails the request.
 - **One conditional write.** A `Conflict` goes back to the caller. The engine
-  never loops: a loop would choose a retry policy before anything has said
-  what it should be.
-- **Disarm by name, after the commit.** The name comes back from whatever
-  armed the deadline and is recorded in the document, so a writer removes
-  what its own predecessor wrote rather than a deadline by coordinates that
-  someone else has since re-armed.
-- **The write law.** If the objects and the armed deadline are untouched,
-  nothing is written. The clock is outside that comparison, or every read
-  would be a write.
+  never loops, because a loop would choose a retry policy before anything
+  has said what it should be.
+- **Disarm by name, after the commit.** The queue returns a name when it
+  arms a deadline, and the document records it. A writer removes the timer
+  its own predecessor armed, never one found by coordinates that someone
+  else has since re-armed.
+- **Send after the commit.** A message is always a consequence of committed
+  state, never of an intention.
 
-`test_engine.py` cuts the power at each of the ten writes the exercise
-performs — across the store, the timers and the transport — then does what
-the world does, retrying the request and firing the deadlines, and requires
-the run to reach the promises and tasks a clean run reached. It also covers
-the window nothing can close over a network: a commit that landed and whose
-answer was lost.
+`test_queue.py` watches that order through the queue and the bucket
+together:
 
-### The specification of an engine
-
-`spec.py` names three things, because three things need naming and they are
-not the same:
-
-```python
-class EngineP(Protocol):        # an engine, once it exists
-    def process(self, msg: Msg, now: int) -> Reply: ...
-
-class EngineC(Protocol):        # how one is made
-    def __call__(self, store: Store, timers: Timers, transport: Transport,
-                 cfg: KernelCfg = ..., prefix: str = ...) -> EngineP: ...
-
-class EngineM(Protocol):        # a module that offers one
-    Engine: EngineC
+```
+schedule /                at 30000     the deadline, first
+commit                                 then the state
+schedule worker://agent   at 0         then the message
 ```
 
-The module is the useful layer. A conformance suite cannot be handed a
-class, because an implementation may want to choose its class at import
-time, and it cannot be handed an instance, because the suite has to supply
-the world the engine runs in. It is handed the module and reaches for
-`Engine`. The ports are constructor arguments for the same reason: that seam
-is what lets one engine run over a bucket in production and over a dict in a
-simulation, which is what makes a simulated run a real run.
+Only deadlines carry a time. A dispatch is never deferred, because anything
+that must wait does so by having a deadline.
 
-`EngineP` has one member and no name, no identity and no lifecycle.
-Everything an engine knows is in the bucket, so two of them are
-interchangeable.
+### Serialization
 
-The types say nothing about behaviour. `conformance(module)` is the part
-that does: it drives an engine through a standard script and returns
-everything it broke. Four checks, independent of each other:
+Serialization is Pydantic everywhere. Request dataclasses carry Pydantic
+field metadata. `types.py` has the `wire`, `adapter` and `record` helpers,
+and replies (`Promise.to_record`, `Task.to_record`) are Pydantic dumps. The
+codec (`resonate/codec.py`) is `encode(doc)`/`decode(raw)`: the document as
+camelCase JSON, through a `TypeAdapter(Document)`. `doc_key` gives the key
+the document lives under.
 
-- every document committed is a state the catalogue admits, and every
-  consecutive pair a transition it admits;
-- a `Timeout` step is held additionally to the sweeper properties, which are
-  strictly stronger than the general edge tables;
-- the effect order, arm then commit then disarm then send, because that is
-  what the crash windows rest on;
-- the write law, restated in `spec.py` rather than imported from the engine,
-  since a specification that borrowed the implementation's comparison would
-  only be checking that the implementation agrees with itself.
+### The two ports and their contracts
 
-Two deliberately broken engines are in `test_spec.py`, one that writes on a
-read and one that sends before it commits, because a conformance suite
-nothing has ever failed proves as little as one nothing has ever passed.
+The engine is written against two protocols in `resonate/ports.py`.
+`StoreP` has `get`, `put`, `delete` and `list`, and `QueueP` has `create`
+and `delete`. A store or queue refuses in one of two ways
+(`resonate/errors.py`). `Conflict` means the write lost a race. `Unavailable`
+means there was no answer. Each interface has a spec module in
+`resonate/testing/spec/`, which also names its implementations:
 
-### What the search found
+```
+spec/engine.py   EngineP  EngineC  EngineM    engine.py
+spec/store.py    StoreP   StoreC   StoreM     store_mem.py   store_gcp.py
+spec/queue.py    QueueP   QueueC   QueueM     queue_mem.py   queue_gcp.py
+```
 
-The Hypothesis machine found a real divergence. Registering a callback
-against a promise that has already settled: the Rust kernel wakes a suspended
-awaiter, following its SQL backend, where the registration inserts a *ready
-callback* that a later step drains. The coalesced machine has no later step,
-so waking there is a transition out of `suspended` that consumed no callback,
-which `consistent_wake_follows_callback_consumption` forbids. The
-specification does nothing in that branch
-(`spec/02-abstract/external.lean:78-83`), and neither do we now. Nothing is
-stranded by the change: a task suspends only on promises that are pending at
-the time, and a settlement drains every callback it holds, so a suspended
-task always has a rung on a pending promise.
+Each has the same three layers. `…P` is the thing once it exists, `…C` is
+how one is made, and `…M` is a module that offers one under an agreed name
+(`Engine`, `Store`, `Queue`). A contract is handed the module. It cannot be
+handed a class, because an implementation may choose its class at import
+time. It cannot be handed an instance, because only the caller knows how to
+configure one. Only `EngineC` fixes a signature, because every engine takes
+the same two ports. `StoreC` and `QueueC` name nothing, because their
+arguments are a deployment, not an interface.
 
-A second finding, reported here rather than fixed: the specification's
-`consistent_suspension_registers_callback` demands a callback that is new in
-the step, but a task that suspends, is halted, continued, re-acquired and
-suspends on the same promise again registers nothing new, because
-registration is idempotent in the specification's own `taskSuspend`. Its
-corpus is scripts of length three, which cannot reach that path.
+The contract lives in the interface's module, not beside an implementation.
+A suite that shipped with the simulator would grade the bucket against a
+rival instead of against a contract. The store has 11 claims and the queue
+has 8. The engine is graded on a script, against the specification's
+catalogue:
 
-## 1. What we are building on
+```python
+from resonate import engine
+from resonate.testing import store_mem, queue_mem
+from resonate.testing.spec import engine as engine_spec, store as store_spec, queue as queue_spec
+
+assert engine_spec.conformance(engine) == []
+assert store_spec.conformance(store_mem) == []
+assert queue_spec.conformance(queue_mem) == []
+```
+
+```
+python -m resonate.testing.spec.check
+```
+
+This command walks all three interfaces. For each implementation it asks
+three questions in order: does the module offer what its spec names, does
+the thing have the operations, and does it behave. Anything it cannot check
+without credentials is reported as a skip, not a pass.
+
+`test_conformance.py` runs each contract three times. The first run uses
+the simulated implementation. The second uses the real adapter over a
+double that raises the libraries' own exceptions. The third runs against
+Google Cloud Storage itself, but only when `GCS_BUCKET` names a bucket this
+machine can reach.
+
+Status: **the store has run on GCP.** On 2026-09-22 all eleven store claims
+passed against a real bucket. The write rates measured in that run are in
+the `resonate/store_gcp.py` docstring. The queue contract runs against Cloud
+Tasks only when `TASKS_QUEUE` names a queue. A green suite does not imply a
+live deployment.
+
+### Files
+
+| file | |
+|---|---|
+| `resonate/__init__.py` | the public surface: `serve`, `resonate`, `gather`, `sleep`, `external`, `Failed`, `Durable` |
+| `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `sleep`, `external`, `Blocked`, versions |
+| `resonate/kernel.py` | the protocol's state machine as pure functions: fifteen operations, `sweep`, `commit`, `handle_external`, `handle_internal` |
+| `resonate/types.py` | the protocol: fifteen requests, the reply, the queue's messages (`Execute`, `Unblock`, `Timeout`), `parse_request`, and the Pydantic helpers |
+| `resonate/codec.py` | the document as JSON, through Pydantic, and `doc_key` |
+| `resonate/engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send |
+| `resonate/worker.py` | `Worker.run(task_id, version)` claims a task and decides what the outcome means; `_attempt` runs the function from the top |
+| `resonate/server.py` | `Server`: `POST /`, dispatched on the body's `kind` |
+| `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
+| `resonate/ports.py` | `StoreP` and `QueueP` |
+| `resonate/errors.py` | `Conflict` and `Unavailable` |
+| `resonate/store_gcp.py` | a store in Cloud Storage: generation preconditions, the two failures mapped, measured write rates |
+| `resonate/queue_gcp.py` | a queue in Cloud Tasks: the OIDC token, service-chosen names, the 30-day horizon |
+| `resonate/testing/sim.py` | `Clock`, a clock a test can move, and `Runtime`, one process playing Cloud Tasks and Cloud Run |
+| `resonate/testing/faults.py` | `Fault` and `Crash`: cut the power at the k-th write, across both ports |
+| `resonate/testing/store_mem.py` | a store in a dict, with a power cut |
+| `resonate/testing/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
+| `resonate/testing/properties.py` | the conformance catalogue from `resonatehq/resonate-specification`: 43 state and 50 transition entries, the sweeper checks, the known gaps |
+| `resonate/testing/explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
+| `resonate/testing/spec/engine.py` | what an engine is, as three protocols, and a conformance suite |
+| `resonate/testing/spec/store.py` | the same for a store, and its 11 claims |
+| `resonate/testing/spec/queue.py` | the same for a queue, and its 8 claims |
+| `resonate/testing/spec/violation.py` | what all three contracts report |
+| `resonate/testing/spec/check.py` | every interface against every implementation, in one command |
+| `examples/research-agent/` | the program above as a deployable application |
+| `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
+| `pyproject.toml` | the package, so a user installs `resonate` instead of copying it |
+| `requirements.txt` | what the container installs |
+| `ARCHITECTURE.md` | the parts, and which of them may touch the outside |
+| `SEQUENCE.md` | the service as sequence diagrams |
+| `live/` | scripts run against a real deployment: crash recovery on Cloud Tasks, and read/write latency on a real bucket |
+| `test/test_kernel.py` | the operations, one test per branch, with the catalogue on every step |
+| `test/test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
+| `test/test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
+| `test/test_explore.py` | the exhaustive search at two profiles: broad and shallow, narrow and deep |
+| `test/test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
+| `test/test_spec.py` | our engine through the conformance suite, and two broken engines the suite has to reject |
+| `test/test_store.py` | what only a simulated store has: the power cut |
+| `test/test_queue.py` | the simulated queue, the agent over an unkind one, and the scheduling order |
+| `test/test_e2e.py` | the research agent, run to completion and killed at each write |
+| `test/test_sleep.py` | a durable sleep arms a deadline and wakes |
+| `test/test_external.py` | `external`: a run waits on a promise somebody outside settles |
+| `test/test_versions.py` | duplicate names are refused; versions of one function coexist |
+| `test/test_types.py` | the three module specs, run past mypy |
+| `test/test_check.py` | that `resonate.testing.spec.check` sees every implementation, admits what it skipped, and can say no |
+| `test/test_conformance.py` | the store and queue contracts against every implementation, plus what only an adapter can get wrong |
+| `test/test_app.py` | `Server` without HTTP: status codes, the queue's messages, and the research agent through the service |
+| `test/test_http.py` | the `handler` that `serve()` returns, in a real Flask app: routes, methods, auth, and the agent over HTTP |
+| `test/test_userapp.py` | that a user's whole repository is `main.py` and a one-line `requirements.txt` |
+| `test/test_deploy.py` | that `requirements.txt` covers what production imports, and each example declares what it imports |
+| `test/test_example_agent.py` | the travel agent through a whole booking |
+
+### Dependencies
+
+Pydantic is the core package's one third-party dependency. `types.py` uses
+it to validate requests, and `codec.py` uses it to read and write
+documents. Three places need more. `server.py` needs Flask (through
+`functions-framework`). `store_gcp.py` and `queue_gcp.py` need Google's
+client libraries, and so does the token check in `Server.authorized`. Those
+Google imports sit inside the methods that use them. `requirements-dev.txt`
+lists the test tools and the GCP libraries as separate groups. The tests
+live in `test/`, and `conftest.py` at the root puts the code on their path.
+
+### Evidence
+
+Several campaigns are opt-in, because they take minutes, not seconds:
+
+```
+DEEP=1 python -m pytest test/test_machine.py -k deep --hypothesis-show-statistics
+python -m resonate.testing.explore --depth 7 --alphabet narrow
+hypothesis fuzz -- -k TestKernelMachine      # needs hypofuzz; runs until stopped
+```
+
+There are four layers of evidence, and each answers something the others
+cannot:
+
+- **The unit tests** pin each operation's branches against the Rust kernel's
+  own test suite, which ours was transcribed from.
+- **The catalogue** runs on every step of every test. A kernel step is two
+  abstract steps, the sweep and the operation. Each is checked on its own,
+  and the fused result must equal their composition.
+- **The exhaustive search** establishes reachability. On the broad alphabet
+  it reaches tens of thousands of states by depth 4. The narrow alphabet
+  goes deeper, which is where the long chains live.
+- **The Hypothesis machine** goes further than any bound, and shrinks what
+  it finds.
+
+#### Steering the search
+
+There are three mechanisms, and only one of them steers.
+
+`event()` labels a test case, and the label shows in
+`--hypothesis-show-statistics`. Every request emits one, so a campaign's
+ratio of real work to refusals can be read off directly. It observes and
+changes nothing.
+
+`target()` is the signal. Hypothesis hill-climbs to maximize what it is
+given. `teardown` gives it the widest the document got during the script,
+under two labels: tasks in flight, and obligations registered between them.
+Hypothesis allows at most one call per label per test case, so the call
+cannot go inside a rule. It also needs volume to bite, so targeting earns
+its keep only in the deep profile.
+
+The rules are grouped by what they need, not by which operation they send,
+and the operation is drawn inside the rule. Hypothesis samples a rule and
+then filters it against its preconditions. A rule gated on a task state the
+document rarely holds therefore costs a retry every time it is drawn.
+Coarse groups keep most steps reaching the kernel instead of stopping at a
+door.
+
+**HypoFuzz** runs the same state machine as a coverage-guided campaign. It
+uses real branch coverage instead of a metric we invented, and it runs for
+as long as it is left running.
+
+Three entries in the catalogue are adapted to our shape and marked in the
+source, with the specification's own form kept beside them. Two are adapted
+because we fuse the wake and its dispatch into one step. The third is
+adapted because the specification samples it on scripts too short to reach
+a re-suspension.
+
+#### What the search found
+
+The Hypothesis machine found a real divergence. The case is registering a
+callback against a promise that has already settled. The Rust kernel wakes
+a suspended awaiter there, following its SQL backend, where the
+registration inserts a *ready callback* that a later step drains. The
+coalesced machine has no later step. Waking there would be a transition out
+of `suspended` that consumed no callback, which
+`consistent_wake_follows_callback_consumption` forbids. The specification
+does nothing in that branch (`spec/02-abstract/external.lean:78-83`), and
+neither do we. Nothing is stranded: a task suspends only on promises that
+are pending at the time, and a settlement drains every callback it holds.
+
+The search also found a second divergence, which is reported here and not
+fixed. The specification's `consistent_suspension_registers_callback`
+demands a callback that is new in the step. But consider a task that
+suspends on a promise, is halted, continued and re-acquired, and suspends
+on the same promise again. It registers nothing new, because registration
+is idempotent in the specification's own `taskSuspend`.
+
+## 1. What we are building on (original plan)
+
+*Sections 1–5 are the plan as it was written before the code existed. They
+are kept as history. Their file names and mechanisms (`main.py` as the
+shell, `doc.py`, `store.py`, `transport.py`, an outbox, `/execute` and
+`/sweep` routes) do not describe the current code. Section 0 does.*
 
 **The programming model (posts 001 and 002 in `design/content/writing`).**
 One primitive, the durable promise, with two operations, `create` and `settle`,
@@ -423,13 +389,7 @@ Cloud Tasks has `schedule_time`, which Pub/Sub lacks, so Cloud Tasks carries
 both the outbox and the deadlines. Cloud Tasks makes no ordering promise, which
 is fine because ordering was never the correctness gate.
 
-## 2. The system, end to end
-
-*The names below are the plan's, written before any of it existed. Section 0
-is what was actually built, and where they differ the table there is right:
-`store.py` turned out to be the interface rather than the GCS
-implementation, `transport.py` and the timers turned out to be one queue
-(`queues.py`), and `main.py` is `resonate/server.py` and `resonate/config.py`.*
+## 2. The system, end to end (original plan)
 
 ```
  SDK worker (any process)          ── HTTP POST / ──▶   Cloud Run function      main.py
@@ -557,7 +517,7 @@ the engine emits a `Dispatch`, and `gather`, which collects every `Blocked`
 id and suspends on all of them at once. Nothing in `sdk/` knows about GCS or
 Cloud Tasks; it speaks the protocol to the function's URL and retries a `409`.
 
-## 3. Where a process can stop
+## 3. Where a process can stop (original plan)
 
 | stopped after | what is left | what repairs it |
 |---|---|---|
@@ -576,9 +536,12 @@ redrain_after`. Then every undrained outbox has a timer, an orphan timer from
 a failed commit fires into a no-op, and `notify` gets the backstop the chat
 says it lacks.
 
-## 4. Order of work
+(As built there is no outbox. The engine arms before the commit and sends
+after it. The current crash table is in `resonate/engine.py`'s docstring.)
 
-1. **`resonate/engine.py`, `doc.py`, `store.py` over `MemoryStore`.** Unit tests for
+## 4. Order of work (original plan)
+
+1. **`engine.py`, `doc.py`, `store.py` over `MemoryStore`.** Unit tests for
    first-writer-wins, fencing, fan-out, timeouts, the effect partition. Every
    listing from post 001 runs against this.
 2. **`main.py` and `transport.py` in memory.** The handler under
@@ -589,11 +552,8 @@ says it lacks.
    to end against the local function, is killed at random points, and resumes.
 4. **Two workers.** `rpc` and durable sleep cross the process boundary, still
    on the stand-in. The Lean trace checker runs over the recorded requests.
-5. **GCS and real Cloud Tasks.** Written — `resonate/store_gcp.py`, `resonate/queue_gcp.py`,
-   `resonate/server.py`, and one contract they share with the simulators. Not yet run on
-   GCP: "it works on GCS" is only true once it has run on GCS, and until
-   then the third leg of `test_conformance.py` is the thing that would say so.
-   Still to do there: one service, two Cloud Run revisions, randomized
+5. **GCS and real Cloud Tasks**, and one contract they share with the
+   simulators. Then one service, two Cloud Run revisions, randomized
    traffic, and a snapshot diff against the Rust `resonate-server-blob`
    in-memory server on the same requests, so our semantics are held to
    theirs.
@@ -602,24 +562,25 @@ Line budget, first estimate: engine 900, doc 300, store 250, main 150,
 transport 200, worker 250, sdk 400, roughly 2,450 for the engine and the
 rest for tests.
 
-## 5. Decisions still open
+## 5. Decisions still open (original plan)
 
-- **Arm before or after commit.** See section 3. Recommended: before.
+- **Arm before or after commit.** See section 3. Recommended: before. (Built:
+  before.)
 - **Sequentiality.** None from Cloud Run. CAS decides; `409` rate is the
   signal. If it is high, Pub/Sub ordering keys on the origin serialize the
   dispatch path only, at the cost of head-of-line blocking per workflow, which
   may be worse than the retries. Measure first.
-- **Wire vocabulary.** Settled: Resonate's envelope (`{"kind":
-  "task.acquire", "head": {...}, "data": {...}}`) at the service, parsed by
-  `resonate/types.py`, so the differential and the trace checker are free. The posts'
-  names stay inside the SDK.
+- **Wire vocabulary.** Resonate's envelope (`{"kind": "task.acquire",
+  "head": {...}, "data": {...}}`) at the service, so the differential and the
+  trace checker are free. The posts' names stay inside the SDK. (Built:
+  `parse_request` in `resonate/types.py`.)
 - **Who retries a `409`.** The SDK, with backoff, since every operation is
   idempotent and reports current state. The function never loops.
 - **Authentication.** Cloud Tasks signs with an OIDC token for a service
-  account; `execute` and `timeout` messages must carry it, and nothing else is accepted for them.
-- **The 30-day clamp.** Settled: `CloudTasksQueue.create` clamps to
-  `min(at, now + 30d)`, a no-op sweep re-arms, and it has its own test,
-  because a bug there makes a promise never time out.
+  account; queue messages must carry it. (Built: `execute` and `timeout`,
+  when `ROUTES_ACCOUNT` is set.)
+- **The 30-day horizon.** Cloud Tasks will not schedule further out.
+  (Built: `queue_gcp.Queue.create` clamps `not_before` to it.)
 
 ## 6. Deploying
 
@@ -645,12 +606,12 @@ handler = serve()
 Beside it, a `requirements.txt` of one line: `resonate`. That is the
 repository.
 
-A durable function's name is the protocol's identifier -- a promise
-carries `{"f": "search"}` and a worker looks the code up by it -- so two
-functions cannot share one. `@resonate` refuses the second rather than
-letting the last import win, because the alternative is a dispatch created
-for one running the other, silently. Two *generations* of one function are
-a different thing and are allowed:
+A durable function's name is the protocol's identifier. A promise carries
+`{"f": "search"}`, and a worker looks the code up by that name, so two
+functions cannot share one. `@resonate` refuses the second instead of letting
+the last import win, because otherwise a dispatch created for one function
+would silently run the other. Two *generations* of one function are a
+different thing, and they are allowed:
 
 ```python
 @resonate(version=1)
@@ -658,65 +619,48 @@ async def research(question: str):
     ...
 ```
 
-Both stay deployed, a run finishes on the body it started on, and new runs
-take the new one. Replay reads earlier calls back by position, so
-inserting a durable call or reordering two is the change that needs a
-version; changing what a call does is not. Unversioned is version 0 and
-writes the bytes it always wrote.
+Both stay deployed. A run finishes on the body it started on, and new runs
+take the new one. Replay reads earlier calls back by position, so inserting
+a durable call or reordering two is the kind of change that needs a
+version. Changing what a call does is not. Unversioned is version 0.
 
-`handler = serve()` is the whole of the wiring. Google's buildpack looks
-for a module-level function named `handler`, and `serve()` builds the
-service from the environment and returns one. It goes last, after the
-functions it serves, and it reads the environment when `main.py` is
-imported — so a missing `BUCKET` fails the container at start, not on the
-first request.
+`handler = serve()` is the whole of the wiring. Google's buildpack looks for
+a module-level function named `handler`, and `serve()` builds the service
+from the environment and returns one. It goes last, after the functions it
+serves. It reads the environment when `main.py` is imported, so a missing
+`BUCKET` fails the container at start, not on the first request.
 `test/test_userapp.py` builds exactly this repository in a temporary
-directory and drives it, so if the story ever needs a second file again,
-that is what says so.
+directory and drives it. The import is a package (`from resonate import
+...`) so a user's own `app.py` or `engine.py` cannot shadow it.
 
-The import is a package rather than four modules for one reason. It used
-to be `from app import handler`, next to `sdk`, `kernel` and `engine` —
-four of the likeliest names to already exist in somebody's project. A
-user's own `app.py` won the lookup, and the deploy failed pointing at
-*their* file; an `app.py` that happened to define `handler` imported
-silently and served nothing.
-
-One service, because Cloud Tasks is push-only: a worker is not a loop, it
-is an endpoint. One route, `POST /`, and the body's `kind` says what
-arrived:
-
-| kind | who sends it |
-|---|---|
-| a protocol request (`promise.create`, ...) | a client that does not embed the engine. One request, one reply |
-| `execute` | the queue, delivering a dispatch |
-| `timeout` | the queue, delivering a deadline. Internal: no client sends one |
+It is one service, because Cloud Tasks is push-only: a worker is not a
+loop, it is an endpoint. The service has one route, `POST /`, dispatched on
+`kind` as described in section 0.
 
 Everything a container needs comes from its environment, and
 `resonate/config.py` is the one place that reads it:
 
 ```
-BUCKET           the bucket documents live in
+SIMULATED        in-memory store, queue and clock instead of GCP
+BUCKET           the Cloud Storage bucket holding the documents
 PROJECT          \
-LOCATION          | the queue both timers and dispatches go through
+LOCATION          > the Cloud Tasks queue both deadlines and dispatches go through
 QUEUE            /
-BASE_URL         where this service answers, so a deadline can be addressed
-ROUTES_ACCOUNT  whose OIDC token the queue signs with, and execute and
-                 timeout messages must carry. Unset says the network is the protection,
-                 and a deployment had better mean it
-ROUTES_WORKERS   {"search": "https://search-xyz.a.run.app/"} — the
-                 only thing in the system that knows the deployment's
-                 shape, and needed only when that shape is more than one
-                 service. Every registered function otherwise routes to
-                 this one, derived from BASE_URL
-RETRY_TIMEOUT    how long a claimed task may go quiet before it is offered
-                 again (default 30s)
-LEASE            how long a worker holds one (default 60s)
+BASE_URL         where this service answers; every function runs here
+                 unless ROUTES_WORKERS says otherwise
+ROUTES_WORKERS   JSON {function name: worker url}, for a split deployment
+ROUTES_ACCOUNT   the service account the queue signs with; execute and timeout
+                 messages must carry its OIDC token. Unset turns that check off
+AUDIENCE         the audience that token is checked against
+RETRY_TIMEOUT    ms a claimed task may go quiet before it is offered again (default 30000)
+LEASE            ms a worker holds a task (default 60000)
+K_REVISION       this worker's id (set by Cloud Run)
 ```
 
-You deploy an application, not this repository. Both of the ones under
-`examples/` are ordinary user applications by the rules above —
-`test_userapp.py` checks that neither reaches past the published surface —
-and each is deployed from its own directory:
+You deploy an application, not this repository. Both applications under
+`examples/` are ordinary user applications by the rules above.
+`test_userapp.py` checks that neither reaches past the published surface.
+Each one is deployed from its own directory:
 
 ```
 cd examples/research-agent
@@ -727,30 +671,27 @@ gcloud run deploy research-agent --source . --function handler \
   --set-env-vars BUCKET=...,PROJECT=...,LOCATION=...,QUEUE=...,BASE_URL=...
 ```
 
-The name `main.py` is the buildpack's: it looks for that name at the root
-of what you deploy and fails the build otherwise — found by running the
-framework locally, which is the cheapest place to find it.
+The name `main.py` is the buildpack's. It looks for a file by that name at
+the root of what you deploy, and the build fails without one.
 
 Only the example's own directory is uploaded, so the buildpack installs
 `resonate` from its `requirements.txt` like any other dependency. Until the
-package is published that line has to say where it really is
-(`resonate @ git+https://github.com/...#subdirectory=code/final`), and that
-exact line has not been run — see `examples/research-agent/README.md`. What
-*has* run on Cloud Run is an earlier layout with `main.py` beside the
-package: a full research run, six promises, twenty-two commits.
+package is published, that line has to say where the package really is
+(`resonate @ git+https://github.com/...#subdirectory=code/final`). That line
+has not been run in this layout yet. See `examples/research-agent/README.md`.
 
-Two things the deployment must get right, because no amount of code here
-can:
+The deployment has to get two things right that no code here can
+guarantee:
 
-- **The bucket must honour generation preconditions**, which GCS does, and
-  which `store.conformance` is the check for: point it at whatever you
-  intend to run on before you run on it. The
-  whole design is one conditional write per transition; a bucket that
-  silently overwrites turns every concurrent request into lost state.
+- **The bucket must honour generation preconditions.** GCS does, and
+  `store_spec.conformance` is the check: run it against whatever you intend
+  to run on before you run on it. The whole design is one conditional write
+  per transition. A bucket that silently overwrites turns every concurrent
+  request into lost state.
 - **The queue's retry policy must be generous.** A dropped `execute` is
-  recoverable — the retry deadline was committed before the message left —
-  but a dropped *sweep* is the one thing nothing here repairs, because the
+  recoverable, because the retry deadline was committed before the message
+  left. A dropped `timeout` is the one loss nothing here repairs, because the
   deadline it carried was the only thing that was going to fire.
-  `test_queue.py` demonstrates the hole and the remedy beside it: a
-  periodic sweep over the bucket, on its own schedule, depending on no
-  single queued task. That sweep is deployment, and it is not optional.
+  `test_queue.py` shows the hole, and beside it the remedy: a periodic
+  timeout per origin, on its own schedule, that does not depend on any single
+  queued task. That sweep is part of the deployment, and it is not optional.
