@@ -37,12 +37,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .kernel import (
+from ..kernel import (
     Document, Object, PENDING, Promise, REJECTED, REJECTED_CANCELED,
     REJECTED_TIMEDOUT, RESOLVED, Send, TAG_TARGET, T_ACQUIRED, T_FULFILLED,
     T_HALTED, T_PENDING, T_SUSPENDED, Task,
 )
-from .types import Execute, Unblock
+from ..types import Execute, Unblock
 
 # ---------------------------------------------------------------------------
 # The state the catalogue is stated over

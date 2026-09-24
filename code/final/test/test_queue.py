@@ -12,16 +12,16 @@ import json
 
 import pytest
 
-from resonate import queue_mem
-from resonate.spec import queue as queue_spec
+from resonate.testing import queue_mem
+from resonate.testing.spec import queue as queue_spec
 from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
-from resonate.queue_mem import Delivery, Queue
+from resonate.testing.queue_mem import Delivery, Queue
 from resonate.types import HERE
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
-from resonate.store_mem import Store
+from resonate.testing.store_mem import Store
 from test_e2e import (
     AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, counted_agent,
     counted_research, counted_search,

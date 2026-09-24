@@ -23,8 +23,8 @@ from resonate.types import (
 )
 from resonate.errors import Conflict
 from resonate.testing.faults import Crash, Fault
-from resonate.queue_mem import Queue
-from resonate.store_mem import Store
+from resonate.testing.queue_mem import Queue
+from resonate.testing.store_mem import Store
 from resonate.types import decode_message
 
 W = "http://w"

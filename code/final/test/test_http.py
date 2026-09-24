@@ -38,7 +38,7 @@ from pathlib import Path
 
 import pytest
 
-from resonate import store_mem
+from resonate.testing import store_mem
 from resonate.codec import decode, doc_key
 from resonate.kernel import TAG_TARGET
 from exampleapp import path_to

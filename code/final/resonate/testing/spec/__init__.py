@@ -11,7 +11,7 @@ A contract lives beside the interface rather than beside an implementation
 because a suite that shipped with the simulator would be grading the bucket
 against a rival instead of against a contract.
 
-    python -m spec.check
+    python -m resonate.testing.spec.check
 
 runs all of them, top to bottom, and says what is implemented and what
 holds.

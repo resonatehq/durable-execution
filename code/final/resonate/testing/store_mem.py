@@ -12,8 +12,8 @@ neither does this.
 
 from __future__ import annotations
 
-from .testing.faults import Fault
-from .errors import Conflict
+from ..errors import Conflict
+from .faults import Fault
 
 
 class Store:

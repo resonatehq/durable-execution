@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from resonate import engine as engine_module
 # The engine's spec, under the name the rest of this file uses for it.
-from resonate.spec import engine as spec
+from resonate.testing.spec import engine as spec
 from resonate.kernel import KernelCfg
 from resonate.types import Execute, PromiseCreate, PromiseGet, Reply, Value
-from resonate.queue_mem import Queue
-from resonate.spec.engine import EngineP, conformance
-from resonate.store_mem import Store
+from resonate.testing.queue_mem import Queue
+from resonate.testing.spec.engine import EngineP, conformance
+from resonate.testing.store_mem import Store
 
 
 def test_the_engine_conforms():
@@ -76,8 +76,8 @@ def test_the_standard_script_exercises_what_it_claims_to():
     """A conformance script that never suspends a task, never expires a
     lease and never settles a timer grades nothing."""
     from resonate.codec import decode, doc_key
-    from resonate.queue_mem import Queue
-    from resonate.store_mem import Store
+    from resonate.testing.queue_mem import Queue
+    from resonate.testing.store_mem import Store
     store = Store()
     e = engine_module.Engine(store, Queue(), spec.CFG)
     seen = set()
@@ -96,5 +96,5 @@ def test_the_engine_conforms_over_a_store_it_was_handed():
     the suite was given rather than the one it defaults to. Any module that
     passes `store.conformance` can be dropped in here — including
     `store_gcp` against a real bucket."""
-    from resonate import store_mem
+    from resonate.testing import store_mem
     assert conformance(engine_module, store=store_mem.Store()) == []

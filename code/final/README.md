@@ -21,7 +21,7 @@ spec/queue.py    QueueP   QueueC   QueueM     queue_mem.py   queue_gcp.py
 ```
 
 ```
-python -m resonate.spec.check
+python -m resonate.testing.spec.check
 ```
 
 walks all three, top to bottom, and for each implementation asks three
@@ -46,7 +46,7 @@ performed in.
 
 The interface files live in `spec/`, one per interface, which also fixes a
 wart: a top-level `queue.py` shadows the standard library's own and breaks
-anything that imports the real one, but `resonate/spec/queue.py` is only ever
+anything that imports the real one, but `resonate/testing/spec/queue.py` is only ever
 reachable as `spec.queue`, so the name is free again.
 
 The same three layers each time. `…P` is the thing once it exists, `…C` is
@@ -154,18 +154,19 @@ should not have to pretend.
 |---|---|
 | `resonate/kernel.py` | `handle_external(doc, req, now, cfg)` and `handle_internal(doc, now, cfg)`: the protocol's state machine as a pure function, all fifteen operations |
 | `resonate/engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send. The only method, and the only place that does I/O |
-| `resonate/spec/engine.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
-| `resonate/spec/store.py` | the same three protocols for a store, the four operations, and the eleven claims every store is held to |
-| `resonate/store_mem.py` | a store in a dict, with a power cut |
+| `resonate/testing/spec/engine.py` | what an engine is, as three protocols, and what it must do, as a conformance suite any implementation can be run through |
+| `resonate/testing/spec/store.py` | the same three protocols for a store, the four operations, and the eleven claims every store is held to |
+| `resonate/testing/store_mem.py` | a store in a dict, with a power cut |
 | `resonate/store_gcp.py` | a store in Google Cloud Storage, with generation preconditions and the two failures mapped |
-| `resonate/spec/queue.py` | the same three protocols for a queue, the two operations, and the eight claims every queue is held to |
-| `resonate/spec/check.py` | every interface against every implementation, top to bottom, in one command |
-| `resonate/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
+| `resonate/testing/spec/queue.py` | the same three protocols for a queue, the two operations, and the eight claims every queue is held to |
+| `resonate/testing/spec/check.py` | every interface against every implementation, top to bottom, in one command |
+| `resonate/testing/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
 | `resonate/queue_gcp.py` | a queue in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
 | `resonate/codec.py` | the document's canonical byte form, and the key it lives under |
+| `resonate/ports.py` | the two interfaces the engine is written against, `StoreP` and `QueueP` |
 | `resonate/errors.py` | the two ways a store or queue refuses: `Conflict` and `Unavailable` |
 | `resonate/testing/faults.py` | the fault injector that cuts power between two effects |
-| `resonate/spec/violation.py` | what all three contracts report |
+| `resonate/testing/spec/violation.py` | what all three contracts report |
 | `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
 | `resonate/server.py` | `Server`: one route, `POST /`, dispatching on the body's `kind` — a protocol request, an `execute`, or a `timeout` — over one engine and one worker |
 | `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
@@ -178,8 +179,8 @@ should not have to pretend.
 | `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `resonate/worker.py` | a worker: `run` claims the task and decides what the outcome means, `_attempt` runs the function from the top |
 | `resonate/testing/sim.py` | a clock a test can move, and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
-| `resonate/properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
-| `resonate/explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
+| `resonate/testing/properties.py` | the conformance catalogue from `resonatehq/resonate-specification`, 43 state and 50 transition entries, the two sweeper checks, the three known gaps |
+| `resonate/testing/explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
 | `test/test_kernel.py` | the operations, one test per branch, plus the remote call from post 002 end to end |
 | `test/test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
 | `test/test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
@@ -192,14 +193,14 @@ should not have to pretend.
 | `test/test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
 | `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
 | `test/test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
-| `test/test_check.py` | that `resonate.spec.check` sees all five implementations, admits what it skipped, and can say no |
+| `test/test_check.py` | that `resonate.testing.spec.check` sees all five implementations, admits what it skipped, and can say no |
 | `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Server` |
 | `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
-made of: `resonate/engine.py`, `resonate/codec.py`, `resonate/errors.py`, `spec/`, `resonate/store_mem.py`,
-`resonate/queue_mem.py`, `resonate/sdk.py`, `resonate/worker.py` and `resonate/testing/` import nothing but the
+made of: `resonate/engine.py`, `resonate/codec.py`, `resonate/errors.py`, `resonate/ports.py`, `resonate/sdk.py`,
+`resonate/worker.py` and everything under `resonate/testing/` import nothing but the
 standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the auth check in
 `resonate/server.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,

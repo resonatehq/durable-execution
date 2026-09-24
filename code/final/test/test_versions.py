@@ -32,14 +32,14 @@ import pytest
 from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
-from resonate.queue_mem import Queue
+from resonate.testing.queue_mem import Queue
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
 from resonate.sdk import (
     REGISTRY, DuplicateFunction, UnknownFunction, call_param, called, gather,
     lookup, resonate,
 )
-from resonate.store_mem import Store
+from resonate.testing.store_mem import Store
 
 CFG = KernelCfg(retry_timeout=30_000)
 WORKER = "worker://w"

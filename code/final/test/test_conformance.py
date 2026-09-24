@@ -31,11 +31,11 @@ import pytest
 gcp = pytest.importorskip("google.api_core.exceptions")
 
 from resonate import queue_gcp
-from resonate import queue_mem
-from resonate.spec import queue as queue_spec
-from resonate.spec import store as store_spec
+from resonate.testing import queue_mem
+from resonate.testing.spec import queue as queue_spec
+from resonate.testing.spec import store as store_spec
 from resonate import store_gcp
-from resonate import store_mem
+from resonate.testing import store_mem
 from resonate.errors import Unavailable
 from resonate.queue_gcp import HORIZON_MS
 from resonate.store_gcp import CONTENT_TYPE

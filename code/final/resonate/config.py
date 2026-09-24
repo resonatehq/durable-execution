@@ -27,7 +27,8 @@ import os
 from datetime import datetime, timezone
 from typing import Mapping
 
-from . import queue_gcp, queue_mem, store_gcp, store_mem
+from . import queue_gcp, store_gcp
+from .testing import queue_mem, store_mem
 from .engine import Engine
 from .kernel import KernelCfg
 from .testing.sim import Clock

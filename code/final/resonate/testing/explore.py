@@ -24,12 +24,12 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from . import properties as P
-from .kernel import (
+from ..kernel import (
     Document, KernelCfg, PENDING, REJECTED, RESOLVED, Send, SetDocument,
     T_ACQUIRED, T_HALTED, T_PENDING, T_SUSPENDED, check_invariants,
     handle_external, handle_internal,
 )
-from .types import (
+from ..types import (
     Execute, PromiseCreate, PromiseGet, PromiseRegisterCallback,
     PromiseRegisterListener, PromiseSettle, TaskAcquire, TaskContinue,
     TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat,

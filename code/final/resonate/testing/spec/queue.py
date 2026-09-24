@@ -7,7 +7,7 @@ around a store:
     QueueC   how one is made: its configuration in, a queue out
     QueueM   a module that offers one, under the name `Queue`
 
-    from ..queue import conformance
+    from ...queue import conformance
     import queue_mem, queue_gcp
 
     assert conformance(queue_mem) == []
@@ -66,29 +66,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ..types import HERE
+from ...types import HERE
+from ...ports import QueueP
 from .violation import Violation
 
 
 # ---------------------------------------------------------------------------
 # The three layers
 # ---------------------------------------------------------------------------
-
-
-@runtime_checkable
-class QueueP(Protocol):
-    def create(self, url: str, body: Any, *, not_before: int = 0) -> str:
-        """Enqueue, and return the name the service gave it.
-
-        The name is the service's, not the caller's. A caller-chosen name
-        leaves a tombstone after deletion, so re-creating the same name
-        within the hour is refused, which is exactly the trap a deadline
-        re-armed at the same instant would fall into.
-        """
-
-    def delete(self, name: str) -> None:
-        """Cancel. Cancelling what is gone, or what is already out for
-        delivery, succeeds and may be too late."""
 
 
 class QueueC(Protocol):

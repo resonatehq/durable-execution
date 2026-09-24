@@ -36,7 +36,7 @@ dev = ["pytest", "hypothesis", "jsonschema"]
 [tool.setuptools]
 # Explicit rather than discovered: `test`, `live` and the example `main.py`
 # sit beside the package and are not part of it.
-packages = ["resonate", "resonate.spec", "resonate.testing"]
+packages = ["resonate", "resonate.testing", "resonate.testing.spec"]
 
 [tool.setuptools.dynamic]
 version = { attr = "resonate.__version__" }

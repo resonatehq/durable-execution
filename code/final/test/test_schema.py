@@ -18,7 +18,7 @@ import jsonschema
 import pytest
 
 from resonate.codec import encode
-from resonate.explore import BROAD, NARROW, explore
+from resonate.testing.explore import BROAD, NARROW, explore
 from resonate.kernel import Document, Object, Promise, Task
 from resonate.types import Value
 
@@ -80,10 +80,10 @@ def test_the_engine_writes_lines_the_schema_accepts():
     the kernel never touches: the generation, the armed deadline and the name
     the shell gave it."""
     from resonate.codec import decode, doc_key
-    from resonate.spec import engine as spec
+    from resonate.testing.spec import engine as spec
     from resonate.engine import Engine
-    from resonate.queue_mem import Queue
-    from resonate.store_mem import Store
+    from resonate.testing.queue_mem import Queue
+    from resonate.testing.store_mem import Store
 
     store = Store()
     e = Engine(store, Queue(), spec.CFG)

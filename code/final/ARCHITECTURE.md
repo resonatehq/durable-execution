@@ -19,7 +19,7 @@ flowchart TB
         kernel["<b>resonate/kernel.py</b> — pure<br/>doc, request, now → effects, reply"]
     end
 
-    subgraph ports["two ports — resonate/errors.py, resonate/spec/"]
+    subgraph ports["two ports — resonate/ports.py, resonate/testing/spec/"]
         direction LR
         store["<b>StoreP</b><br/>get put delete list"]
         queue["<b>QueueP</b><br/>create delete"]
@@ -76,7 +76,7 @@ that may not exist between two steps of the same run.
 Effects happen in an order: **arm the deadline → commit → disarm the old →
 send**. Every crash window in between leaves the run recoverable, which is
 the difference between durable and merely persistent. `SEQUENCE.md` draws
-it; `resonate/spec/engine.py` grades it.
+it; `resonate/testing/spec/engine.py` grades it.
 
 ## What a run costs
 

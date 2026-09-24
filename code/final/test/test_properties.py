@@ -12,7 +12,7 @@
 import copy
 from types import SimpleNamespace
 
-from resonate import properties as P
+from resonate.testing import properties as P
 from resonate.kernel import (
     Document, KernelCfg, Object, PENDING, Promise, REJECTED,
     REJECTED_TIMEDOUT, RESOLVED, Send, SetDocument, T_ACQUIRED, T_FULFILLED,

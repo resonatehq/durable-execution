@@ -11,7 +11,7 @@ passes `legal_pre=False` and is checked against the kernel's own invariants
 only.
 """
 
-from resonate.properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
+from resonate.testing.properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
 from resonate.kernel import (
     DelTimeout, Document, KernelCfg, PENDING, REJECTED_TIMEDOUT, RESOLVED,
     Send, SetDocument, SetTimeout, TAG_TIMER, T_ACQUIRED, T_FULFILLED,

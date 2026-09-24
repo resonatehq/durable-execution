@@ -29,7 +29,7 @@ language, a different store, a kernel written from the specification rather
 than transcribed from it.
 
     from . import conformance
-    from .. import engine
+    from ... import engine
 
     assert conformance(engine) == []
 """
@@ -39,16 +39,15 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from .. import properties as P
-from ..codec import decode, doc_key
-from ..errors import Conflict
-from ..kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
-from ..testing.faults import Fault
-from ..types import (
+from ...codec import decode, doc_key
+from ...errors import Conflict
+from ...kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
+from ..faults import Fault
+from ...types import (
     PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
     TaskAcquire, TaskFulfill, TaskSuspend, Timeout, Value, decode_message,
 )
-from .queue import QueueP
-from .store import StoreP
+from ...ports import QueueP, StoreP
 from .violation import Violation
 
 

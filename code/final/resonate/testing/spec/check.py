@@ -1,6 +1,6 @@
 """Is every interface implemented, and does every implementation hold?
 
-    python -m resonate.spec.check
+    python -m resonate.testing.spec.check
 
 Three interfaces, top to bottom, and for each one every implementation of
 it. Three questions per implementation, in order, because each only makes
@@ -27,11 +27,8 @@ from __future__ import annotations
 import os
 import sys
 
-from .. import engine
-from .. import queue_gcp
-from .. import queue_mem
-from .. import store_gcp
-from .. import store_mem
+from ... import engine, queue_gcp, store_gcp
+from .. import queue_mem, store_mem
 from . import engine as engine_spec
 from . import queue as queue_spec
 from . import store as store_spec

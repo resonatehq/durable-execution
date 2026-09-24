@@ -1,4 +1,4 @@
-"""`python -m resonate.spec.check` says what it sees, and can say no.
+"""`python -m resonate.testing.spec.check` says what it sees, and can say no.
 
 A checker that has never failed is a wish, so this breaks one thing of
 each kind and confirms the checker notices: a module that does not offer
@@ -15,17 +15,17 @@ from pathlib import Path
 
 import pytest
 
-from resonate import queue_mem
-from resonate import store_mem
-from resonate.spec import queue as queue_spec
-from resonate.spec import store as store_spec
+from resonate.testing import queue_mem
+from resonate.testing import store_mem
+from resonate.testing.spec import queue as queue_spec
+from resonate.testing.spec import store as store_spec
 
 #: Where the code is. The tests live one level down, in `test/`.
 ROOT = Path(__file__).parent.parent
 
 
 def run(**overrides: str | None) -> subprocess.CompletedProcess:
-    """`resonate.spec.check` in a subprocess, with the environment under our control.
+    """`resonate.testing.spec.check` in a subprocess, with the environment under our control.
 
     `GCS_BUCKET=None` removes it, so a machine that happens to have
     credentials runs the same test as one that does not. Reading the
@@ -35,7 +35,7 @@ def run(**overrides: str | None) -> subprocess.CompletedProcess:
     environ = dict(os.environ)
     for name, value in overrides.items():
         environ.pop(name, None) if value is None else environ.update({name: value})
-    return subprocess.run([sys.executable, "-m", "resonate.spec.check"],
+    return subprocess.run([sys.executable, "-m", "resonate.testing.spec.check"],
                           cwd=ROOT, capture_output=True, text=True, env=environ)
 
 

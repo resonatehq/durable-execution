@@ -13,7 +13,7 @@ be handed an instance, because two implementations are configured
 differently and only the caller knows how. It is handed the module, and
 reaches for `Store`.
 
-    from ..store import conformance
+    from ...store import conformance
     import store_mem, store_gcp
 
     assert conformance(store_mem) == []
@@ -87,7 +87,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from ..errors import Conflict, Unavailable
+from ...errors import Conflict, Unavailable
+from ...ports import StoreP
 from .violation import Violation
 
 __all__ = ["StoreP", "StoreC", "StoreM", "Unavailable",
@@ -97,22 +98,6 @@ __all__ = ["StoreP", "StoreC", "StoreM", "Unavailable",
 # ---------------------------------------------------------------------------
 # The three layers
 # ---------------------------------------------------------------------------
-
-
-@runtime_checkable
-class StoreP(Protocol):
-    def get(self, key: str) -> tuple[str, str] | None:
-        """The body and its version, or `None`."""
-
-    def put(self, key: str, body: str, *, if_match: str | None = None,
-            if_absent: bool = False) -> str:
-        """Write, conditionally, and return the new version."""
-
-    def delete(self, key: str) -> None:
-        """Remove. Removing what is not there succeeds."""
-
-    def list(self, prefix: str, limit: int) -> list[str]:
-        """At most `limit` keys under `prefix`, lexicographically ascending."""
 
 
 class StoreC(Protocol):

@@ -21,16 +21,16 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from resonate import properties as P
+from resonate.testing import properties as P
 from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, Send
 from resonate.types import PromiseRegisterListener
 from resonate.testing.faults import Crash, Fault
-from resonate.queue_mem import Queue
+from resonate.testing.queue_mem import Queue
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
-from resonate.store_mem import Store
+from resonate.testing.store_mem import Store
 from resonate.types import decode_message
 from resonate.sdk import Failed, gather, resonate
 

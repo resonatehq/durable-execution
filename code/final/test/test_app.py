@@ -25,12 +25,12 @@ from resonate.codec import doc_key
 from resonate.kernel import KernelCfg, TAG_TARGET
 from resonate.testing.sim import Clock
 from resonate.sdk import dumps, route
-from resonate.store_mem import Store
+from resonate.testing.store_mem import Store
 from test_e2e import (
     CALLS, EXPECTED, ORIGIN, QUESTION, counted_agent, counted_research,
     counted_search,
 )
-from resonate.queue_mem import Queue
+from resonate.testing.queue_mem import Queue
 from resonate.types import Timeout
 
 CFG = KernelCfg(retry_timeout=30_000)

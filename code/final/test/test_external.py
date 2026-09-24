@@ -25,11 +25,11 @@ from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, TAG_EXTERNAL
 from resonate.types import PromiseSettle
-from resonate.queue_mem import Queue
+from resonate.testing.queue_mem import Queue
 from resonate.testing.sim import Clock, Runtime
 from resonate.worker import Worker
 from resonate.sdk import Failed, dumps, external, resonate
-from resonate.store_mem import Store
+from resonate.testing.store_mem import Store
 
 CFG = KernelCfg(retry_timeout=30_000)
 WORKER = "worker://w"
