@@ -645,6 +645,25 @@ async def research(question: str):
 Beside it, a `requirements.txt` of one line: `resonate`. That is the
 repository.
 
+A durable function's name is the protocol's identifier -- a promise
+carries `{"f": "search"}` and a worker looks the code up by it -- so two
+functions cannot share one. `@resonate` refuses the second rather than
+letting the last import win, because the alternative is a dispatch created
+for one running the other, silently. Two *generations* of one function are
+a different thing and are allowed:
+
+```python
+@resonate(version=1)
+async def research(question: str):
+    ...
+```
+
+Both stay deployed, a run finishes on the body it started on, and new runs
+take the new one. Replay reads earlier calls back by position, so
+inserting a durable call or reordering two is the change that needs a
+version; changing what a call does is not. Unversioned is version 0 and
+writes the bytes it always wrote.
+
 `handler` is the whole of the wiring. Google's buildpack looks for a
 module-level function of that name, and the import is what puts one there
 — it is never called by your code, which is why the `noqa` is not

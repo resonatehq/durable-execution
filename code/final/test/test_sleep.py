@@ -31,7 +31,7 @@ from resonate.engine import Engine
 from resonate.kernel import KernelCfg, TAG_TIMER
 from resonate.queue_mem import Queue
 from resonate.runtime import Clock, Runtime, Worker
-from resonate.sdk import REGISTRY, resonate, sleep
+from resonate.sdk import resonate, sleep
 from resonate.spec.queue import SWEEP
 from resonate.store_mem import Store
 
@@ -50,7 +50,7 @@ RAN: list[str] = []
 
 
 @resonate
-async def nap(label: str):
+async def watched_nap(label: str):
     RAN.append(f"before:{label}")
     await sleep(SLEEP_MS)
     RAN.append(f"after:{label}")
@@ -59,16 +59,10 @@ async def nap(label: str):
 
 def world():
     RAN.clear()
-    # `@resonate` writes to a single global registry at import, and
-    # `main.py` -- the deployed example -- defines functions by these same
-    # names. Whichever module imported last owns them, so this file's
-    # `nap`, the one that records what ran, is claimed here rather
-    # than left to the order pytest happens to collect in.
-    REGISTRY[nap.name] = nap
     store, queue, clock = Store(), Queue(), Clock()
     engine = Engine(store, queue, CFG)
     rt = Runtime(engine, queue, clock)
-    rt.serve(WORKER, Worker(engine, clock, "napper-1"), nap)
+    rt.serve(WORKER, Worker(engine, clock, "napper-1"), watched_nap)
     return rt, store, engine, clock
 
 
@@ -93,7 +87,7 @@ def sweeps(rt) -> list[int]:
 
 def test_a_sleep_blocks_until_its_deadline():
     rt, store, _, clock = world()
-    rt.start(ORIGIN, nap, "a")
+    rt.start(ORIGIN, watched_nap, "a")
     rt.drain()
 
     assert RAN == ["before:a"], RAN
@@ -111,7 +105,7 @@ def test_the_sleep_is_a_timer_promise_that_resolves():
     result rather than a failure, and `promise_create` refuses a timer that
     also names a target."""
     rt, store, _, clock = world()
-    rt.start(ORIGIN, nap, "a")
+    rt.start(ORIGIN, watched_nap, "a")
     rt.drain()
 
     doc = document(store)
@@ -136,7 +130,7 @@ def test_the_shell_arms_a_deadline_for_the_sleep():
     that a sweep exists.
     """
     rt, store, _, clock = world()
-    rt.start(ORIGIN, nap, "a")
+    rt.start(ORIGIN, watched_nap, "a")
     rt.drain()
 
     armed = sweeps(rt)
@@ -148,7 +142,7 @@ def test_the_shell_arms_a_deadline_for_the_sleep():
 
 def test_a_sleep_wakes_and_the_run_finishes():
     rt, store, _, clock = world()
-    rt.start(ORIGIN, nap, "a")
+    rt.start(ORIGIN, watched_nap, "a")
     rt.drain()
     assert root(store).state == "pending"
 
@@ -167,7 +161,7 @@ def test_the_work_before_the_sleep_is_not_done_twice():
     repeated, and here the sleep itself is that work: it is one promise, at
     one position, and waking reads it back rather than sleeping again."""
     rt, store, _, clock = world()
-    rt.start(ORIGIN, nap, "a")
+    rt.start(ORIGIN, watched_nap, "a")
     rt.drain()
     clock.advance(SLEEP_MS)
     rt.drain()
@@ -183,7 +177,7 @@ def test_waking_early_does_not_happen():
     """One millisecond short is still asleep. A deadline that fired on
     approximately the right tick would pass every other test in this file."""
     rt, store, _, clock = world()
-    rt.start(ORIGIN, nap, "a")
+    rt.start(ORIGIN, watched_nap, "a")
     rt.drain()
 
     clock.advance(SLEEP_MS - 1)

@@ -17,6 +17,14 @@ service's entry point, which is what the `noqa` is for.
 
 Beside it you need a `requirements.txt` naming this package, and that is
 the end of the list.
+
+Nothing here is versioned, which is the right state for code that has
+never been deployed. The day you change one of these bodies while runs of
+it are still in flight -- insert an `await`, reorder two -- the old runs
+replay by position into the new body and read the wrong answers back. That
+is when you write `@resonate(version=1)` above the new one and leave the
+old one where it is, so runs finish on the body they started on. Changing
+what a call *does* without changing which calls are made needs no version.
 """
 
 from __future__ import annotations

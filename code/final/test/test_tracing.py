@@ -45,7 +45,9 @@ from resonate.sdk import dumps, route
 from resonate.spec import queue as queue_spec
 from resonate.spec import store as store_spec
 from resonate.spec.queue import SWEEP
-from test_e2e import CALLS, ORIGIN, QUESTION, agent, research, search
+from test_e2e import (
+    CALLS, ORIGIN, QUESTION, counted_agent, counted_research, counted_search,
+)
 
 #: Where the code is, and where the tests are: a subprocess needs both
 #: on its path to re-run one of these from outside pytest.
@@ -105,7 +107,7 @@ def world():
     clock = Clock()
     store = tracing.watch(store_mem.Store(), store_spec.StoreP, "store")
     queue = tracing.watch(queue_mem.Queue(), queue_spec.QueueP, "queue")
-    for fn in (research, agent, search):
+    for fn in (counted_research, counted_agent, counted_search):
         route(fn, WORKER)
     routes = Routes(store, queue, CFG, pid="rev-1", ttl=20_000, clock=clock)
     return routes, queue, clock
@@ -130,7 +132,7 @@ def run() -> tracing.Trace:
         routes.handle("POST", "/", {
             "kind": "promise.create",
             "data": {"id": ORIGIN, "timeoutAt": 10 ** 12,
-                     "param": {"data": dumps({"f": "research", "a": [QUESTION]}).data},
+                     "param": {"data": dumps({"f": "counted_research", "a": [QUESTION]}).data},
                      "tags": {TAG_TARGET: WORKER}}})
         for _ in range(12):
             deliver(routes, queue, clock)
@@ -231,7 +233,12 @@ def test_nothing_with_a_heap_address_reaches_a_trace():
 def test_a_durable_function_says_which_one_it_is():
     t = run()
     args = t.of("Worker.execute_until_blocked_inner")[0].args
-    assert "fn=@resonate research" in args, args
+    assert "fn=@resonate counted_research" in args, args
+    # No heap address, and no version either: an unversioned function reads
+    # as its bare name, so a project that never versions anything never
+    # finds a version in its own trace. `@resonate(version=1)` would read
+    # `@resonate counted_research@1`.
+    assert "0x" not in args, args
 
 
 def test_a_document_body_is_in_the_trace_by_its_identity_not_its_bulk():

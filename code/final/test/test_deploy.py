@@ -276,7 +276,7 @@ def test_a_worker_with_no_application_module_registers_nothing():
         # Derived from the module, not listed here: a hardcoded set goes stale
         # the first time the example grows a function, and did.
         import main as demo
-        expected = {n for n, v in vars(demo).items() if isinstance(v, sdk.Durable)}
+        expected = {v.key for v in vars(demo).values() if isinstance(v, sdk.Durable)}
         assert expected, "the example defines no durable functions"
         assert set(sdk.REGISTRY) == expected, sorted(sdk.REGISTRY)
     finally:

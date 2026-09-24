@@ -25,7 +25,10 @@ from resonate.ports import Conflict, Unavailable
 from resonate.runtime import Clock
 from resonate.sdk import dumps, route
 from resonate.store_mem import Store
-from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
+from test_e2e import (
+    CALLS, EXPECTED, ORIGIN, QUESTION, counted_agent, counted_research,
+    counted_search,
+)
 from resonate.queue_mem import Queue
 from resonate.spec.queue import SWEEP
 
@@ -42,7 +45,7 @@ def service(**knobs):
     CALLS.clear()
     store, queue, clock = Store(), Queue(**knobs), Clock()
     svc = Routes(store, queue, CFG, pid="rev-1", ttl=60_000, clock=clock)
-    for fn in (research, agent, search):
+    for fn in (counted_research, counted_agent, counted_search):
         route(fn, WORKER)
     return svc, store, queue, clock
 
@@ -204,7 +207,7 @@ def test_a_duplicate_dispatch_is_answered_rather_than_retried():
     is a 200: delivering it a third time would not change anything."""
     svc, _, queue, clock = service()
     post(svc, "promise.create", id="w.1", timeoutAt=clock() + 1_000_000,
-         param={"data": json.dumps({"f": "search", "a": ["sagas"]})},
+         param={"data": json.dumps({"f": "counted_search", "a": ["sagas"]})},
          tags={TAG_TARGET: WORKER})
     dispatch = queue.take(clock())
     assert dispatch is not None and dispatch.url == WORKER
@@ -251,7 +254,7 @@ def start(svc, clock, question: str = QUESTION) -> None:
     target. Nothing in the service knows it is the start of anything."""
     body, status = post(
         svc, "promise.create", id=ORIGIN, timeoutAt=clock() + 10 ** 9,
-        param={"data": dumps({"f": "research", "a": [question]}).data},
+        param={"data": dumps({"f": "counted_research", "a": [question]}).data},
         tags={TAG_TARGET: WORKER})
     assert status == 200, body
 

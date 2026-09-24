@@ -290,7 +290,12 @@ def _route() -> None:
     # than at deploy.
     base = os.environ.get("BASE_URL", "").rstrip("/")
     if base:
-        for name in REGISTRY:
+        # By name, not by name and version: a version is a generation of
+        # code, and every generation of a function runs wherever that
+        # function runs. Two of them in different services would be two
+        # deployments of one name, which is the thing versions exist to
+        # avoid needing.
+        for name, _version in REGISTRY:
             TARGETS.setdefault(name, f"{base}/execute")
 
     # Explicit second, so it overrides. This is the split deployment: some

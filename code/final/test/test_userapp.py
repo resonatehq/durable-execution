@@ -115,7 +115,7 @@ def test_the_functions_register_with_nothing_naming_them(user_repo):
     their file, importing it is the registration."""
     assert "ROUTES_APP" not in os.environ
     serve(user_repo)
-    assert {"lookup", "define"} <= set(REGISTRY), sorted(REGISTRY)
+    assert {("lookup", 0), ("define", 0)} <= set(REGISTRY), sorted(REGISTRY)
 
 
 def test_rpc_routes_itself_with_no_table(user_repo):

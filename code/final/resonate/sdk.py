@@ -71,6 +71,10 @@ from .ports import Conflict, Unavailable
 
 #: How long a promise this SDK creates has to settle before it times out.
 DEFAULT_TIMEOUT = 24 * 60 * 60 * 1_000
+#: What a function is when nobody says. Zero rather than one so that adding
+#: a version to an existing function is the change, and having never
+#: thought about versions is the default.
+UNVERSIONED = 0
 
 
 class Blocked(Exception):
@@ -171,6 +175,42 @@ def dumps(x: Any) -> Value:
     return Value(data=json.dumps(x))
 
 
+def call_param(fn: "Durable", args: tuple) -> Value:
+    """What a promise records about the call it stands for.
+
+    `v` is omitted at version zero, deliberately. A project that never
+    versions anything writes the same bytes it always did, so documents
+    from before versions existed still decode, the checked-in trace does
+    not move, and the feature costs nothing to the people not using it.
+    """
+    call: dict[str, Any] = {"f": fn.name, "a": args}
+    if fn.version != UNVERSIONED:
+        call["v"] = fn.version
+    return dumps(call)
+
+
+def called(param: dict) -> tuple[str, int, list]:
+    """The other direction: what a worker was handed. A parameter with no
+    `v` was written by a function with no version, which is zero."""
+    return param["f"], param.get("v", UNVERSIONED), param["a"]
+
+
+def lookup(name: str, version: int = UNVERSIONED) -> "Durable":
+    """The code for a dispatched call, or a readable account of why not."""
+    found = REGISTRY.get((name, version))
+    if found is not None:
+        return found
+    deployed = sorted(d.label for d in REGISTRY.values() if d.name == name)
+    raise UnknownFunction(
+        f"nothing deployed here answers to "
+        f"{name if version == UNVERSIONED else f'{name}@{version}'}. "
+        + (f"This container has {', '.join(deployed)}. A run created under a "
+           "version you have retired cannot finish until that version is "
+           "deployed again." if deployed else
+           "This container has no function by that name at all -- check that "
+           "the module defining it is imported by `main.py`."))
+
+
 def loads(v: dict) -> Any:
     data = v.get("data")
     return None if data is None else json.loads(data)
@@ -194,9 +234,43 @@ def read_back(record: dict) -> Any:
 # The decorator
 # ---------------------------------------------------------------------------
 
-#: Every durable function, by name. What a worker looks in to find the code
-#: for a task it just claimed.
-REGISTRY: dict[str, "Durable"] = {}
+class DuplicateFunction(Exception):
+    """Two functions claiming one name and version.
+
+    The name is not a label, it is the protocol's identifier: a promise
+    carries `{"f": "process"}` and a worker looks the code up by it. Two
+    functions answering to it means a dispatch runs whichever module
+    imported last, silently, and a task created for one executes the
+    other's body. Deploy `billing.py` and `orders.py` each defining
+    `process` and that is the bug.
+
+    If they really are two generations of one function, say so with
+    `@resonate(version=1)` and they coexist. If they are different
+    functions, they need different names.
+    """
+
+
+class UnknownFunction(Exception):
+    """A dispatch for code this worker does not have.
+
+    Usually a version that has been retired while runs created under it
+    were still in flight. The message lists what is deployed, because the
+    useful question is which versions this container actually carries.
+    """
+
+
+#: Every durable function, by name *and version*. What a worker looks in to
+#: find the code for a task it just claimed.
+#:
+#: Keyed by the pair because a run outlives the deploy that started it. A
+#: promise records the position of every durable call its function made, and
+#: replay reads those positions back; change the body -- insert a call,
+#: reorder two -- and the positions move, so a run in flight resumes into
+#: code that disagrees with its own history. Versions let the old body stay
+#: deployed until the runs that need it are finished, which is the only way
+#: to change a durable function without draining first.
+REGISTRY: dict[tuple[str, int], "Durable"] = {}
+
 
 #: Where each function runs when it is called with `.rpc`. Deployment, not
 #: definition: the same function is a local call on one machine and a remote
@@ -204,16 +278,54 @@ REGISTRY: dict[str, "Durable"] = {}
 TARGETS: dict[str, str] = {}
 
 
+def _where(fn: Callable) -> tuple[str, str]:
+    """Which function this is, as something two imports of one file agree on.
+
+    Not the function object: `functions_framework.create_app` loads
+    `main.py` as a module object of its own, so a file that is also
+    imported normally runs its decorators twice and builds two `Durable`s
+    for one function. That is a re-import, not a collision, and the file
+    and qualified name are what tell them apart.
+    """
+    code = getattr(fn, "__code__", None)
+    if code is None:  # a callable that is not a plain function
+        return (getattr(fn, "__module__", "?"), getattr(fn, "__qualname__", repr(fn)))
+    return (code.co_filename, getattr(fn, "__qualname__", code.co_name))
+
+
 class Durable:
-    def __init__(self, fn: Callable, name: str) -> None:
-        self.fn, self.name = fn, name
-        REGISTRY[name] = self
+    def __init__(self, fn: Callable, name: str, version: int = UNVERSIONED) -> None:
+        if not isinstance(version, int) or isinstance(version, bool) or version < 0:
+            raise ValueError(f"{name}: a version is a non-negative integer, not {version!r}")
+        self.fn, self.name, self.version = fn, name, version
+        self.where = _where(fn)
+
+        prior = REGISTRY.get(self.key)
+        if prior is not None and prior.where != self.where:
+            raise DuplicateFunction(
+                f"{self.label} is defined in two places:\n"
+                f"  {prior.where[0]}: {prior.where[1]}\n"
+                f"  {self.where[0]}: {self.where[1]}\n"
+                "A promise carries this name, so a dispatch for one would run "
+                "the other. Rename one, or give them versions.")
+        REGISTRY[self.key] = self
+
+    @property
+    def key(self) -> tuple[str, int]:
+        return (self.name, self.version)
+
+    @property
+    def label(self) -> str:
+        """How this function is named to a person. The version is shown only
+        when there is one, so a project that never versions anything never
+        has to read about versions."""
+        return self.name if self.version == UNVERSIONED else f"{self.name}@{self.version}"
 
     def __repr__(self) -> str:
         """Which function this is. The default carries a heap address,
         which is useless in a log and worse in a trace that is supposed to
         fingerprint the same in every process."""
-        return f"@resonate {self.name}"
+        return f"@resonate {self.label}"
 
     async def __call__(self, *args) -> Any:
         """A local durable call: create, run if pending, settle, read back.
@@ -224,7 +336,7 @@ class Durable:
         inv, frame = current()
         id = frame.child()
         _, data = inv.fence(PromiseCreate(
-            id, inv.now() + DEFAULT_TIMEOUT, dumps({"f": self.name, "a": args}), {}))
+            id, inv.now() + DEFAULT_TIMEOUT, call_param(self, args), {}))
         record = data["promise"]
         if record["state"] != PENDING:
             return read_back(record)
@@ -280,7 +392,7 @@ class Durable:
         inv, frame = current()
         id = frame.child()
         _, data = inv.fence(PromiseCreate(
-            id, inv.now() + DEFAULT_TIMEOUT, dumps({"f": self.name, "a": args}),
+            id, inv.now() + DEFAULT_TIMEOUT, call_param(self, args),
             {TAG_TARGET: target}))
         record = data["promise"]
         if record["state"] == PENDING:
@@ -288,9 +400,30 @@ class Durable:
         return read_back(record)
 
 
-def resonate(fn: Callable) -> Durable:
-    """Mark a function durable. That is the whole of the syntax."""
-    return Durable(fn, fn.__name__)
+def resonate(fn: Callable | None = None, *, version: int = UNVERSIONED):
+    """Mark a function durable. That is the whole of the syntax.
+
+        @resonate                 # version 0, and you need never think again
+        async def research(q): ...
+
+        @resonate(version=1)      # a second generation, deployed alongside
+        async def research(q): ...
+
+    Version when you change a durable function's body while runs of it are
+    in flight. A run replays from the top and reads its previous calls back
+    by *position*, so inserting a call or reordering two moves every
+    position after it: an in-flight run resuming into the new body reads
+    somebody else's answer. Deploying the new body under a new version
+    leaves the old one to finish the runs that started under it, and new
+    runs take the new one because that is what the caller now names.
+
+    What does not need a version is anything a replay cannot see -- a
+    faster query, a fixed typo in a prompt, a different model behind the
+    same call. Position is what matters, not behaviour.
+    """
+    if fn is None:
+        return lambda f: Durable(f, f.__name__, version)
+    return Durable(fn, fn.__name__, version)
 
 
 def route(fn: Durable, target: str) -> None:

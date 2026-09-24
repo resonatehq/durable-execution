@@ -47,7 +47,8 @@ from .ports import Conflict, Unavailable
 from .spec.queue import SWEEP
 from .tracing import because, trace
 from .sdk import (
-    _FRAME, _INVOCATION, PLATFORM, REGISTRY, Blocked, Invocation, _Call, describe, dumps,
+    _FRAME, _INVOCATION, PLATFORM, Blocked, Invocation, _Call, call_param, called,
+    describe, dumps, lookup,
     loads, route,
 )
 
@@ -90,8 +91,11 @@ class Worker:
         self.ran.append(task_id)
         task, promise = reply.data["task"], reply.data["promise"]
         v = task["version"]
-        call = loads(promise["param"])
-        fn = REGISTRY[call["f"]]
+        # The version travels with the call, so a task created before a
+        # deploy still names the body it was written against. A worker that
+        # no longer carries it says so rather than running the nearest thing.
+        name, version, args = called(loads(promise["param"]))
+        fn = lookup(name, version)
 
         while True:
             # One span per turn of this loop, because one turn is one attempt
@@ -99,10 +103,10 @@ class Worker:
             # the delivery is not: a suspension with nothing left to wait for
             # runs the body again, in this same request.
             with otel.attempt(task_id, origin_of(task_id), self.clock,
-                              name=call["f"], **{"de.worker": self.pid,
+                              name=fn.label, **{"de.worker": self.pid,
                                                  "de.task.version": v}) as span:
                 try:
-                    result = self.execute_until_blocked_inner(fn, call["a"], task_id, v)
+                    result = self.execute_until_blocked_inner(fn, args, task_id, v)
                 except Blocked as b:
                     # Not a failure. Waiting for a value you do not have is
                     # how this system makes progress, and colouring it red
@@ -215,7 +219,7 @@ class Runtime:
             raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
         with because("POST /"):
             self.engine.process(PromiseCreate(
-                id, self.clock() + timeout, dumps({"f": fn.name, "a": args}),
+                id, self.clock() + timeout, call_param(fn, args),
                 {TAG_TARGET: target}), self.clock())
 
     def handle(self, delivery) -> bool:

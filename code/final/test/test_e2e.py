@@ -31,7 +31,7 @@ from resonate.spec.queue import SWEEP
 from resonate.runtime import Clock, Runtime, Worker
 from resonate.store_mem import Store
 from resonate.wire import decode_message
-from resonate.sdk import REGISTRY, Failed, gather, resonate
+from resonate.sdk import Failed, gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)
 AGENT, SEARCH = "worker://agent", "worker://search"
@@ -44,7 +44,7 @@ CALLS: Counter = Counter()
 
 
 @resonate
-async def agent(prompt: str):
+async def counted_agent(prompt: str):
     """A model call. Async, because that is what a model call is."""
     CALLS["agent"] += 1
     if prompt.startswith("Plan"):
@@ -55,22 +55,22 @@ async def agent(prompt: str):
 
 
 @resonate
-def search(query: str):
+def counted_search(query: str):
     """A leaf with nothing to await. It does not have to pretend."""
     CALLS["search:" + query] += 1
     return f"finding about {query}"
 
 
 @resonate
-async def research(question: str):
+async def counted_research(question: str):
     # Plan the searches
-    queries = await agent(f"Plan the searches for: {question}")
+    queries = await counted_agent(f"Plan the searches for: {question}")
 
     # Fan out the searches
-    results = await gather(search.rpc(q) for q in queries)
+    results = await gather(counted_search.rpc(q) for q in queries)
 
     # Synthesize the results
-    return await agent(f"Write a cited report. {question}: {results}")
+    return await counted_agent(f"Write a cited report. {question}: {results}")
 
 
 QUESTION = "What is durable execution?"
@@ -80,18 +80,11 @@ ORIGIN = "research.1"
 def world(fault: Fault | None = None):
     """One store, one queue, one clock, two workers."""
     CALLS.clear()
-    # `@resonate` writes to a single global registry at import, and
-    # `main.py` -- the deployed example -- defines functions by these same
-    # names. Whichever module imported last owns them, so this file's
-    # versions, the ones that count their calls, are claimed here rather
-    # than left to the order pytest happens to collect in.
-    for fn in (research, agent, search):
-        REGISTRY[fn.name] = fn
     store, queue, clock = Store(fault), Queue(fault=fault), Clock()
     engine = Engine(store, queue, CFG)
     rt = Runtime(engine, queue, clock)
-    rt.serve(AGENT, Worker(engine, clock, "agent-1"), research, agent)
-    rt.serve(SEARCH, Worker(engine, clock, "search-1"), search)
+    rt.serve(AGENT, Worker(engine, clock, "agent-1"), counted_research, counted_agent)
+    rt.serve(SEARCH, Worker(engine, clock, "search-1"), counted_search)
     return rt, store, engine, clock
 
 
@@ -137,7 +130,7 @@ EXPECTED = {"report": (
 
 def test_the_research_agent_runs_to_completion():
     rt, store, _, _ = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     rt.drain()
     assert answer(store) == EXPECTED
     check_bytes(store)
@@ -147,7 +140,7 @@ def test_nothing_is_paid_for_twice():
     """Three searches, two model calls, each exactly once, across however
     many times the function was re-run from the top."""
     rt, store, _, _ = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     rt.drain()
     assert dict(CALLS) == {
         "agent": 2,
@@ -162,7 +155,7 @@ def test_the_fan_out_is_a_fan_out():
     caller suspends once rather than once per branch. Dispatching and
     reading are separable for exactly this reason."""
     rt, store, engine, clock = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     rt.drain()
     doc = document(store)
     branches = [o for o in doc.objects if o.id.startswith(f"{ORIGIN}:") and o.task is not None]
@@ -175,7 +168,7 @@ def test_the_fan_out_is_a_fan_out():
 
 def test_a_listener_is_told_when_the_run_settles():
     rt, store, engine, clock = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     engine.process(PromiseRegisterListener(ORIGIN, "http://client"), clock())
     rt.drain()
     assert ORIGIN in rt.notified
@@ -186,7 +179,7 @@ def test_the_bucket_holds_one_document_for_the_whole_run():
     """Every promise and task of this run is one object under one key, which
     is why one conditional write commits a whole transition."""
     rt, store, _, _ = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     rt.drain()
     assert list(store.objects) == [doc_key(ORIGIN)]
     doc = document(store)
@@ -198,7 +191,7 @@ def test_every_state_the_run_passes_through_is_one_the_catalogue_admits():
     """The conformance catalogue, over a real program rather than a script
     somebody wrote to be graded."""
     rt, store, engine, clock = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     seen = P.State(document(store), retry_timeout=CFG.retry_timeout)
     steps = 0
     while rt.step():
@@ -213,7 +206,7 @@ def test_every_state_the_run_passes_through_is_one_the_catalogue_admits():
 
 def clean_run() -> tuple[object, Counter]:
     rt, store, _, _ = world()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     rt.drain()
     return answer(store), Counter(CALLS)
 
@@ -234,7 +227,7 @@ def test_killing_the_worker_at_any_write_still_finishes_the_run(k):
 
     fault = Fault()
     rt, store, engine, clock = world(fault)
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     fault.crash_after(k)
     try:
         rt.drain()
@@ -373,7 +366,7 @@ def test_another_worker_finishes_what_a_dead_one_started():
     want, _ = clean_run()
     fault = Fault()
     rt, store, engine, clock = world(fault)
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     fault.crash_after(6)
     try:
         rt.drain()
@@ -382,7 +375,7 @@ def test_another_worker_finishes_what_a_dead_one_started():
     first = rt.workers[AGENT]
     fault.heal()
     second = Worker(engine, clock, "agent-2")
-    rt.serve(AGENT, second, research, agent)
+    rt.serve(AGENT, second, counted_research, counted_agent)
     for _ in range(6):
         clock.advance(40_000)
         rt.drain()

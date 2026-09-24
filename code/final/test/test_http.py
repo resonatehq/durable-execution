@@ -44,8 +44,11 @@ from resonate import local
 from resonate.codec import decode, doc_key
 from resonate.kernel import TAG_TARGET
 from resonate.spec.queue import SWEEP
-from resonate.sdk import REGISTRY, dumps, route
-from test_e2e import CALLS, EXPECTED, ORIGIN, QUESTION, agent, research, search
+from resonate.sdk import dumps, route
+from test_e2e import (
+    CALLS, EXPECTED, ORIGIN, QUESTION, counted_agent, counted_research,
+    counted_search,
+)
 
 #: Where this service answers. One service runs every function, which is the
 #: smallest deployment that is still the real shape.
@@ -72,16 +75,11 @@ def client(monkeypatch):
     # entry point that worked when imported directly and not through the
     # example would be a broken deployment with a green suite.
     app = functions_framework.create_app("handler", str(ROOT / "main.py"))
-    # After `create_app`, deliberately. Loading `main.py` runs its own
-    # `@resonate` decorators, which claim `research`, `agent` and `search` in
-    # the registry. This test wants its own, which count their calls, so it
-    # takes the names back once the example has finished registering.
-    for fn in (research, agent, search):
+    # Loading `main.py` registers its own functions. These are different
+    # ones -- `@resonate` refuses two registrations of a name, so they have
+    # to be -- and they only need saying where they run.
+    for fn in (counted_research, counted_agent, counted_search):
         route(fn, WORKER)
-        # `route` only says where a function runs. What decides which code
-        # runs is `REGISTRY`, and `@resonate` writes to it at import, so the
-        # example's functions are sitting in these three names already.
-        REGISTRY[fn.name] = fn
     return app.test_client()
 
 
@@ -144,7 +142,7 @@ def test_the_queue_routes_refuse_an_unsigned_request(client, monkeypatch):
     assert post(client, "promise.get", id="nothing").status_code == 404
 
 
-# --- the whole agent, over nothing but HTTP --------------------------------
+# --- the whole counted_agent, over nothing but HTTP --------------------------------
 
 
 def pump(client, budget: int = 2_000) -> int:
@@ -173,7 +171,7 @@ def settle(client, rounds: int = 12) -> None:
 
 def test_the_research_agent_runs_end_to_end_over_http(client):
     started = post(client, "promise.create", id=ORIGIN, timeoutAt=10 ** 12,
-                   param={"data": dumps({"f": "research", "a": [QUESTION]}).data},
+                   param={"data": dumps({"f": "counted_research", "a": [QUESTION]}).data},
                    tags={TAG_TARGET: WORKER})
     assert started.status_code == 200
 

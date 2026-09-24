@@ -228,7 +228,10 @@ def _name(promise) -> str:
         return "promise"
     if isinstance(param, dict):
         if isinstance(param.get("f"), str):
-            return param["f"]
+            # The version only when there is one, so an unversioned project
+            # never reads about versions in its own traces.
+            v = param.get("v")
+            return f"{param['f']}@{v}" if v else param["f"]
         if "sleep" in param:
             return f"sleep {param['sleep']}ms"
     return "promise"

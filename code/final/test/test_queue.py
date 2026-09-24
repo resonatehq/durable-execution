@@ -22,7 +22,8 @@ from resonate.spec.queue import SWEEP
 from resonate.runtime import Clock, Runtime, Worker
 from resonate.store_mem import Store
 from test_e2e import (
-    AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, agent, research, search,
+    AGENT, CALLS, EXPECTED, ORIGIN, QUESTION, SEARCH, counted_agent,
+    counted_research, counted_search,
 )
 
 CFG = KernelCfg(retry_timeout=30_000)
@@ -98,7 +99,7 @@ def test_the_order_is_nobody_s_promise():
     assert [d.body for d in out] != list(range(6)), "shuffling did not shuffle"
 
 
-# --- the agent, over an unkind queue ---------------------------------------
+# --- the counted_agent, over an unkind queue ---------------------------------------
 
 
 def cloud(**knobs):
@@ -108,8 +109,8 @@ def cloud(**knobs):
     clock = Clock()
     engine = Engine(store, queue, CFG)
     rt = Runtime(engine, queue, clock)
-    rt.serve(AGENT, Worker(engine, clock, "agent-1"), research, agent)
-    rt.serve(SEARCH, Worker(engine, clock, "search-1"), search)
+    rt.serve(AGENT, Worker(engine, clock, "agent-1"), counted_research, counted_agent)
+    rt.serve(SEARCH, Worker(engine, clock, "search-1"), counted_search)
     return rt, store, queue, clock
 
 
@@ -135,7 +136,7 @@ DONE = {"agent": 2, "search:durable execution": 1,
 
 def test_the_agent_runs_over_a_well_behaved_queue():
     rt, store, queue, clock = cloud()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock)
     assert answer(store) == EXPECTED and dict(CALLS) == DONE
 
@@ -145,7 +146,7 @@ def test_every_message_twice_costs_nothing():
     does not hold, and is refused. That refusal is the fence doing its job,
     and it is why at-least-once delivery is safe to build on."""
     rt, store, queue, clock = cloud(duplicate=1.0)
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock)
     assert answer(store) == EXPECTED
     assert dict(CALLS) == DONE, "something was paid for twice"
@@ -158,7 +159,7 @@ def test_out_of_order_and_late_and_sometimes_lost(seed):
     is the same, and nothing is done twice."""
     rt, store, queue, clock = cloud(
         seed=seed, duplicate=0.4, shuffle=True, lateness=500, lose=0.3, backoff=100)
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock, rounds=30)
     assert answer(store) == EXPECTED
     assert dict(CALLS) == DONE
@@ -191,7 +192,7 @@ def test_a_dropped_deadline_is_the_one_thing_nothing_repairs():
     rt, store, queue, clock = cloud()
     rt.queue = queue = DropsEverySweep(seed=1)
     rt.engine.queue = queue
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock)
     found = store.get(doc_key(ORIGIN))
     root = decode(found[0].encode(), ORIGIN).get(ORIGIN).promise
@@ -207,7 +208,7 @@ def test_a_periodic_sweep_recovers_what_the_queue_lost():
     rt, store, queue, clock = cloud()
     rt.queue = queue = DropsEverySweep(seed=1)
     rt.engine.queue = queue
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     for _ in range(12):
         rt.drain()
         clock.advance(40_000)
@@ -254,11 +255,11 @@ def test_the_deadline_is_scheduled_before_the_document_commits():
     queue, store, clock = WatchedQueue(), WatchedBlob(), Clock()
     engine = Engine(store, queue, CFG)
     rt = Runtime(engine, queue, clock)
-    rt.serve(AGENT, Worker(engine, clock, "w"), research, agent)
-    rt.serve(SEARCH, Worker(engine, clock, "s"), search)
+    rt.serve(AGENT, Worker(engine, clock, "w"), counted_research, counted_agent)
+    rt.serve(SEARCH, Worker(engine, clock, "s"), counted_search)
 
     CALLS.clear()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     assert log == [
         f"schedule {SWEEP}{ORIGIN} at 30000",   # the deadline, first
         "commit",                               # then the state
@@ -273,7 +274,7 @@ def test_only_deadlines_carry_a_schedule():
     retry backoff — waits by having a deadline, and the deadline is what
     gets scheduled."""
     rt, store, queue, clock = cloud()
-    rt.start(ORIGIN, research, QUESTION)
+    rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock)
     scheduled = [(e.url, e.not_before) for e in queue.entries.values()]
     assert all(not_before == 0 or url.startswith(SWEEP) for url, not_before in scheduled), scheduled
