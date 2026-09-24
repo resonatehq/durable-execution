@@ -7,10 +7,8 @@ drift.
 
 The name is Google's: the Python buildpack looks for `main.py` at the root
 of what you deploy and fails with `MissingSourceException` otherwise. The
-entry point is `handler`, which is why it is imported and never called --
-`--function handler` looks for a module-level name, and the import is what
-puts one there. A linter that strips unused imports will delete your
-service's entry point, which is what the `noqa` is for.
+entry point is `handler`, built by `serve()` on the last line --
+`--function handler` looks for a module-level function by that name.
 
     gcloud run deploy my-agent --source . --function handler \
       --set-env-vars BUCKET=...,QUEUE=...
@@ -29,7 +27,7 @@ what a call *does* without changing which calls are made needs no version.
 
 from __future__ import annotations
 
-from resonate import gather, handler, resonate, sleep  # noqa: F401
+from resonate import gather, resonate, serve, sleep
 
 
 @resonate
@@ -71,3 +69,6 @@ async def nap(ms: int):
     """
     await sleep(ms)
     return {"slept": ms}
+
+
+handler = serve()

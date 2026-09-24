@@ -38,7 +38,9 @@ import pytest
 from resonate import queue_mem
 from resonate import store_mem
 from resonate import tracing
-from resonate.app import Routes
+from resonate.engine import Engine
+from resonate.runtime import Worker
+from resonate.server import Server
 from resonate.kernel import KernelCfg, TAG_TARGET
 from resonate.runtime import Clock
 from resonate.sdk import dumps, route
@@ -71,7 +73,7 @@ DIAGRAM = HERE / "research.mmd"
 #: them orphans nothing, and `research.trace` has every one.
 DIAGRAM_OMIT = ("store", "queue")
 
-#: What calls `Routes.handle` in production, whoever sent the request. The
+#: What calls `Server.handle` in production, whoever sent the request. The
 #: note above each arrow says which route it was.
 CALLER = "CloudRun"
 
@@ -91,11 +93,11 @@ CFG = KernelCfg(retry_timeout=30_000)
 
 
 def world():
-    """One container, as it is deployed: `Routes` over the two simulated
+    """One container, as it is deployed: `Server` over the two simulated
     ports, reached the way production reaches it.
 
     Driving `Runtime` instead would be shorter and would record a path
-    that does not exist — it calls the worker directly, so `Routes` never
+    that does not exist — it calls the worker directly, so `Server` never
     appears and the reviewed trace would be of the test harness rather
     than of the service.
 
@@ -109,7 +111,8 @@ def world():
     queue = tracing.watch(queue_mem.Queue(), queue_spec.QueueP, "queue")
     for fn in (counted_research, counted_agent, counted_search):
         route(fn, WORKER)
-    routes = Routes(store, queue, CFG, pid="rev-1", ttl=20_000, clock=clock)
+    engine = Engine(store, queue, CFG)
+    routes = Server(engine, Worker(engine, clock, pid="rev-1", ttl=20_000), clock)
     return routes, queue, clock
 
 
@@ -190,7 +193,7 @@ def test_the_log_is_in_call_order_not_return_order():
     the order a stack unwinds and the opposite of what happened."""
     t = run()
     first = t.calls[0]
-    assert first.depth == 0 and first.name == "Routes.protocol"
+    assert first.depth == 0 and first.name == "Server.protocol"
     assert t.calls[1].depth == 1, "the parent's first call comes after the parent"
 
 
@@ -260,7 +263,7 @@ def test_every_call_knows_the_request_that_caused_it():
     assert [c.where for c in t.calls] == ["POST /execute"]
 
 
-def test_the_entry_point_is_where_a_trace_starts(monkeypatch):
+def test_the_entry_point_is_where_a_trace_starts():
     """A route is the outermost frame — and the only one with no cause of
     its own, because it is the cause. Everything under it carries the route.
 
@@ -269,17 +272,14 @@ def test_the_entry_point_is_where_a_trace_starts(monkeypatch):
     with an address in it is recordable. So the trace starts one call in,
     at the thing that was actually asked for, which is the more useful
     name anyway."""
-    from resonate import app
+    from resonate import config
 
-    monkeypatch.setenv("SIMULATED", "1")
-    from resonate import local
-    local.reset()
-    routes = app.from_environment()
+    routes = config.build({"SIMULATED": "1"})
     with tracing.recording() as t:
         routes.protocol({"kind": "promise.get", "data": {"id": "nothing"}})
 
     first, rest = t.calls[0], t.calls[1:]
-    assert first.name == "Routes.protocol" and first.depth == 0
+    assert first.name == "Server.protocol" and first.depth == 0
     assert first.where == "", "the entry point is caused by nothing inside this system"
     assert rest and all(c.where == "POST /" for c in rest)
     assert t.of("Engine.process")[0].result.startswith("Reply(status=404")
@@ -342,8 +342,8 @@ def test_every_delivery_says_what_caused_it():
     # reached rather than by a dispatcher that no longer exists: `handler`
     # chooses the route from a Flask request, and the trace starts at what
     # was chosen.
-    assert mmd.count("CloudRun->>+Routes: protocol(") == 1
-    assert mmd.count("CloudRun->>+Routes: execute(") == 5
+    assert mmd.count("CloudRun->>+Server: protocol(") == 1
+    assert mmd.count("CloudRun->>+Server: execute(") == 5
 
 
 def test_the_ports_are_left_out_rather_than_left_idle():
@@ -367,7 +367,7 @@ def test_the_diagram_names_the_hop_it_cannot_show():
     mmd = DIAGRAM.read_text()
     assert "Note over CloudRun,Engine:" in mmd
     assert "another process" in mmd
-    assert "CloudRun->>+Routes: execute(" in mmd
+    assert "CloudRun->>+Server: execute(" in mmd
 
 
 def test_mermaid_can_actually_read_the_diagram():
@@ -415,7 +415,7 @@ def test_participants_are_ordered_by_who_calls_whom():
     only ever reaches through the engine."""
     order = [line.split()[-1] for line in DIAGRAM.read_text().split("\n")
              if line.strip().startswith("participant ")]
-    assert order == ["CloudRun", "Routes", "Worker", "Durable", "Engine"], order
+    assert order == ["CloudRun", "Server", "Worker", "Durable", "Engine"], order
 
 
 def test_cutting_the_diagram_off_never_leaves_a_dangling_arrow():

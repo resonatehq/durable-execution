@@ -222,6 +222,6 @@ def test_the_example_only_uses_the_published_surface(agent):
     something a user could not import, the translation would be cheating."""
     src = (EXAMPLE / "main.py").read_text()
     assert "from resonate import" in src
-    for private in ("resonate.sdk", "resonate.app", "resonate.engine",
+    for private in ("resonate.sdk", "resonate.server", "resonate.engine",
                     "resonate.kernel", "resonate.codec"):
         assert private not in src, f"the example reaches into {private}"

@@ -71,7 +71,7 @@ class Clock:
 
 
 class Worker:
-    def __init__(self, engine, clock: Clock, pid: str, ttl: int = 30_000) -> None:
+    def __init__(self, engine, clock: Callable[[], int], pid: str, ttl: int = 30_000) -> None:
         self.engine, self.clock, self.pid, self.ttl = engine, clock, pid, ttl
         self.ran: list[str] = []  # which task ids this worker picked up, for tests
 
@@ -228,7 +228,7 @@ class Runtime:
 
         The URL is named in the trace rather than left to be inferred,
         because in production this is a route on a service and the thing
-        that caused the work is the delivery. `Routes.handle` does the
+        that caused the work is the delivery. `Server` does the
         same for a real request.
         """
         with because(delivery.url):

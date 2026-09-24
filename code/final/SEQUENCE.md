@@ -1,7 +1,7 @@
 # The Cloud Run function, in sequence
 
 Four routes, one engine, and one rule about the order effects happen in.
-Everything below is what `app.py`, `engine.py` and `runtime.py` actually
+Everything below is what `server.py`, `engine.py` and `runtime.py` actually
 do; where a diagram says a name, it is the name in the code.
 
 *These are drawn by hand, from what the design says the system does.
@@ -20,8 +20,8 @@ anything.
 |---|---|
 | **Cloud Tasks** | the queue, and the only thing that calls `/execute` and `/sweep`. A deadline and a dispatch are both tasks in it |
 | **GCS** | one object per origin, at `wf/{origin}`. The whole state of a run |
-| `handler` / `Routes` | `app.py`. The HTTP entry point, and one `Routes` built per container at import |
-| `Worker` | `runtime.Worker` — **an object, not a service**. `Routes.worker`, built beside the engine in the same container and called in-process. Post 002's two halves: `execute_until_blocked_outer` claims the task and decides what the run meant, `execute_until_blocked_inner` runs the function from the top |
+| `handler` / `Server` | `server.py`. The HTTP entry point: `serve()` in `main.py` builds one `Server` per container at import |
+| `Worker` | `runtime.Worker` — **an object, not a service**. `Server.worker`, built beside the engine in the same container and called in-process. Post 002's two halves: `execute_until_blocked_outer` claims the task and decides what the run meant, `execute_until_blocked_inner` runs the function from the top |
 | `@resonate research` | the user's own function, running under `asyncio.run` inside `Worker._run`. Ordinary async Python that mentions no promise, task or lease |
 | `Engine.process` | `engine.Engine`, in the same container again. The only thing that does I/O |
 | `kernel` | `handle_external` / `handle_internal`. A pure function: a document in, effects out |
@@ -31,7 +31,7 @@ A worker being an object rather than a process is the part worth pausing
 on. Cloud Tasks is push-only, so nothing here polls for work; a delivery
 arrives as an HTTP request, the handler hands it to the outer half, and
 the worker's whole life is that one call. Two "workers" running at once
-are two containers, each with its own `Routes`, sharing nothing but the
+are two containers, each with its own `Server`, sharing nothing but the
 bucket.
 
 ---
@@ -50,7 +50,7 @@ sequenceDiagram
     participant F as Cloud Run<br/>handler()
     participant S as GCS
 
-    Note over F: one Routes per container,<br/>built at import from the environment
+    Note over F: one Server per container,<br/>built at import from the environment
 
     C->>+F: POST / — a protocol request
     F->>S: one conditional write
@@ -83,7 +83,7 @@ sequenceDiagram
     autonumber
     actor C as Caller
     box rgba(128,128,128,0.08) one Cloud Run container
-        participant H as handler / Routes
+        participant H as handler / Server
         participant E as Engine.process
         participant K as kernel (pure)
     end
@@ -91,7 +91,7 @@ sequenceDiagram
     participant T as Cloud Tasks<br/>via queue_gcp
 
     C->>+H: POST /, {kind, data}
-    H->>H: verify() — OIDC, for the queue's routes
+    H->>H: authorized() — OIDC, for the queue's routes
     H->>H: parse_request() — a 400 here never reaches the kernel
     H->>+E: process(req, now)
 

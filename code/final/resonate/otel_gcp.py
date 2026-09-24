@@ -50,7 +50,7 @@ two real ports.
 
     PROJECT=... TRACE=1 python -m your.entrypoint
 
-`app.py` reads `TRACE` and calls `install()`. Nothing else refers to this.
+`config.py` reads `TRACE` and calls `install()`. Nothing else refers to this.
 """
 
 from __future__ import annotations

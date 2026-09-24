@@ -26,13 +26,12 @@ and a deadline in the document brings the run back.
 
 | file | |
 |---|---|
-| `main.py` | the four functions, and `handler` re-exported in one import |
+| `main.py` | the four functions, and `handler = serve()` on the last line |
 | `requirements.txt` | one line |
 
-That is the whole application. `handler` is never called by this code —
-`--function handler` looks for a module-level name and the import is what
-puts one there, which is why the `noqa` on it is load-bearing rather than
-decoration.
+That is the whole application. `--function handler` looks for a
+module-level function by that name, and `serve()` builds it from the
+environment.
 
 ## Running it
 

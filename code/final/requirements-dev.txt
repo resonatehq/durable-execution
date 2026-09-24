@@ -16,7 +16,7 @@ jsonschema
 mypy
 
 # -- to run on Google Cloud -------------------------------------------------
-# Only store_gcp.py, queue_gcp.py and app.py's entry point import these, and each
+# Only store_gcp.py, queue_gcp.py and server.py's auth check import these, and each
 # import is inside the method that needs it, so the rest of the suite runs
 # without them. `test_conformance.py` skips itself when they are absent.
 # The same four are in `requirements.txt`, which is what the container gets.

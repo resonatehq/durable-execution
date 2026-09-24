@@ -18,7 +18,7 @@
 #   1. The service runs with `TRACE=1` and `PROJECT` set. Off is the
 #      default and off means no spans are built at all, so a run against a
 #      service without it produces a perfectly healthy document and no
-#      trace. `app.py` reads them; changing them is a redeploy.
+#      trace. `config.py` reads them; changing them is a redeploy.
 #
 #   2. Whatever account the service runs as can write traces --
 #      `roles/cloudtrace.agent` on the project. Without it the spans are

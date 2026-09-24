@@ -7,9 +7,9 @@ the engine is not re-proved; what is proved here is the thin, dull layer
 that is nevertheless the one a deployment gets wrong: which route, which
 code, and who is allowed to knock.
 
-The one thing this file cannot reach is `from_environment` and `verify`,
-which need credentials and a real request object. They are wiring, and they
-are marked as such.
+The one thing this file cannot reach is the GCP half of `config.build` and
+`Server.authorized`, which need credentials. They are wiring, and they are
+marked as such.
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ import json
 
 import pytest
 
-from resonate.app import Routes
+from resonate.engine import Engine
+from resonate.runtime import Worker
+from resonate.server import Server
 from resonate.codec import doc_key
 from resonate.kernel import KernelCfg, TAG_TARGET
 from resonate.ports import Conflict, Unavailable
@@ -44,13 +46,14 @@ def service(**knobs):
     """One container instance, one store, one queue."""
     CALLS.clear()
     store, queue, clock = Store(), Queue(**knobs), Clock()
-    svc = Routes(store, queue, CFG, pid="rev-1", ttl=60_000, clock=clock)
+    engine = Engine(store, queue, CFG)
+    svc = Server(engine, Worker(engine, clock, pid="rev-1", ttl=60_000), clock)
     for fn in (counted_research, counted_agent, counted_search):
         route(fn, WORKER)
     return svc, store, queue, clock
 
 
-def deliver(svc: Routes, queue: Queue, clock: Clock, budget: int = 2_000) -> int:
+def deliver(svc: Server, queue: Queue, clock: Clock, budget: int = 2_000) -> int:
     """Cloud Tasks, as the only thing it is: a POST to a URL.
 
     A delivery's url is either this service's `/execute` or the sweep path
@@ -80,7 +83,7 @@ def settle(svc, queue, clock, rounds: int = 12) -> None:
     deliver(svc, queue, clock)
 
 
-def post(svc: Routes, kind: str, **data):
+def post(svc: Server, kind: str, **data):
     return svc.protocol({"kind": kind, "data": data})
 
 
@@ -132,7 +135,7 @@ def test_ready_says_whether_the_bucket_answers():
     body, status = svc.ready()
     assert status == 200 and body["ready"] is True
 
-    svc.store = Unreachable()
+    svc.engine.store = Unreachable()
     body, status = svc.ready()
     assert status == 503 and body["ready"] is False
 

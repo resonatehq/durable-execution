@@ -131,7 +131,7 @@ class StoreC(Protocol):
 
     So this says the one thing that is true of both: a store is made by
     calling something. Who calls it with what is the caller's business —
-    the contract below is handed the configuration, and `app.py` reads it
+    the contract below is handed the configuration, and `config.py` reads it
     from the environment.
     """
 

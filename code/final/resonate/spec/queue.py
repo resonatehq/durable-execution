@@ -30,7 +30,7 @@ gets back: a deadline's is recorded in the document, because cancelling is
 by name, and a dispatch's is dropped, because a dispatch is never
 cancelled.
 
-The tell was in `app.py`, which built the two ports out of the same object
+The tell was in the service's wiring, which built the two ports out of the same object
 and handed it to the engine twice. So there is one port now, named for
 what it is. What a deadline and a dispatch still do *not* share is when
 they happen — arm before the commit, send after — and that is stated where
@@ -41,7 +41,7 @@ rather than in the shape of the world.
 
 There is no third operation for receiving. That is not an omission: Cloud
 Tasks is push-only, a task is delivered by an HTTP POST to the URL it
-carries, and that is why `app.py` exists and why a worker is a service
+carries, and that is why `server.py` exists and why a worker is a service
 rather than a loop. Taking delivery belongs to whatever is being delivered
 to; a simulator adds `take`/`ack`/`nack` for its own tests and the
 interface stays two methods.

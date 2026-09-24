@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import inspect
 
-from resonate import external, handler, resonate  # noqa: F401
+from resonate import external, resonate, serve
 
 from planner import plan
 from tools import NEEDS_CONFIRMING, TOOLS
@@ -186,3 +186,6 @@ def unacceptable(tool, args: dict) -> str | None:
     if extra:
         return f"{tool} does not take {', '.join(sorted(extra))}"
     return None
+
+
+handler = serve()

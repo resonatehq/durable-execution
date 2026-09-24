@@ -38,7 +38,7 @@ Engine(store, queue, cfg, prefix)
 It used to take three. `timers` and `transport` were the same thing
 wearing two names — a deadline is a task with a time before which it must
 not be delivered, a dispatch is a task whose time is now, and both are
-`create` on the same queue. The tell was in `resonate/app.py`, which built two
+`create` on the same queue. The tell was in the service's wiring, which built two
 ports out of one object and handed the engine the same thing twice. What
 keeps a deadline and a dispatch apart is not two ports but the kernel's
 effects (`SetTimeout`, `DelTimeout`, `Send`) and the order they are
@@ -165,19 +165,19 @@ should not have to pretend.
 | `resonate/codec.py` | the document's canonical byte form, and the key it lives under |
 | `resonate/ports.py` | the vocabulary the two ports share: the two failures, the fault injector that cuts power between two effects, and the violation all three contracts report |
 | `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
-| `resonate/app.py` | `Routes`: the four routes and the composition root — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, one engine per container — with `handler` the ten lines of HTTP above it |
-| `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler` re-exported in one import. The program above, and the one every test drives, so the example and the thing under test are one file |
+| `resonate/server.py` | `Server`: the four routes — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready` — over one engine and one worker |
+| `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
+| `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler = serve()` on the last line. The program above, and the one every test drives, so the example and the thing under test are one file |
 | `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
-| `resonate/__init__.py` | the public surface, and the whole of it: `handler`, `resonate`, `gather`, `sleep`, `Failed` |
+| `resonate/__init__.py` | the public surface, and the whole of it: `serve`, `resonate`, `gather`, `sleep`, `Failed` |
 | `pyproject.toml` | what makes `from resonate import ...` an install rather than a copy of somebody else's repository |
 | `resonate/otel.py` | spans derived from durable ids, so a trace needs no propagated context: one per promise, one per attempt |
 | `resonate/otel_gcp.py` | those spans as OpenTelemetry's objects, in Cloud Trace. The only file that imports the library |
 | `test/test_userapp.py` | that a user's whole repository is `main.py` and a one-line `requirements.txt`, asserted by building one |
 | `test/test_otel.py` | that the ids survive a process boundary, that the two layers have two parent rules, and that an attempt which wrote nothing still left a span |
-| `resonate/local.py` | the simulated world as a module, so `SIMULATED=1` runs the whole service on a laptop |
 | `resonate/tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
 | `test/research.trace` | the path one run takes through the system — every call in and every call out — reviewed and checked in. A change to it is a diff somebody has to accept |
-| `test/research.mmd` | the same run as a sequence diagram, generated rather than drawn, starting at `Routes.handle` because that is where a request arrives. `SEQUENCE.md` says what the design means; this says what the code did |
+| `test/research.mmd` | the same run as a sequence diagram, generated rather than drawn, starting at `Server` because that is where a request arrives. `SEQUENCE.md` says what the design means; this says what the code did |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `resonate/runtime.py` | a worker, as post 002's two halves under its own names — `execute_until_blocked_outer` claims and decides, `execute_until_blocked_inner` runs the function — and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
@@ -198,14 +198,14 @@ should not have to pretend.
 | `test/test_tracing.py` | that the path is still the reviewed path, and that a trace is faithful (a raise is a raise), cheap (nothing when off) and repeatable (the same fingerprint in any process) |
 | `test/test_check.py` | that `resonate.spec.check` sees all five implementations, admits what it skipped, and can say no |
 | `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
-| `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Routes.handle` |
+| `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Server` |
 | `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
 The kernel has no dependencies, and neither does anything the kernel is
 made of: `resonate/engine.py`, `resonate/codec.py`, `resonate/ports.py`, `spec/`, `resonate/store_mem.py`,
 `resonate/queue_mem.py`, `resonate/sdk.py` and `resonate/runtime.py` import nothing but the
-standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the entry point in
-`resonate/app.py` reach for Google's libraries, and they are the three files that
+standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the auth check in
+`resonate/server.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
 separately; `python -m pytest` runs 317 tests in about ninety seconds, and
 320 in about two and a quarter minutes when `GCS_BUCKET` names a bucket,
@@ -432,7 +432,7 @@ is fine because ordering was never the correctness gate.
 is what was actually built, and where they differ the table there is right:
 `store.py` turned out to be the interface rather than the GCS
 implementation, `transport.py` and the timers turned out to be one queue
-(`queues.py`), and `main.py` is `resonate/app.py`.*
+(`queues.py`), and `main.py` is `resonate/server.py` and `resonate/config.py`.*
 
 ```
  SDK worker (any process)          ── HTTP POST / ──▶   Cloud Run function      main.py
@@ -593,7 +593,7 @@ says it lacks.
 4. **Two workers.** `rpc` and durable sleep cross the process boundary, still
    on the stand-in. The Lean trace checker runs over the recorded requests.
 5. **GCS and real Cloud Tasks.** Written — `resonate/store_gcp.py`, `resonate/queue_gcp.py`,
-   `resonate/app.py`, and one contract they share with the simulators. Not yet run on
+   `resonate/server.py`, and one contract they share with the simulators. Not yet run on
    GCP: "it works on GCS" is only true once it has run on GCS, and until
    then the third leg of `test_conformance.py` is the thing that would say so.
    Still to do there: one service, two Cloud Run revisions, randomized
@@ -630,7 +630,7 @@ What you write is one file.
 
 ```python
 # main.py
-from resonate import gather, handler, resonate   # noqa: F401
+from resonate import gather, resonate, serve
 
 @resonate
 def search(query: str):
@@ -641,6 +641,8 @@ async def research(question: str):
     queries = await agent(f"Plan the searches for: {question}")
     results = await gather(search.rpc(q) for q in queries)
     return await agent(f"Write a cited report. {question}: {results}")
+
+handler = serve()
 ```
 
 Beside it, a `requirements.txt` of one line: `resonate`. That is the
@@ -665,10 +667,12 @@ inserting a durable call or reordering two is the change that needs a
 version; changing what a call does is not. Unversioned is version 0 and
 writes the bytes it always wrote.
 
-`handler` is the whole of the wiring. Google's buildpack looks for a
-module-level function of that name, and the import is what puts one there
-— it is never called by your code, which is why the `noqa` is not
-decoration: a linter that strips unused imports deletes your entry point.
+`handler = serve()` is the whole of the wiring. Google's buildpack looks
+for a module-level function named `handler`, and `serve()` builds the
+service from the environment and returns one. It goes last, after the
+functions it serves, and it reads the environment when `main.py` is
+imported — so a missing `BUCKET` fails the container at start, not on the
+first request.
 `test/test_userapp.py` builds exactly this repository in a temporary
 directory and drives it, so if the story ever needs a second file again,
 that is what says so.
@@ -691,8 +695,8 @@ than out of a preference.
 | `POST /sweep/<origin>` | the queue, delivering a deadline |
 | `GET /ready` | the platform, asking whether the bucket answers |
 
-Everything a container needs comes from its environment, and nothing in
-`resonate/app.py` decides policy:
+Everything a container needs comes from its environment, and
+`resonate/config.py` is the one place that reads it:
 
 ```
 BUCKET           the bucket documents live in
@@ -708,9 +712,6 @@ ROUTES_WORKERS   {"search": "https://search-xyz.a.run.app/execute"} — the
                  shape, and needed only when that shape is more than one
                  service. Every registered function otherwise routes to
                  this one, derived from BASE_URL
-ROUTES_APP       modules whose @resonate functions this worker can run,
-                 comma separated. Unnecessary when main.py defines them,
-                 which is the shape above: importing it is the registration
 TRACE            1 sends spans to Cloud Trace. Off is the default and off
                  is free
 RETRY_TIMEOUT    how long a claimed task may go quiet before it is offered

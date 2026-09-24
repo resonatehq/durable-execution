@@ -195,7 +195,7 @@ def test_the_entry_point_the_buildpack_looks_for_exists(example):
     repository is an example directory, so every one of them needs it."""
     assert (example / "main.py").is_file(), example.name
     src = (example / "main.py").read_text()
-    assert "handler" in src, f"{example.name} has no entry point to deploy"
+    assert "handler = serve()" in src, f"{example.name} has no entry point to deploy"
     assert "from resonate import" in src, f"{example.name} does not use the package"
 
 
@@ -250,20 +250,21 @@ BORROWED = {"K_REVISION"}
 
 
 def configured_names() -> set[str]:
-    """Every environment variable `app.py` reads."""
+    """Every environment variable `config.py` reads, as `env.get("X")` or
+    `env["X"]`."""
     names: set[str] = set()
-    tree = ast.parse((ROOT / "resonate" / "app.py").read_text())
+    tree = ast.parse((ROOT / "resonate" / "config.py").read_text())
     for node in ast.walk(tree):
-        # os.environ.get("X") / os.environ.get("X", default)
+        # env.get("X") / env.get("X", default) / env["X"]
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr in ("get", "pop") and node.args \
                 and isinstance(node.args[0], ast.Constant) \
                 and isinstance(node.args[0].value, str):
-            if "environ" in ast.dump(node.func.value):
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "env":
                 names.add(node.args[0].value)
-        # os.environ["X"]
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
-                and isinstance(node.slice.value, str) and "environ" in ast.dump(node.value):
+                and isinstance(node.slice.value, str) \
+                and isinstance(node.value, ast.Name) and node.value.id == "env":
             names.add(node.slice.value)
     return names
 
@@ -283,7 +284,7 @@ def test_no_configuration_name_collides_with_the_runtime():
     """
     clash = (configured_names() & RUNTIME_OWNED) - BORROWED
     assert not clash, (
-        "app.py reads environment variables functions-framework owns: "
+        "config.py reads environment variables functions-framework owns: "
         + ", ".join(sorted(clash))
         + " -- the container will not start. Prefix them, as ROUTES_* does.")
 
@@ -293,55 +294,6 @@ def test_the_check_can_see_the_names_at_all():
     which would make the check above a decoration."""
     found = configured_names()
     assert {"BUCKET", "PROJECT", "QUEUE", "ROUTES_WORKERS"} <= found, found
-
-
-def test_a_worker_with_no_application_module_registers_nothing():
-    """The gap the first Cloud Run deployment fell into.
-
-    A container that imports `app.py` alone has an empty `sdk.REGISTRY`: it
-    answers `promise.create` and `promise.get` correctly, passes a health
-    check, and raises `KeyError` on the first dispatch it is handed, because
-    the only module defining the example functions was a test file and the
-    build does not ship `test/`. Serving the protocol and being able to run
-    anything are two different things, and only the second needs
-    `ROUTES_APP`.
-    """
-    from resonate import sdk
-
-    before = dict(sdk.REGISTRY)
-    sdk.REGISTRY.clear()
-    try:
-        os.environ.pop("ROUTES_APP", None)
-        from resonate import app
-        app._route()
-        assert sdk.REGISTRY == {}, "nothing should register without ROUTES_APP"
-
-        # `ROUTES_APP` is the override, not the road: in the shape a user
-        # deploys, `main.py` *is* the module the platform loads, so importing
-        # it is what registers and there is nothing to name. This asserts the
-        # override still works, because a split deployment needs it.
-
-        # An importable module by that name, which is what `ROUTES_APP`
-        # takes. In a user's deployment it is their own module; here it is
-        # an example, whose directory goes on the path exactly as the
-        # platform would have put it there.
-        sys.path.insert(0, str(ROOT / "examples" / "research-agent"))
-        os.environ["ROUTES_APP"] = "main"
-        app._route()
-        # Derived from the module, not listed here: a hardcoded set goes stale
-        # the first time the example grows a function, and did.
-        import main as demo
-        expected = {v.key for v in vars(demo).values() if isinstance(v, sdk.Durable)}
-        assert expected, "the example defines no durable functions"
-        assert set(sdk.REGISTRY) == expected, sorted(sdk.REGISTRY)
-    finally:
-        os.environ.pop("ROUTES_APP", None)
-        example = str(ROOT / "examples" / "research-agent")
-        if example in sys.path:
-            sys.path.remove(example)
-        sys.modules.pop("main", None)
-        sdk.REGISTRY.clear()
-        sdk.REGISTRY.update(before)
 
 
 def test_the_example_the_deployment_runs_is_the_one_in_the_readme():

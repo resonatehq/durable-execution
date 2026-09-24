@@ -1,4 +1,4 @@
-→ Routes.protocol(envelope={'kind': 'promise.create', 'data': {'id': 'research.1', 'timeoutAt': 1000000000000, 'param': {'data': <a7f98add 62b>}, 'tags': {'resonate:target': 'https://svc-abc.a.run.app/execute'}}})
+→ Server.protocol(envelope={'kind': 'promise.create', 'data': {'id': 'research.1', 'timeoutAt': 1000000000000, 'param': {'data': <a7f98add 62b>}, 'tags': {'resonate:target': 'https://svc-abc.a.run.app/execute'}}})
 [POST /]
   → Engine.process(msg=PromiseCreate(id='research.1', ...), now=0)
     → store.get(key='wf/research.1')
@@ -10,8 +10,8 @@
     → queue.create(url='https://svc-abc.a.run.app/execute', body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
     ← queue.create = 'task-2'
   ← Engine.process = Reply(status=200, ...)
-← Routes.protocol = ({'head': {'status': 200}, 'data': {'promise': {7 keys}}}, 200)
-→ Routes.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
+← Server.protocol = ({'head': {'status': 200}, 'data': {'promise': {7 keys}}}, 200)
+→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 0}})
 [POST /execute]
   → Worker.execute_until_blocked_outer(task_id='research.1', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1', version=0, pid='rev-1', ttl=20000), now=0)
@@ -77,8 +77,8 @@
       ← queue.delete = None
     ← Engine.process = Reply(status=200, data={})
   ← Worker.execute_until_blocked_outer = 'suspended'
-← Routes.execute = ({'outcome': 'suspended'}, 200)
-→ Routes.execute(body={'kind': 'execute', 'task': {'id': 'research.1:2', 'version': 0}})
+← Server.execute = ({'outcome': 'suspended'}, 200)
+→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:2', 'version': 0}})
 [POST /execute]
   → Worker.execute_until_blocked_outer(task_id='research.1:2', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:2', version=0, pid='rev-1', ttl=20000), now=0)
@@ -108,8 +108,8 @@
       ← queue.create = 'task-10'
     ← Engine.process = Reply(status=200, ...)
   ← Worker.execute_until_blocked_outer = 'done'
-← Routes.execute = ({'outcome': 'done'}, 200)
-→ Routes.execute(body={'kind': 'execute', 'task': {'id': 'research.1:3', 'version': 0}})
+← Server.execute = ({'outcome': 'done'}, 200)
+→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:3', 'version': 0}})
 [POST /execute]
   → Worker.execute_until_blocked_outer(task_id='research.1:3', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:3', version=0, pid='rev-1', ttl=20000), now=0)
@@ -137,8 +137,8 @@
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
   ← Worker.execute_until_blocked_outer = 'done'
-← Routes.execute = ({'outcome': 'done'}, 200)
-→ Routes.execute(body={'kind': 'execute', 'task': {'id': 'research.1:4', 'version': 0}})
+← Server.execute = ({'outcome': 'done'}, 200)
+→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1:4', 'version': 0}})
 [POST /execute]
   → Worker.execute_until_blocked_outer(task_id='research.1:4', version=0)
     → Engine.process(msg=TaskAcquire(id='research.1:4', version=0, pid='rev-1', ttl=20000), now=0)
@@ -166,8 +166,8 @@
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
   ← Worker.execute_until_blocked_outer = 'done'
-← Routes.execute = ({'outcome': 'done'}, 200)
-→ Routes.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
+← Server.execute = ({'outcome': 'done'}, 200)
+→ Server.execute(body={'kind': 'execute', 'task': {'id': 'research.1', 'version': 1}})
 [POST /execute]
   → Worker.execute_until_blocked_outer(task_id='research.1', version=1)
     → Engine.process(msg=TaskAcquire(id='research.1', version=1, pid='rev-1', ttl=20000), now=0)
@@ -223,4 +223,4 @@
       ← queue.delete = None
     ← Engine.process = Reply(status=200, ...)
   ← Worker.execute_until_blocked_outer = 'done'
-← Routes.execute = ({'outcome': 'done'}, 200)
+← Server.execute = ({'outcome': 'done'}, 200)

@@ -36,7 +36,7 @@ instead of a hundred lines. The hundred lines are the artifact.
 A worker runs a durable function under `asyncio.run`, and the branches of
 a `gather` are separate tasks. `contextvars` is the one mechanism that
 survives both: `asyncio` copies the current context into each task it
-creates, so a request id set in `Routes.handle` reaches every store call
+creates, so a request id set in a `Server` route reaches every store call
 made by every branch, without threading an argument through the kernel.
 It is the same mechanism the SDK already uses for `_INVOCATION` and
 `_FRAME`, for the same reason.

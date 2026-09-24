@@ -10,8 +10,13 @@ makes `code/final` the rootdir, so `python -m pytest` from here finds
 everything.
 """
 
+import os
 import sys
 from pathlib import Path
+
+# The examples end in `handler = serve()`, which builds the service when the
+# file is imported. Without this, importing one would reach for a bucket.
+os.environ.setdefault("SIMULATED", "1")
 
 ROOT = Path(__file__).parent
 if str(ROOT) not in sys.path:

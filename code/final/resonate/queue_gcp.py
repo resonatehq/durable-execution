@@ -4,7 +4,7 @@
 that is all the engine needs: put a task in, take one out again. There is
 no third method for receiving, and that is not an omission — Cloud Tasks is
 push-only. A task is delivered by an HTTP POST to the URL it carries, which
-is why `app.py` exists and why a worker is a service rather than a loop.
+is why `server.py` exists and why a worker is a service rather than a loop.
 
 ## What a task is here
 

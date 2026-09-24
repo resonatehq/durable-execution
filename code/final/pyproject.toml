@@ -6,7 +6,7 @@
 # names to already exist in somebody's project. A user's own `app.py` won
 # the lookup and the deploy failed pointing at *their* file; worse, an
 # `app.py` that happened to define `handler` imported silently and served
-# nothing. `from resonate import handler` cannot be shadowed.
+# nothing. `from resonate import serve` cannot be shadowed.
 
 [build-system]
 requires = ["setuptools>=61"]
