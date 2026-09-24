@@ -219,7 +219,7 @@ def explore(depth, limit=None, log=None, ab=BROAD, visit=None):
     """Breadth-first to `depth`. Returns (states per depth, edges, tally).
 
     `visit(now, doc)` is called once per state first reached, which is how
-    something other than the catalogue — the line schema, say — gets handed
+    something other than the catalogue gets handed
     every document the kernel can produce rather than the few a script
     happens to build."""
     start = (0, P.State(Document(), retry_timeout=CFG.retry_timeout))

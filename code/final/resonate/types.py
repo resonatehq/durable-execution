@@ -11,19 +11,15 @@ felt like an edge. That split has a good general argument behind it -- keep
 a domain model away from its serialisation, so one model can have several
 wire formats -- and this system does not collect on it: there is exactly
 one wire format for a request, and the only other encoder in the project,
-`codec.py`, serialises documents rather than requests. What the split cost
-instead was an invariant nobody enforced. A field added to `PromiseCreate`
-has to be learned by `_create`, and with the two in different files nothing
-says so; together, they are eleven lines apart.
+`codec.py`, serialises documents rather than requests.
 
 ## It parses dicts, not bytes
 
 `parse_request` takes an envelope that is already a `dict`. Whoever turned
-the body into one -- Flask, a test, a queue -- did that, and this module
-imports nothing to do it. That is what lets `kernel.py` import this file
-without importing anything of the outside world: the kernel still reads no
-clock, generates no id and calls nothing, and its alphabet now lives beside
-the grammar for writing it down.
+the body into one -- Flask, a test, a queue -- did that. Each request class
+says how it is read: Pydantic validates the data against the class, with
+camelCase names on the wire and the protocol's nested actions unwrapped by
+the field that holds them.
 
 ## Two seams, both JSON
 
@@ -41,7 +37,13 @@ go and nowhere else.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import (
+    BeforeValidator, ConfigDict, Field, StrictInt, StringConstraints, TypeAdapter,
+    ValidationError, with_config,
+)
+from pydantic.alias_generators import to_camel
 
 
 # ---------------------------------------------------------------------------
@@ -67,101 +69,144 @@ class Value:
 
 PROTOCOL_VERSION = "2026-04-01"
 
+#: Requests arrive as JSON in the protocol's camelCase (`timeoutAt`, `corrId`).
+wire = with_config(ConfigDict(alias_generator=to_camel))
 
+#: A non-empty string: every id, pid, address and state.
+Id = Annotated[str, StringConstraints(strict=True, min_length=1)]
+
+
+def _data(action: dict) -> dict:
+    """A nested action is `{kind, head, data}`; only the data is the request."""
+    return action["data"]
+
+
+@wire
 @dataclass(frozen=True)
 class PromiseGet:
-    id: str
+    id: Id
 
 
+@wire
 @dataclass(frozen=True)
 class PromiseCreate:
-    id: str
-    timeout_at: int
+    id: Id
+    timeout_at: StrictInt
     param: Value = field(default_factory=Value)
     tags: dict[str, str] = field(default_factory=dict)
 
 
+@wire
 @dataclass(frozen=True)
 class PromiseSettle:
-    id: str
-    state: str  # RESOLVED | REJECTED | REJECTED_CANCELED
+    id: Id
+    state: Id  # RESOLVED | REJECTED | REJECTED_CANCELED
     value: Value = field(default_factory=Value)
 
 
+@wire
 @dataclass(frozen=True)
 class PromiseRegisterCallback:
-    awaited: str
-    awaiter: str  # same origin as `awaited`, and not equal to it
+    awaited: Id
+    awaiter: Id  # same origin as `awaited`, and not equal to it
 
 
+@wire
 @dataclass(frozen=True)
 class PromiseRegisterListener:
-    awaited: str
-    address: str
+    awaited: Id
+    address: Id
 
 
+@wire
 @dataclass(frozen=True)
 class TaskGet:
-    id: str
+    id: Id
 
 
+@wire
 @dataclass(frozen=True)
 class TaskCreate:
-    pid: str
-    ttl: int
-    action: PromiseCreate  # must carry resonate:target, must not carry resonate:delay
+    pid: Id
+    ttl: StrictInt
+    # must carry resonate:target, must not carry resonate:delay
+    action: Annotated[PromiseCreate, BeforeValidator(_data)]
 
 
+@wire
 @dataclass(frozen=True)
 class TaskAcquire:
-    id: str
-    version: int
-    pid: str
-    ttl: int
+    id: Id
+    version: StrictInt
+    pid: Id
+    ttl: StrictInt
 
 
+@wire
 @dataclass(frozen=True)
 class TaskRelease:
-    id: str
-    version: int
+    id: Id
+    version: StrictInt
 
 
+@wire
 @dataclass(frozen=True)
 class TaskFulfill:
-    id: str
-    version: int
-    action: PromiseSettle  # action.id == id
+    id: Id
+    version: StrictInt
+    action: Annotated[PromiseSettle, BeforeValidator(_data)]  # action.id == id
 
 
+@wire
 @dataclass(frozen=True)
 class TaskSuspend:
-    id: str
-    version: int
-    awaited: tuple[str, ...]  # unique, same origin, none equal to `id`; on the wire, one register_callback action each
+    id: Id
+    version: StrictInt
+    # Unique, same origin, none equal to `id`. On the wire, one
+    # promise.register_callback action each.
+    awaited: Annotated[
+        tuple[Id, ...],
+        Field(validation_alias="actions", min_length=1),
+        BeforeValidator(lambda actions: [_data(a)["awaited"] for a in actions]),
+    ]
 
 
+def _promise_action(action: dict) -> PromiseCreate | PromiseSettle:
+    kind = "promise.create" if action.get("kind") == "promise.create" else "promise.settle"
+    return REQUESTS[kind].validate_python(_data(action))
+
+
+@wire
 @dataclass(frozen=True)
 class TaskFence:
-    id: str
-    version: int
+    id: Id
+    version: StrictInt
     corr_id: str  # the envelope's, echoed in the nested response head
-    action: PromiseCreate | PromiseSettle
+    action: Annotated[PromiseCreate | PromiseSettle, BeforeValidator(_promise_action)]
 
 
+@wire
 @dataclass(frozen=True)
 class TaskHeartbeat:
-    pid: str
-    tasks: tuple[tuple[str, int], ...]  # (id, version), all one origin
+    pid: Id
+    # (id, version), all one origin. On the wire, a list of {id, version}.
+    tasks: Annotated[
+        tuple[tuple[Id, StrictInt], ...],
+        Field(min_length=1),
+        BeforeValidator(lambda tasks: [(t["id"], t["version"]) for t in tasks]),
+    ]
 
 
+@wire
 @dataclass(frozen=True)
 class TaskHalt:
-    id: str
+    id: Id
 
 
+@wire
 @dataclass(frozen=True)
 class TaskContinue:
-    id: str
+    id: Id
 
 
 Req = (
@@ -256,101 +301,37 @@ def decode_message(body: dict) -> Execute | Unblock | Timeout:
 # ---------------------------------------------------------------------------
 
 
-def _value(d: Any) -> Value:
-    d = d or {}
-    if not isinstance(d, dict):
-        raise Invalid("a payload is an object")
-    return Value(headers=d.get("headers"), data=d.get("data"))
-
-
-def _create(d: dict) -> PromiseCreate:
-    return PromiseCreate(_str(d, "id"), _int(d, "timeoutAt"),
-                         _value(d.get("param")), dict(d.get("tags") or {}))
-
-
-def _settle(d: dict) -> PromiseSettle:
-    return PromiseSettle(_str(d, "id"), _str(d, "state"), _value(d.get("value")))
-
-
-def _str(d: dict, k: str) -> str:
-    v = d.get(k)
-    if not isinstance(v, str) or not v:
-        raise Invalid(f"{k} must be a non-empty string")
-    return v
-
-
-def _int(d: dict, k: str) -> int:
-    v = d.get(k)
-    if not isinstance(v, int) or isinstance(v, bool):
-        raise Invalid(f"{k} must be an integer")
-    return v
-
-
-def _action(d: dict) -> dict:
-    """The protocol nests a request inside `action`, with its own kind and
-    head. Only the data is ours to read."""
-    a = d.get("action")
-    if not isinstance(a, dict) or not isinstance(a.get("data"), dict):
-        raise Invalid("action must carry a data object")
-    return a
+REQUESTS = {kind: TypeAdapter(cls) for kind, cls in {
+    "promise.get": PromiseGet,
+    "promise.create": PromiseCreate,
+    "promise.settle": PromiseSettle,
+    "promise.register_callback": PromiseRegisterCallback,
+    "promise.register_listener": PromiseRegisterListener,
+    "task.get": TaskGet,
+    "task.create": TaskCreate,
+    "task.acquire": TaskAcquire,
+    "task.release": TaskRelease,
+    "task.fulfill": TaskFulfill,
+    "task.suspend": TaskSuspend,
+    "task.fence": TaskFence,
+    "task.heartbeat": TaskHeartbeat,
+    "task.halt": TaskHalt,
+    "task.continue": TaskContinue,
+}.items()}
 
 
 def parse_request(envelope: dict) -> Req:
     """One envelope to one typed request, or `Invalid`."""
-    if not isinstance(envelope, dict):
-        raise Invalid("an envelope is an object")
-    kind, d = envelope.get("kind"), envelope.get("data")
-    if not isinstance(d, dict):
-        raise Invalid("data must be an object")
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), dict):
+        raise Invalid("an envelope is an object with a data object")
+    kind, data = envelope.get("kind"), envelope["data"]
+    if kind not in REQUESTS:
+        raise Invalid(f"unknown request kind {kind!r}")
+    if kind == "task.fence":
+        data = {**data, "corrId": str(envelope.get("head", {}).get("corrId", ""))}
     try:
-        match kind:
-            case "promise.get":
-                return PromiseGet(_str(d, "id"))
-            case "promise.create":
-                return _create(d)
-            case "promise.settle":
-                return _settle(d)
-            case "promise.register_callback":
-                return PromiseRegisterCallback(_str(d, "awaited"), _str(d, "awaiter"))
-            case "promise.register_listener":
-                return PromiseRegisterListener(_str(d, "awaited"), _str(d, "address"))
-            case "task.get":
-                return TaskGet(_str(d, "id"))
-            case "task.create":
-                return TaskCreate(_str(d, "pid"), _int(d, "ttl"), _create(_action(d)["data"]))
-            case "task.acquire":
-                return TaskAcquire(_str(d, "id"), _int(d, "version"), _str(d, "pid"), _int(d, "ttl"))
-            case "task.release":
-                return TaskRelease(_str(d, "id"), _int(d, "version"))
-            case "task.fulfill":
-                return TaskFulfill(_str(d, "id"), _int(d, "version"), _settle(_action(d)["data"]))
-            case "task.suspend":
-                actions = d.get("actions")
-                if not isinstance(actions, list) or not actions:
-                    raise Invalid("actions must be a non-empty array")
-                return TaskSuspend(_str(d, "id"), _int(d, "version"),
-                                   tuple(_str(a["data"], "awaited") for a in actions))
-            case "task.fence":
-                action = _action(d)
-                inner = action["data"]
-                nested = _create(inner) if action.get("kind") == "promise.create" else _settle(inner)
-                return TaskFence(_str(d, "id"), _int(d, "version"),
-                                 str(envelope.get("head", {}).get("corrId", "")), nested)
-            case "task.heartbeat":
-                rows = d.get("tasks")
-                if not isinstance(rows, list) or not rows:
-                    raise Invalid("tasks must be a non-empty array")
-                return TaskHeartbeat(_str(d, "pid"),
-                                     tuple((_str(t, "id"), _int(t, "version")) for t in rows))
-            case "task.halt":
-                return TaskHalt(_str(d, "id"))
-            case "task.continue":
-                return TaskContinue(_str(d, "id"))
-            case other:
-                raise Invalid(f"unknown request kind {other!r}")
-    except Invalid:
-        raise
-    except (KeyError, TypeError, AttributeError) as e:
+        return REQUESTS[kind].validate_python(data)
+    except (ValidationError, KeyError, TypeError, AttributeError) as e:
         raise Invalid(f"{kind}: {e}") from None
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from resonate.codec import Malformed, decode, doc_key, encode
+from resonate.codec import decode, doc_key, encode
 from resonate.engine import Engine, origin_of_msg
 from resonate.types import Timeout
 from resonate.kernel import (
@@ -62,7 +62,7 @@ def create(id, to=100_000, tags=None):
 
 def read(store, origin="o"):
     found = store.get(doc_key(origin))
-    return Document() if found is None else decode(found[0].encode(), origin)
+    return Document() if found is None else decode(found[0].encode())
 
 
 def substance(doc):
@@ -75,33 +75,13 @@ def substance(doc):
 # --- the codec -------------------------------------------------------------
 
 
-def test_a_document_round_trips_and_its_bytes_are_stable():
+def test_a_document_round_trips():
     e, store, q = build()
     e.process(create("o:a"), 0)
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 10)
     e.process(PromiseRegisterListener("o:a", "http://l"), 20)
-    raw = store.get(doc_key("o"))[0].encode()
-    doc = decode(raw, "o")
-    assert encode(doc, "o") == raw, "decode then encode is the identity on bytes"
-    assert decode(encode(doc, "o"), "o") == doc, "and encode then decode on documents"
-
-
-def test_a_document_is_bound_to_the_key_it_lives_under():
-    raw = encode(Document(), "o")
-    assert decode(raw, "o") == Document()
-    with pytest.raises(Malformed, match="does not belong to origin"):
-        decode(raw, "other")
-
-
-def test_a_document_from_a_newer_writer_is_refused_rather_than_misread():
-    raw = encode(Document(), "o").replace(b'"v":1', b'"v":99')
-    with pytest.raises(Malformed, match="newer"):
-        decode(raw, "o")
-
-
-def test_an_unknown_line_type_is_skipped_so_a_newer_writer_can_add_one():
-    raw = encode(Document(), "o") + b'\n{"t":"z","something":"new"}'
-    assert decode(raw, "o") == Document()
+    doc = decode(store.get(doc_key("o"))[0].encode())
+    assert decode(encode(doc)) == doc
 
 
 def test_every_origin_gets_its_own_key():

@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from pathlib import Path
 
-import jsonschema
 import pytest
 
 from resonate.testing import properties as P
@@ -36,8 +34,6 @@ from resonate.sdk import Failed, gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)
 AGENT, SEARCH = "worker://agent", "worker://search"
-VALIDATOR = jsonschema.Draft202012Validator(
-    json.loads((Path(__file__).parent.parent / "line.schema.json").read_text()))
 
 #: What the model and the search index were actually asked to do. The point
 #: of the whole exercise is that these do not grow on replay.
@@ -98,15 +94,13 @@ def dispatched(rt) -> list[Send]:
 
 def document(store: Store, origin: str = ORIGIN):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode(), origin) if found else None
+    return decode(found[0].encode()) if found else None
 
 
 def check_bytes(store: Store) -> None:
-    """Every line of every document in the bucket, against the schema."""
+    """Every document in the bucket decodes."""
     for key, (body, _) in store.objects.items():
-        for i, line in enumerate(body.split("\n")):
-            errs = list(VALIDATOR.iter_errors(json.loads(line)))
-            assert not errs, f"{key} line {i}: {[e.message for e in errs]}"
+        decode(body.encode())
 
 
 def answer(store: Store, origin: str = ORIGIN):
@@ -295,7 +289,7 @@ def run(fn, id, *args, extra=()):
     rt.serve(AGENT, Worker(engine, clock, "w"), fn, *extra)
     rt.start(id, fn, *args)
     rt.drain()
-    return decode(store.get(doc_key(id))[0].encode(), id)
+    return decode(store.get(doc_key(id))[0].encode())
 
 
 def test_a_durable_call_can_contain_one():
@@ -354,7 +348,7 @@ def test_a_rejection_is_read_back_rather_than_re_raised_by_running_again():
     for _ in range(6):
         clock.advance(40_000)
         rt.drain()
-    doc = decode(store.get(doc_key("boom.2"))[0].encode(), "boom.2")
+    doc = decode(store.get(doc_key("boom.2"))[0].encode())
     assert doc.get("boom.2").promise.state == "rejected"
     assert CALLS["on_fire"] == called_once, "the failing call was made again"
 

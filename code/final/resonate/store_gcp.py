@@ -65,10 +65,8 @@ from typing import Any
 
 from .errors import Conflict, Unavailable
 
-#: The bytes a document is. Not `application/json`: a document is a sequence
-#: of JSON values, one per line, which is a different media type and worth
-#: being honest about to anything that reads the bucket.
-CONTENT_TYPE = "application/x-ndjson"
+#: The bytes a document is: one JSON object.
+CONTENT_TYPE = "application/json"
 
 
 class Store:

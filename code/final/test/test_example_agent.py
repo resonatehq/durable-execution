@@ -65,7 +65,7 @@ def world(agent):
 
 def document(store, origin=ORIGIN):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode(), origin) if found else None
+    return decode(found[0].encode()) if found else None
 
 
 def pending_question(store):

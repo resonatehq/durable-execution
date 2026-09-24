@@ -84,7 +84,7 @@ def test_the_standard_script_exercises_what_it_claims_to():
     for msg, now in spec.STANDARD_SCRIPT:
         e.process(msg, now)
         raw = store.get(doc_key(spec.ORIGIN))[0].encode()
-        for o in decode(raw, spec.ORIGIN).objects:
+        for o in decode(raw).objects:
             if o.task is not None:
                 seen.add(o.task.state)
             seen.add(o.promise.state)

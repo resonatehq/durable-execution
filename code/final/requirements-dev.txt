@@ -8,7 +8,6 @@
 # -- to run the tests -------------------------------------------------------
 pytest
 hypothesis
-jsonschema
 
 # The module specs in spec/ are claims in the type
 # system, and no test can check a type-system claim. `test_types.py` runs

@@ -213,7 +213,7 @@ def world(*functions):
 
 def document(store, origin):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode(), origin) if found else None
+    return decode(found[0].encode()) if found else None
 
 
 def test_a_run_finishes_on_the_body_it_started_on():

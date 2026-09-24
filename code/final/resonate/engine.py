@@ -104,13 +104,10 @@ class Engine:
     def process(self, msg: Req | Timeout, now: int) -> Reply:
         origin = origin_of_msg(msg)
         key = doc_key(origin, self.prefix)
-        # The store speaks text, because the body of an object in a bucket
-        # is something a person can read; the codec speaks bytes, because a
-        # document's canonical form is bytes. One `encode` each way is the
-        # whole of the difference.
+        # The store speaks text and the codec speaks bytes.
         found = self.store.get(key)
         version = None if found is None else found[1]
-        doc = Document() if found is None else decode(found[0].encode("utf-8"), origin)
+        doc = Document() if found is None else decode(found[0].encode("utf-8"))
         # Fold the clock forward rather than taking it: a caller whose clock
         # has regressed must not be able to un-expire anything.
         now = max(now, doc.clock)
@@ -137,9 +134,9 @@ class Engine:
         if new.timer_at is None:
             # The name names the armed deadline. With nothing armed there is
             # nothing to name, and a leftover name is a handle on something
-            # that no longer exists. Found by the line schema.
+            # that no longer exists.
             new.timer_name = None
-        body = encode(new, origin).decode("utf-8")
+        body = encode(new).decode("utf-8")
         if version is None:
             self.store.put(key, body, if_absent=True)
         else:

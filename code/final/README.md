@@ -67,7 +67,7 @@ differences somewhere less honest, like a dict, so what they say instead is
 the one thing that is true of both: a store is made by calling something.
 
 `test_types.py` is what holds the three specs to that, by running a type
-checker over them — an oracle in the same sense the line schema is. It
+checker over them — an oracle that is not ours. It
 found one: `Engine: EngineC` had been a plain attribute, which is
 invariant, so no class object could ever satisfy it. Every test in this
 project passed with it, and none of them could have caught it.
@@ -162,7 +162,7 @@ should not have to pretend.
 | `resonate/testing/spec/check.py` | every interface against every implementation, top to bottom, in one command |
 | `resonate/testing/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
 | `resonate/queue_gcp.py` | a queue in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
-| `resonate/codec.py` | the document's canonical byte form, and the key it lives under |
+| `resonate/codec.py` | the document as JSON, through Pydantic, and the key it lives under |
 | `resonate/ports.py` | the two interfaces the engine is written against, `StoreP` and `QueueP` |
 | `resonate/errors.py` | the two ways a store or queue refuses: `Conflict` and `Unavailable` |
 | `resonate/testing/faults.py` | the fault injector that cuts power between two effects |
@@ -175,7 +175,6 @@ should not have to pretend.
 | `resonate/__init__.py` | the public surface, and the whole of it: `serve`, `resonate`, `gather`, `sleep`, `Failed` |
 | `pyproject.toml` | what makes `from resonate import ...` an install rather than a copy of somebody else's repository |
 | `test/test_userapp.py` | that a user's whole repository is `main.py` and a one-line `requirements.txt`, asserted by building one |
-| `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `resonate/worker.py` | a worker: `run` claims the task and decides what the outcome means, `_attempt` runs the function from the top |
 | `resonate/testing/sim.py` | a clock a test can move, and the loop that plays Cloud Tasks and the Cloud Run routes in one process |
@@ -188,7 +187,6 @@ should not have to pretend.
 | `test/test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
 | `test/test_spec.py` | our engine run through the conformance suite, over a dict and over a simulated bucket, and two broken engines the suite has to reject |
 | `test/test_store.py` | what only a simulated store has: the power cut, and where in a write it happens |
-| `test/test_schema.py` | every reachable document against the schema, and 29 ways an encoder goes wrong that it has to reject |
 | `test/test_e2e.py` | the research agent, run to completion and killed at each of its 25 writes |
 | `test/test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
 | `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
@@ -198,10 +196,12 @@ should not have to pretend.
 | `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Server` |
 | `test/test_http.py` | the layer above it — the real `handler` in a real Flask app, real requests and status codes, and the agent over nothing but HTTP |
 
-The kernel has no dependencies, and neither does anything the kernel is
-made of: `resonate/engine.py`, `resonate/codec.py`, `resonate/errors.py`, `resonate/ports.py`, `resonate/sdk.py`,
-`resonate/worker.py` and everything under `resonate/testing/` import nothing but the
-standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the auth check in
+The kernel's one dependency is Pydantic, which `resonate/types.py` uses to
+validate requests and `resonate/codec.py` uses to read and write documents.
+Everything else the kernel is made of — `resonate/engine.py`,
+`resonate/errors.py`, `resonate/ports.py`, `resonate/sdk.py`,
+`resonate/worker.py` and everything under `resonate/testing/` — imports
+nothing but the standard library. Only `resonate/store_gcp.py`, `resonate/queue_gcp.py` and the auth check in
 `resonate/server.py` reach for Google's libraries, and they are the three files that
 cannot be tested without them. `requirements-dev.txt` has both groups,
 separately; `python -m pytest` runs 317 tests in about ninety seconds, and

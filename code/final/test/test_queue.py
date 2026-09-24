@@ -125,7 +125,7 @@ def settle(rt, clock, rounds: int = 12) -> None:
 def answer(store):
     found = store.get(doc_key(ORIGIN))
     assert found, "nothing was ever written"
-    doc = decode(found[0].encode(), ORIGIN)
+    doc = decode(found[0].encode())
     root = doc.get(ORIGIN).promise
     assert root.state == "resolved", f"the run did not finish: {root.state}"
     return json.loads(root.value.data)
@@ -196,7 +196,7 @@ def test_a_dropped_deadline_is_the_one_thing_nothing_repairs():
     rt.start(ORIGIN, counted_research, QUESTION)
     settle(rt, clock)
     found = store.get(doc_key(ORIGIN))
-    root = decode(found[0].encode(), ORIGIN).get(ORIGIN).promise
+    root = decode(found[0].encode()).get(ORIGIN).promise
     assert root.state == "resolved", (
         "with nothing suspended on a deadline this still finishes; if it ever "
         "does not, the fan-out has started depending on a sweep")

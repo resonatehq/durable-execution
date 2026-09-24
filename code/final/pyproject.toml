@@ -28,10 +28,11 @@ dependencies = [
     "google-cloud-tasks",
     "google-auth",
     "functions-framework",
+    "pydantic",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "hypothesis", "jsonschema"]
+dev = ["pytest", "hypothesis"]
 
 [tool.setuptools]
 # Explicit rather than discovered: `test`, `live` and the example `main.py`

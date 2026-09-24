@@ -156,7 +156,7 @@ def root(store, origin: str = ORIGIN):
 
     found = store.get(doc_key(origin))
     assert found, "nothing was ever written"
-    return decode(found[0].encode(), origin).get(origin).promise
+    return decode(found[0].encode()).get(origin).promise
 
 
 def start(svc, clock, question: str = QUESTION) -> None:

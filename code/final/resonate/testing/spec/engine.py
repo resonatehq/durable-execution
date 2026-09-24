@@ -294,7 +294,7 @@ def conformance(module: EngineM, script: list[tuple[Msg, int]] | None = None,
 
     def committed() -> Document:
         found = store.get(key)
-        return Document() if found is None else decode(found[0].encode("utf-8"), origin)
+        return Document() if found is None else decode(found[0].encode("utf-8"))
 
     for step, (msg, now) in enumerate(script):
         mark, before = len(fault.log), committed()

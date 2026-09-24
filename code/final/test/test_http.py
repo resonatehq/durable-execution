@@ -196,7 +196,7 @@ def test_the_research_agent_runs_end_to_end_over_http(client, server):
 
     found = server.engine.store.get(doc_key(ORIGIN))
     assert found, "nothing was ever written"
-    root = decode(found[0].encode(), ORIGIN).get(ORIGIN).promise
+    root = decode(found[0].encode()).get(ORIGIN).promise
     assert root.state == "resolved", root.state
     assert json.loads(root.value.data) == EXPECTED
     assert dict(CALLS) == {"agent": 2, "search:durable execution": 1,

@@ -64,7 +64,7 @@ being scheduled oddly.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol
 
 from ...types import HERE
 from ...ports import QueueP

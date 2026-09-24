@@ -85,7 +85,7 @@ one — in `test_conformance.py`, against a double.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol
 
 from ...errors import Conflict, Unavailable
 from ...ports import StoreP

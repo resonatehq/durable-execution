@@ -144,7 +144,7 @@ def test_a_whole_run_from_a_file_a_user_wrote(user_repo):
 
     found = server.engine.store.get(doc_key("define.1"))
     assert found, "nothing was ever written"
-    root = decode(found[0].encode(), "define.1").get("define.1").promise
+    root = decode(found[0].encode()).get("define.1").promise
     assert root.state == "resolved", root.state
     assert json.loads(root.value.data) == {
         "defined": ["ping means something", "pong means something"]}
