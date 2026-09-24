@@ -187,11 +187,15 @@ double that raises the libraries' own exceptions. The third runs against
 Google Cloud Storage itself, but only when `GCS_BUCKET` names a bucket this
 machine can reach.
 
-Status: **the store has run on GCP.** On 2026-09-22 all eleven store claims
-passed against a real bucket. The write rates measured in that run are in
-the `resonate/store_gcp.py` docstring. The queue contract runs against Cloud
-Tasks only when `TASKS_QUEUE` names a queue. A green suite does not imply a
-live deployment.
+Status: **the store has run on GCP, and so has the service.** On 2026-09-22
+all eleven store claims passed against a real bucket. The write rates
+measured in that run are in the `resonate/store_gcp.py` docstring. The queue
+contract runs against Cloud Tasks only when `TASKS_QUEUE` names a queue. On
+2026-09-24 the whole thing ran on Cloud Run over that bucket and a real
+queue, including a run whose only dispatch was deleted from the queue and
+which its deadline brought back. A green suite still does not imply a live
+deployment — only a deployment does, which is why the runs are written down
+where they happened.
 
 ### Files
 
@@ -676,9 +680,20 @@ the root of what you deploy, and the build fails without one.
 
 Only the example's own directory is uploaded, so the buildpack installs
 `resonate` from its `requirements.txt` like any other dependency. Until the
-package is published, that line has to say where the package really is
-(`resonate @ git+https://github.com/...#subdirectory=code/final`). That line
-has not been run in this layout yet. See `examples/research-agent/README.md`.
+package is published, that line has to say where the package really is:
+
+```
+resonate @ git+https://github.com/resonatehq/durable-execution@<sha>#subdirectory=code/final
+```
+
+That line has now been run. On 2026-09-24 `examples/research-agent/`
+deployed from its own directory — buildpack, git install, Cloud Run — and
+three runs went through it: a research run of six promises and nineteen
+commits, a sixty-second `nap` that suspended and was woken by Cloud Tasks,
+and a run whose only dispatch was deleted from the queue and which its
+deadline brought back. `examples/research-agent/README.md` has the detail
+and the two IAM grants it took. `examples/travel-agent/` is the same shape
+and has not been deployed.
 
 The deployment has to get two things right that no code here can
 guarantee:

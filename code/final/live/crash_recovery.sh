@@ -7,12 +7,20 @@
 # which are worth having and neither of which involves Google deciding when
 # a message is delivered.
 #
-# The trick is the pause. A dispatch carries no schedule, so Cloud Tasks
-# delivers it within a second or so, and deleting it afterwards proves
-# nothing -- the work already happened. Pausing the queue first turns a race
-# into a sequence: the engine enqueues, nothing is delivered, we delete the
-# dispatch at our leisure, and only the armed deadline still knows this run
-# exists.
+# The trick is the pause, and the trick to the pause is doing it first and
+# waiting. A dispatch carries no schedule, so Cloud Tasks delivers it within
+# a second or so, and deleting it afterwards proves nothing -- the work
+# already happened. So the queue is paused before the run is started, which
+# turns the race into a sequence: the engine enqueues, nothing is delivered,
+# we delete the dispatch at our leisure, and only the armed deadline still
+# knows this run exists.
+#
+# The wait after the pause is not politeness. `queues pause` returns before
+# it takes effect: on 2026-09-24 a run started immediately after a
+# successful pause had its dispatch delivered anyway and finished in eight
+# seconds, which proves nothing and looks like a pass. Step 2 below is what
+# makes the difference visible -- one promise, gen 1, nothing claimed --
+# before anything is destroyed.
 #
 # Run it with credentials that can pause the queue and read the bucket.
 # Everything it touches it created; it leaves the document behind on purpose.
@@ -25,22 +33,30 @@ PROJECT="${PROJECT:-resonate-chess}"
 REGION="${REGION:-europe-west1}"
 QUEUE="${QUEUE:-de-q}"
 BUCKET="${BUCKET:-de-contract-28425}"
-URL="${URL:-https://de-svc-570193643085.europe-west1.run.app}"
+URL="${URL:-https://research-agent-570193643085.europe-west1.run.app}"
 ORIGIN="${ORIGIN:-research.crash1}"
 
 #: `RETRY_TIMEOUT` on the service, plus room for the timeout message to be
 #: delivered and the run to finish. Shorter than this and a pass is luck.
 WAIT="${WAIT:-90}"
 
+#: How long to let the pause take effect before trusting it. Thirty seconds
+#: was enough; five was not.
+SETTLE="${SETTLE:-30}"
+
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 
-say "0. clean slate"
-gcloud storage rm "gs://$BUCKET/wf/**" --project="$PROJECT" 2>/dev/null || true
+say "0. clean slate, and pause before anything is running"
+gcloud storage rm "gs://$BUCKET/wf/$ORIGIN" --project="$PROJECT" 2>/dev/null || true
 gcloud tasks queues purge "$QUEUE" --location="$REGION" --project="$PROJECT" --quiet
-gcloud tasks queues resume "$QUEUE" --location="$REGION" --project="$PROJECT" --quiet
+gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" --quiet
+sleep "$SETTLE"
 
 say "1. start the run"
-TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
+# A service account can mint a token for a named audience; a user
+# credential cannot, and Cloud Run takes its own id token anyway.
+TOKEN="$(gcloud auth print-identity-token --audiences="$URL" 2>/dev/null \
+  || gcloud auth print-identity-token)"
 NOW="$(( $(date +%s) * 1000 ))"
 PARAM='{\"f\": \"research\", \"a\": [\"What is durable execution?\"]}'
 curl -sS -X POST "$URL/" \
@@ -52,10 +68,11 @@ curl -sS -X POST "$URL/" \
         \"param\":{\"data\":\"$PARAM\"},
         \"tags\":{\"resonate:target\":\"$URL/\"}}}" | head -c 400
 echo
+sleep 10
 
-say "2. pause, so nothing else is delivered while we interfere"
-gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" --quiet
-sleep 5
+say "2. nothing should have run: one promise, gen 1, nothing claimed"
+gcloud storage cat "gs://$BUCKET/wf/$ORIGIN" --project="$PROJECT" | head -c 400
+echo
 
 say "3. what is queued now"
 gcloud tasks list --queue="$QUEUE" --location="$REGION" --project="$PROJECT" \
@@ -67,7 +84,7 @@ DELETED=0
 while read -r NAME; do
   BODY=$(gcloud tasks describe "$NAME" --queue="$QUEUE" --location="$REGION" \
            --project="$PROJECT" --response-view=full \
-           --format="value(httpRequest.body)" | base64 -d)
+           --format="value(httpRequest.body)" 2>/dev/null | base64 -d 2>/dev/null) || true
   case "$BODY" in
     *'"kind": "execute"'*)
       gcloud tasks delete "$NAME" --queue="$QUEUE" --location="$REGION" \
@@ -79,8 +96,10 @@ done < <(gcloud tasks list --queue="$QUEUE" --location="$REGION" \
            --project="$PROJECT" --format="value(name.basename())")
 echo "destroyed $DELETED dispatch(es)"
 if [ "$DELETED" -eq 0 ]; then
-  echo "NOTHING WAS DESTROYED -- the dispatch was delivered before the pause."
-  echo "The run is proceeding normally and this tells you nothing. Re-run."
+  echo "NOTHING WAS DESTROYED. With the queue paused first there should have"
+  echo "been exactly one dispatch to destroy, so either the pause did not"
+  echo "hold or the run never got as far as enqueuing one. Read step 2 and"
+  echo "re-run; this tells you nothing either way."
   exit 2
 fi
 

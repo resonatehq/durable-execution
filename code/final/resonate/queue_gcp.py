@@ -35,6 +35,17 @@ nothing -- so nothing re-arms it.
 The queue contract in `testing/spec/queue.py` runs against a real queue
 when `TASKS_QUEUE` names one. A paused queue is enough: it accepts creation
 and deletion, which is the whole contract, and dispatches nothing.
+
+Delivery is verified by deploying rather than by claiming. A Cloud Run
+service built from `examples/research-agent/` ran three runs through a
+real queue: dispatches arrived, a deadline set sixty seconds out arrived
+sixty seconds out with nothing running in between, and a run whose only
+dispatch was deleted from the queue was brought back by the deadline that
+outlived it. Beside the `actAs` grant above, that found one more: the
+account being signed for also needs `roles/run.invoker` on the service it
+is signed for, and until IAM propagates -- twenty seconds or so -- every
+delivery is a `403` the service never sees. The queue's retries carry it
+through, which is why that policy has to be generous.
 """
 
 from __future__ import annotations
