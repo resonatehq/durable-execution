@@ -17,7 +17,7 @@ from __future__ import annotations
 import copy
 import re
 from bisect import insort
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -119,18 +119,6 @@ class Task:
     resumes: set[str] = field(default_factory=set)  # awaited ids settled but not yet observed
     retry_at: int | None = None  # armed while pending
     lease_at: int | None = None  # armed while acquired
-
-    def disarm(self) -> None:
-        self.retry_at = None
-        self.lease_at = None
-
-    def arm_retry(self, at: int) -> None:
-        self.retry_at = at
-        self.lease_at = None
-
-    def arm_lease(self, at: int) -> None:
-        self.lease_at = at
-        self.retry_at = None
 
     def to_record(self, id: str) -> dict[str, Any]:
         """This task as a reply carries it: its public fields, and its id."""
@@ -249,22 +237,56 @@ def is_valid_address(address: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# A decision in progress
+# What a decision returns
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class Tx:
-    doc: Document  # a copy of the input; mutated freely
-    sends: list[Send] = field(default_factory=list)
+class Commands:
+    """What a decision wants done: the new version of every object it
+    changed, and the messages to send. A decision never mutates the
+    document it reads; `add` is the whole of what it wrote, so an empty
+    `add` means nothing changed."""
+
+    add: list[Object] = field(default_factory=list)
+    send: list[Send] = field(default_factory=list)
+
+    def merge(self, other: Commands) -> Commands:
+        return Commands(self.add + other.add, self.send + other.send)
+
+    def view(self, doc: Document) -> Document:
+        """`doc` with every added object in place of the one it replaces."""
+        objects = {o.id: o for o in doc.objects}
+        for o in self.add:
+            objects[o.id] = o
+        return Document(sorted(objects.values(), key=lambda o: dewey(o.id)),
+                        doc.clock, doc.gen, doc.timer_at, doc.timer_name)
 
 
-def send_execute(tx: Tx, task_id: str, version: int) -> None:
-    """Queue a dispatch. A promise with no target has nowhere to send."""
-    o = tx.doc.get(task_id)
-    address = o.promise.target() if o is not None else None
-    if address is not None:
-        tx.sends.append(Send(address, Execute(task_id, version)))
+NOTHING = Commands()
+
+
+def execute(o: Object) -> list[Send]:
+    """A dispatch for `o`'s task. A promise with no target has nowhere to send."""
+    address = o.promise.target()
+    return [] if address is None else [Send(address, Execute(o.id, o.task.version))]
+
+
+def pending(t: Task, retry_at: int) -> Task:
+    return replace(t, state=T_PENDING, pid=None, ttl=None, retry_at=retry_at, lease_at=None)
+
+
+def acquired(t: Task, pid: str, ttl: int, now: int) -> Task:
+    """Claimed: the version bump is the fence, and the resumes the previous
+    run buffered are dropped."""
+    return replace(t, state=T_ACQUIRED, version=t.version + 1, pid=pid, ttl=ttl,
+                   resumes=set(), retry_at=None, lease_at=now + ttl)
+
+
+def parked(t: Task, state: str) -> Task:
+    """Suspended, halted or fulfilled: nobody holds it and no timer is armed."""
+    return replace(t, state=state, pid=None, ttl=None, resumes=set(),
+                   retry_at=None, lease_at=None)
 
 
 # ---------------------------------------------------------------------------
@@ -274,68 +296,116 @@ def send_execute(tx: Tx, task_id: str, version: int) -> None:
 
 def handle_internal(doc: Document, now: int, cfg: KernelCfg) -> list[Effect]:
     """Sweep every deadline at or before `now`, in one pass."""
-    tx = Tx(doc=copy.deepcopy(doc))
-    sweep(tx, now, cfg)
-    return commit(doc, tx)
+    return commit(doc, sweep(doc, now, cfg))
 
 
-def sweep(tx: Tx, now: int, cfg: KernelCfg) -> None:
-    """Four phases, each reading the state the previous one left: settle every
-    expired promise, run their settlement chains, re-dispatch pending tasks
-    past their retry deadline, reclaim acquired tasks past their lease. A
-    promise without a target expires here like any other; its chain simply
-    has nobody to fulfil, wake, or notify, so it sends nothing."""
-
-    # Phase 1: settle first, all of them, so an awaiter that is itself expiring
-    # is already settled when its awaited promise fans out, and is skipped
-    # rather than resumed. `settled_at` is the deadline, not `now`.
-    expired = [o for o in tx.doc.objects if o.promise.state == PENDING and now >= o.promise.timeout_at]
+def sweep(doc: Document, now: int, cfg: KernelCfg) -> Commands:
+    """Four passes, each reading the document the passes before it left:
+    settle every expired promise, run their settlement chains, re-dispatch
+    pending tasks past their retry deadline, reclaim acquired tasks past
+    their lease. A promise without a target expires here like any other; its
+    chain simply has nobody to fulfil, wake, or notify, so it sends nothing."""
+    # Settle first, all of them, so an awaiter that is itself expiring is
+    # already settled when its awaited promise fans out, and is skipped rather
+    # than resumed. `settled_at` is the deadline, not `now`.
+    expired = [o for o in doc.objects
+               if o.promise.state == PENDING and now >= o.promise.timeout_at]
+    c = Commands(add=[
+        replace(o, promise=replace(o.promise, state=o.promise.timeout_state(),
+                                   settled_at=o.promise.timeout_at))
+        for o in expired])
+    # The chains, in id order.
     for o in expired:
-        o.promise.state = o.promise.timeout_state()
-        o.promise.settled_at = o.promise.timeout_at
-    # Phase 2: the chains, in id order.
-    for o in expired:
-        trigger_settlement(tx, o.id, now, cfg)
+        c = c.merge(trigger_settlement(c.view(doc), o.id, now, cfg))
 
-    # Phase 3: re-dispatch pending tasks whose retry deadline has passed. Read
-    # after phase 2: a task the settlement just fulfilled has no timer left.
-    for o in tx.doc.objects:
+    # Re-dispatch pending tasks whose retry deadline has passed. Read after
+    # the chains: a task a settlement just fulfilled has no timer left.
+    for o in c.view(doc).objects:
         t = o.task
         if t is not None and t.state == T_PENDING and t.retry_at is not None and t.retry_at <= now:
-            t.arm_retry(now + cfg.retry_timeout)
-            send_execute(tx, o.id, t.version)
+            o = replace(o, task=replace(t, retry_at=now + cfg.retry_timeout))
+            c = c.merge(Commands([o], execute(o)))
 
-    # Phase 4: expire leases. The holder is presumed gone, so the task goes
-    # back to pending at the *same* version and is re-dispatched; whoever picks
-    # it up bumps the version and fences the old holder out.
-    for o in tx.doc.objects:
+    # Expire leases. The holder is presumed gone, so the task goes back to
+    # pending at the *same* version and is re-dispatched; whoever picks it up
+    # bumps the version and fences the old holder out.
+    for o in c.view(doc).objects:
         t = o.task
         if t is not None and t.state == T_ACQUIRED and t.lease_at is not None and t.lease_at <= now:
-            t.state = T_PENDING
-            t.pid = None
-            t.ttl = None
-            t.arm_retry(now + cfg.retry_timeout)
-            send_execute(tx, o.id, t.version)
+            o = replace(o, task=pending(t, now + cfg.retry_timeout))
+            c = c.merge(Commands([o], execute(o)))
+    return c
 
 
-def commit(doc: Document, tx: Tx) -> list[Effect]:
-    """The effects of a decision, in the order the shell performs them: arm
-    the new timer, write the document, clear the old timer, send.
+def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[list[Effect], Reply]:
+    """Sweep, then decide one request against the swept document, then merge.
 
-    A decision that changed nothing has no effects at all, so a read writes
-    nothing."""
-    old, new = doc.timer_at, min_deadline(tx.doc)
-    tx.doc.timer_at = new
-    if tx.doc.objects == doc.objects and old == new:
-        assert not tx.sends, "a decision that changed nothing owes no effects"
+    Sends keep their order, the sweep's first, then the request's, except
+    that a sweep dispatch the request overtook is dropped."""
+    swept = sweep(doc, now, cfg)
+    mid = swept.view(doc)
+    match req:
+        case PromiseGet():
+            reply, c = promise_get(mid, req)
+        case PromiseCreate():
+            reply, c = promise_create(mid, req, now, cfg)
+        case PromiseSettle():
+            reply, c = promise_settle(mid, req, now, cfg)
+        case PromiseRegisterCallback():
+            reply, c = promise_register_callback(mid, req)
+        case PromiseRegisterListener():
+            reply, c = promise_register_listener(mid, req)
+        case TaskGet():
+            reply, c = task_get(mid, req)
+        case TaskCreate():
+            reply, c = task_create(mid, req, now, cfg)
+        case TaskAcquire():
+            reply, c = task_acquire(mid, req, now, cfg)
+        case TaskRelease():
+            reply, c = task_release(mid, req, now, cfg)
+        case TaskFulfill():
+            reply, c = task_fulfill(mid, req, now, cfg)
+        case TaskSuspend():
+            reply, c = task_suspend(mid, req, cfg)
+        case TaskFence():
+            reply, c = task_fence(mid, req, now, cfg)
+        case TaskHeartbeat():
+            reply, c = task_heartbeat(mid, req, now)
+        case TaskHalt():
+            reply, c = task_halt(mid, req)
+        case TaskContinue():
+            reply, c = task_continue(mid, req, now, cfg)
+
+    # A dispatch the request overtook is not sent: the task it names is no
+    # longer pending at that version (the request settled its promise, or
+    # acquired it), so the message could only be refused.
+    final = c.view(mid)
+    kept = []
+    for e in swept.send:
+        if isinstance(e.msg, Execute):
+            o = final.get(e.msg.task_id)
+            if o is None or o.task is None or o.task.state != T_PENDING or o.task.version != e.msg.version:
+                continue
+        kept.append(e)
+    return commit(doc, Commands(swept.add + c.add, kept + c.send)), reply
+
+
+def commit(doc: Document, c: Commands) -> list[Effect]:
+    """The effects, in the order the shell performs them: arm the new timer,
+    write the document, clear the old timer, send. A decision that added
+    nothing has no effects at all, so a read writes nothing."""
+    if not c.add:
+        assert not c.send, "a decision that changed nothing owes no effects"
         return []
+    new = c.view(doc)
+    old, new.timer_at = doc.timer_at, min_deadline(new)
     fx: list[Effect] = []
-    if old != new and new is not None:
-        fx.append(SetTimeout(new))
-    fx.append(SetDocument(tx.doc))
-    if old != new and old is not None:
+    if old != new.timer_at and new.timer_at is not None:
+        fx.append(SetTimeout(new.timer_at))
+    fx.append(SetDocument(new))
+    if old != new.timer_at and old is not None:
         fx.append(DelTimeout(old))
-    fx.extend(tx.sends)
+    fx.extend(c.send)
     return fx
 
 
@@ -344,145 +414,83 @@ def document_after(doc: Document, fx: list[Effect]) -> Document:
     return next((e.doc for e in fx if isinstance(e, SetDocument)), doc)
 
 
-def handle_external(doc: Document, req: Req, now: int, cfg: KernelCfg) -> tuple[list[Effect], Reply]:
-    """Sweep, then decide one request against the swept document, then merge.
-
-    The sweep's own timer effects are discarded: the merged timer transition
-    is from the document that came in to the document that goes out, so an
-    intermediate deadline the request then moved is never armed. Sends keep
-    their order, the sweep's first, then the request's, except that a sweep
-    dispatch the request overtook is dropped."""
-    swept = Tx(doc=copy.deepcopy(doc))
-    sweep(swept, now, cfg)
-    tx = Tx(doc=swept.doc)
-    match req:
-        case PromiseGet():
-            reply = promise_get(tx, req)
-        case PromiseCreate():
-            reply = promise_create(tx, req, now, cfg)
-        case PromiseSettle():
-            reply = promise_settle(tx, req, now, cfg)
-        case PromiseRegisterCallback():
-            reply = promise_register_callback(tx, req, now, cfg)
-        case PromiseRegisterListener():
-            reply = promise_register_listener(tx, req)
-        case TaskGet():
-            reply = task_get(tx, req)
-        case TaskCreate():
-            reply = task_create(tx, req, now, cfg)
-        case TaskAcquire():
-            reply = task_acquire(tx, req, now, cfg)
-        case TaskRelease():
-            reply = task_release(tx, req, now, cfg)
-        case TaskFulfill():
-            reply = task_fulfill(tx, req, now, cfg)
-        case TaskSuspend():
-            reply = task_suspend(tx, req, cfg)
-        case TaskFence():
-            reply = task_fence(tx, req, now, cfg)
-        case TaskHeartbeat():
-            reply = task_heartbeat(tx, req, now)
-        case TaskHalt():
-            reply = task_halt(tx, req)
-        case TaskContinue():
-            reply = task_continue(tx, req, now, cfg)
-
-    # The sweep's sends first, then the request's. A dispatch the request
-    # overtook is not sent: the task it names is no longer pending at that
-    # version (the request settled its promise, or acquired it), so the
-    # message could only be refused.
-    kept = []
-    for e in swept.sends:
-        if isinstance(e.msg, Execute):
-            o = tx.doc.get(e.msg.task_id)
-            if o is None or o.task is None or o.task.state != T_PENDING or o.task.version != e.msg.version:
-                continue
-        kept.append(e)
-    tx.sends = kept + tx.sends
-    return commit(doc, tx), reply
-
-
 # ---------------------------------------------------------------------------
 # Promise operations
 # ---------------------------------------------------------------------------
 
 
-def promise_get(tx: Tx, r: PromiseGet) -> Reply:
-    o = tx.doc.get(r.id)
+def promise_get(doc: Document, r: PromiseGet) -> tuple[Reply, Commands]:
+    o = doc.get(r.id)
     if o is None:
-        return Reply.err(404, "Promise not found")
-    return Reply.ok({"promise": o.promise.to_record(r.id)})
+        return Reply.err(404, "Promise not found"), NOTHING
+    return Reply.ok({"promise": o.promise.to_record(r.id)}), NOTHING
 
 
-def promise_create(tx: Tx, r: PromiseCreate, now: int, cfg: KernelCfg) -> Reply:
+def promise_create(doc: Document, r: PromiseCreate, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
     address = r.tags.get(TAG_TARGET)
     if address is not None and not is_valid_address(address):
-        return Reply.err(400, "Invalid resonate:target address")
+        return Reply.err(400, "Invalid resonate:target address"), NOTHING
     if r.tags.get(TAG_TIMER) == "true" and address is not None:
-        return Reply.err(400, "A timer promise must not have a resonate:target tag")
+        return Reply.err(400, "A timer promise must not have a resonate:target tag"), NOTHING
     delay = r.tags.get(TAG_DELAY)
     if delay is not None:
         if not delay.isdigit():
-            return Reply.err(400, "resonate:delay must be a non-negative integer")
+            return Reply.err(400, "resonate:delay must be a non-negative integer"), NOTHING
         if int(delay) >= r.timeout_at:
-            return Reply.err(400, "resonate:delay must be less than timeoutAt")
+            return Reply.err(400, "resonate:delay must be less than timeoutAt"), NOTHING
         if address is None:
-            return Reply.err(400, "resonate:delay requires a resonate:target tag")
-    o = tx.doc.get(r.id)
+            return Reply.err(400, "resonate:delay requires a resonate:target tag"), NOTHING
+    o = doc.get(r.id)
     if o is not None:
         # Create is idempotent on id alone: the stored promise wins.
-        return Reply.ok({"promise": o.promise.to_record(r.id)})
+        return Reply.ok({"promise": o.promise.to_record(r.id)}), NOTHING
 
-    o = insert_promise(tx, r.id, r, now)
-    record = o.promise.to_record(r.id)
-    if o.promise.target() is None:
+    p = new_promise(r, now)
+    reply = Reply.ok({"promise": p.to_record(r.id)})
+    if p.target() is None:
         # No target means no task and no armed deadline: such a promise only
         # ever expires lazily, when someone reads it.
-        return Reply.ok({"promise": record})
-
-    o.task = Task(state=T_FULFILLED, version=0)
-    if o.promise.state != PENDING:
+        return reply, Commands([Object(r.id, p)])
+    if p.state != PENDING:
         # Born settled, so its task is born done.
-        return Reply.ok({"promise": record})
-    o.task.state = T_PENDING
+        return reply, Commands([Object(r.id, p, Task(state=T_FULFILLED))])
     if delay is not None and now < int(delay):
         # An absolute instant before which the task must not be dispatched:
         # arm the retry timer there and send nothing.
-        o.task.arm_retry(int(delay))
-    else:
-        o.task.arm_retry(o.promise.created_at + cfg.retry_timeout)
-        send_execute(tx, r.id, 0)
-    return Reply.ok({"promise": record})
+        return reply, Commands([Object(r.id, p, Task(state=T_PENDING, retry_at=int(delay)))])
+    o = Object(r.id, p, Task(state=T_PENDING, retry_at=p.created_at + cfg.retry_timeout))
+    return reply, Commands([o], execute(o))
 
 
-def promise_settle(tx: Tx, r: PromiseSettle, now: int, cfg: KernelCfg) -> Reply:
+def promise_settle(doc: Document, r: PromiseSettle, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
     if r.state not in SETTLE_STATES:
-        return Reply.err(400, "Invalid settle state")
-    o = tx.doc.get(r.id)
+        return Reply.err(400, "Invalid settle state"), NOTHING
+    o = doc.get(r.id)
     if o is None:
-        return Reply.err(404, "Promise not found")
+        return Reply.err(404, "Promise not found"), NOTHING
     if o.promise.state != PENDING:
         # Settlement is terminal: a second settle reports the first one.
-        return Reply.ok({"promise": o.promise.to_record(r.id)})
-    return Reply.ok({"promise": settle(tx, r.id, r.state, r.value, now, cfg)})
+        return Reply.ok({"promise": o.promise.to_record(r.id)}), NOTHING
+    record, c = settle(doc, r.id, r.state, r.value, now, cfg)
+    return Reply.ok({"promise": record}), c
 
 
-def promise_register_callback(tx: Tx, r: PromiseRegisterCallback, now: int, cfg: KernelCfg) -> Reply:
+def promise_register_callback(doc: Document, r: PromiseRegisterCallback) -> tuple[Reply, Commands]:
     if r.awaited == r.awaiter:
-        return Reply.err(400, "Awaited and awaiter must be different promises")
+        return Reply.err(400, "Awaited and awaiter must be different promises"), NOTHING
     if origin_of(r.awaited) != origin_of(r.awaiter):
-        return Reply.err(400, "Awaiter and awaited must belong to the same origin")
-    awaited = tx.doc.get(r.awaited)
+        return Reply.err(400, "Awaiter and awaited must belong to the same origin"), NOTHING
+    awaited = doc.get(r.awaited)
     if awaited is None:
-        return Reply.err(404, "Awaited promise not found")
-    awaiter = tx.doc.get(r.awaiter)
+        return Reply.err(404, "Awaited promise not found"), NOTHING
+    awaiter = doc.get(r.awaiter)
     if awaiter is None:
-        return Reply.err(422, "Awaiter promise not found")
+        return Reply.err(422, "Awaiter promise not found"), NOTHING
     if awaiter.promise.target() is None:
-        return Reply.err(422, "Awaiter promise has no resonate:target tag")
+        return Reply.err(422, "Awaiter promise has no resonate:target tag"), NOTHING
     if not awaited.promise.is_external():
-        return Reply.err(422, "Awaited promise is not awaitable")
-    record = awaited.promise.to_record(r.awaited)
+        return Reply.err(422, "Awaited promise is not awaitable"), NOTHING
+    reply = Reply.ok({"promise": awaited.promise.to_record(r.awaited)})
 
     # Registering against a promise that has already settled does nothing: the
     # caller learns the outcome from the record it gets back. It is not a wake,
@@ -499,26 +507,28 @@ def promise_register_callback(tx: Tx, r: PromiseRegisterCallback, now: int, cfg:
     # coalesced machine has no later step, and the specification's
     # `promiseRegisterCallback` accordingly does nothing here:
     # `spec/02-abstract/external.lean:78-83`. Found by the Hypothesis machine.)
-    if awaited.promise.state == PENDING and awaiter.promise.state == PENDING:
-        # Registration order is protocol-visible; the pair is unique.
-        if r.awaiter not in awaited.promise.callbacks:
-            awaited.promise.callbacks.append(r.awaiter)
-    return Reply.ok({"promise": record})
+    p = awaited.promise
+    if p.state != PENDING or awaiter.promise.state != PENDING or r.awaiter in p.callbacks:
+        return reply, NOTHING
+    # Registration order is protocol-visible; the pair is unique.
+    return reply, Commands([replace(awaited, promise=replace(p, callbacks=[*p.callbacks, r.awaiter]))])
 
 
-def promise_register_listener(tx: Tx, r: PromiseRegisterListener) -> Reply:
+def promise_register_listener(doc: Document, r: PromiseRegisterListener) -> tuple[Reply, Commands]:
     if not is_valid_address(r.address):
-        return Reply.err(400, "Invalid listener address")
-    o = tx.doc.get(r.awaited)
+        return Reply.err(400, "Invalid listener address"), NOTHING
+    o = doc.get(r.awaited)
     if o is None:
-        return Reply.err(404, "Awaited promise not found")
+        return Reply.err(404, "Awaited promise not found"), NOTHING
     if not o.promise.is_external():
         # A listener is an obligation, and the server owes an observation only
         # where someone can be blocked.
-        return Reply.err(422, "Awaited promise is not awaitable")
-    if o.promise.state == PENDING and r.address not in o.promise.listeners:
-        o.promise.listeners.append(r.address)
-    return Reply.ok({"promise": o.promise.to_record(r.awaited)})
+        return Reply.err(422, "Awaited promise is not awaitable"), NOTHING
+    reply = Reply.ok({"promise": o.promise.to_record(r.awaited)})
+    p = o.promise
+    if p.state != PENDING or r.address in p.listeners:
+        return reply, NOTHING
+    return reply, Commands([replace(o, promise=replace(p, listeners=[*p.listeners, r.address]))])
 
 
 # ---------------------------------------------------------------------------
@@ -526,255 +536,212 @@ def promise_register_listener(tx: Tx, r: PromiseRegisterListener) -> Reply:
 # ---------------------------------------------------------------------------
 
 
-def task_get(tx: Tx, r: TaskGet) -> Reply:
-    o = tx.doc.get(r.id)
+def task_get(doc: Document, r: TaskGet) -> tuple[Reply, Commands]:
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    return Reply.ok({"task": o.task.to_record(r.id)})
+        return Reply.err(404, "Task not found"), NOTHING
+    return Reply.ok({"task": o.task.to_record(r.id)}), NOTHING
 
 
-def task_create(tx: Tx, r: TaskCreate, now: int, cfg: KernelCfg) -> Reply:
+def claimed(doc: Document, o: Object, cfg: KernelCfg) -> Reply:
+    """The reply to a claim: the task, its promise, and the preload."""
+    return Reply.ok({
+        "task": o.task.to_record(o.id),
+        "promise": o.promise.to_record(o.id),
+        "preload": preload(doc, o.id, cfg),
+    })
+
+
+def task_create(doc: Document, r: TaskCreate, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
     """A worker claiming work by describing it: creates the promise if absent
     and hands back a task already acquired by the caller. No dispatch, because
     the caller *is* the worker."""
     a = r.action
     address = a.tags.get(TAG_TARGET)
     if address is None:
-        return Reply.err(400, "Action must have a resonate:target tag")
+        return Reply.err(400, "Action must have a resonate:target tag"), NOTHING
     if not is_valid_address(address):
-        return Reply.err(400, "Invalid resonate:target address")
+        return Reply.err(400, "Invalid resonate:target address"), NOTHING
     if a.tags.get(TAG_TIMER) == "true":
-        return Reply.err(400, "A timer promise must not have a resonate:target tag")
+        return Reply.err(400, "A timer promise must not have a resonate:target tag"), NOTHING
     if TAG_DELAY in a.tags:
-        return Reply.err(400, "Action must not have a resonate:delay tag")
+        return Reply.err(400, "Action must not have a resonate:delay tag"), NOTHING
     if r.ttl < 1:
-        return Reply.err(400, "TTL must be a positive integer")
-    o = tx.doc.get(a.id)
+        return Reply.err(400, "TTL must be a positive integer"), NOTHING
+    o = doc.get(a.id)
     if o is not None and o.task is not None:
-        t = o.task
-        if t.state == T_PENDING:
-            # The version bump is the fence: every later write by a previous
-            # holder fails its version check.
-            t.state = T_ACQUIRED
-            t.version += 1
-            t.pid = r.pid
-            t.ttl = r.ttl
-            t.resumes.clear()
-            t.arm_lease(now + r.ttl)
-            return Reply.ok({
-                "task": t.to_record(a.id),
-                "promise": o.promise.to_record(a.id),
-                "preload": preload(tx.doc, a.id, cfg),
-            })
-        if t.state == T_FULFILLED:
+        if o.task.state == T_PENDING:
+            o = replace(o, task=acquired(o.task, r.pid, r.ttl, now))
+            c = Commands([o])
+            return claimed(c.view(doc), o, cfg), c
+        if o.task.state == T_FULFILLED:
             # The work is already done. No preload on this branch.
             return Reply.ok({
-                "task": t.to_record(a.id),
+                "task": o.task.to_record(a.id),
                 "promise": o.promise.to_record(a.id),
                 "preload": [],
-            })
-        return Reply.err(409, "Already exists")
+            }), NOTHING
+        return Reply.err(409, "Already exists"), NOTHING
     if o is not None:
         # A promise without a task is a promise nobody can be dispatched for.
-        return Reply.err(422, "The promise does not have a resonate:target tag")
+        return Reply.err(422, "The promise does not have a resonate:target tag"), NOTHING
 
     # Neither exists: create both. The task is born acquired by the caller,
     # never pending, so no dispatch is emitted.
-    o = insert_promise(tx, a.id, a, now)
-    t = Task(state=T_FULFILLED, version=0)
-    if o.promise.state == PENDING:
-        t.state = T_ACQUIRED
-        t.version = 1
-        t.pid = r.pid
-        t.ttl = r.ttl
-        t.arm_lease(now + r.ttl)
-    o.task = t
-    return Reply.ok({
-        "task": t.to_record(a.id),
-        "promise": o.promise.to_record(a.id),
-        "preload": preload(tx.doc, a.id, cfg),
-    })
+    p = new_promise(a, now)
+    if p.state == PENDING:
+        t = Task(state=T_ACQUIRED, version=1, pid=r.pid, ttl=r.ttl, lease_at=now + r.ttl)
+    else:
+        t = Task(state=T_FULFILLED)
+    o = Object(a.id, p, t)
+    c = Commands([o])
+    return claimed(c.view(doc), o, cfg), c
 
 
-def task_acquire(tx: Tx, r: TaskAcquire, now: int, cfg: KernelCfg) -> Reply:
+def task_acquire(doc: Document, r: TaskAcquire, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
     if r.ttl < 1:
-        return Reply.err(400, "TTL must be a positive integer")
-    o = tx.doc.get(r.id)
+        return Reply.err(400, "TTL must be a positive integer"), NOTHING
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    t = o.task
-    if t.state != T_PENDING:
-        return Reply.err(409, "Task is not pending")
-    if t.version != r.version:
-        return Reply.err(409, "Version mismatch")
-    # Claim: bump the version (the fence), take the lease, drop the resumes
-    # the previous run buffered.
-    t.state = T_ACQUIRED
-    t.version += 1
-    t.pid = r.pid
-    t.ttl = r.ttl
-    t.resumes.clear()
-    t.arm_lease(now + r.ttl)
-    return Reply.ok({
-        "task": t.to_record(r.id),
-        "promise": o.promise.to_record(r.id),
-        "preload": preload(tx.doc, r.id, cfg),
-    })
+        return Reply.err(404, "Task not found"), NOTHING
+    if o.task.state != T_PENDING:
+        return Reply.err(409, "Task is not pending"), NOTHING
+    if o.task.version != r.version:
+        return Reply.err(409, "Version mismatch"), NOTHING
+    o = replace(o, task=acquired(o.task, r.pid, r.ttl, now))
+    c = Commands([o])
+    return claimed(c.view(doc), o, cfg), c
 
 
-def task_release(tx: Tx, r: TaskRelease, now: int, cfg: KernelCfg) -> Reply:
-    o = tx.doc.get(r.id)
+def task_release(doc: Document, r: TaskRelease, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    t = o.task
-    if t.state != T_ACQUIRED or t.version != r.version:
-        return Reply.err(409, "Task version mismatch or invalid state")
+        return Reply.err(404, "Task not found"), NOTHING
+    if o.task.state != T_ACQUIRED or o.task.version != r.version:
+        return Reply.err(409, "Task version mismatch or invalid state"), NOTHING
     # Releasing hands the task back unclaimed at the *same* version; only a
     # claim bumps it, so the next worker acquires with the version it saw.
-    t.state = T_PENDING
-    t.pid = None
-    t.ttl = None
-    t.arm_retry(now + cfg.retry_timeout)
-    send_execute(tx, r.id, t.version)
-    return Reply.ok({})
+    o = replace(o, task=pending(o.task, now + cfg.retry_timeout))
+    return Reply.ok({}), Commands([o], execute(o))
 
 
-def task_fulfill(tx: Tx, r: TaskFulfill, now: int, cfg: KernelCfg) -> Reply:
+def task_fulfill(doc: Document, r: TaskFulfill, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
     if r.action.id != r.id:
-        return Reply.err(400, "Action ID must match the task ID")
+        return Reply.err(400, "Action ID must match the task ID"), NOTHING
     if r.action.state not in SETTLE_STATES:
-        return Reply.err(400, "Invalid settle state")
-    o = tx.doc.get(r.id)
+        return Reply.err(400, "Invalid settle state"), NOTHING
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    t = o.task
-    if t.state != T_ACQUIRED or t.version != r.version:
-        return Reply.err(409, "Task version mismatch or invalid state")
-    po = tx.doc.get(r.action.id)
-    if po is None:
-        return Reply.err(404, "Promise not found")
-    if po.promise.state != PENDING:
+        return Reply.err(404, "Task not found"), NOTHING
+    if o.task.state != T_ACQUIRED or o.task.version != r.version:
+        return Reply.err(409, "Task version mismatch or invalid state"), NOTHING
+    if o.promise.state != PENDING:
         # Unreachable while the invariants hold (an acquired task's promise is
         # pending), but the reference fulfils the task regardless.
-        t.state = T_FULFILLED
-        t.pid = None
-        t.ttl = None
-        t.resumes.clear()
-        t.disarm()
-        return Reply.ok({"promise": po.promise.to_record(r.action.id)})
-    return Reply.ok({"promise": settle(tx, r.action.id, r.action.state, r.action.value, now, cfg)})
+        return (Reply.ok({"promise": o.promise.to_record(r.id)}),
+                Commands([replace(o, task=parked(o.task, T_FULFILLED))]))
+    record, c = settle(doc, r.id, r.action.state, r.action.value, now, cfg)
+    return Reply.ok({"promise": record}), c
 
 
-def task_suspend(tx: Tx, r: TaskSuspend, cfg: KernelCfg) -> Reply:
+def task_suspend(doc: Document, r: TaskSuspend, cfg: KernelCfg) -> tuple[Reply, Commands]:
     """Park a task on a set of promises, unless one of them has already
     settled, in which case there is nothing to wait for and the caller is
     told to carry on (300)."""
     if not r.awaited:
-        return Reply.err(400, "Actions array cannot be empty")
+        return Reply.err(400, "Actions array cannot be empty"), NOTHING
     if r.id in r.awaited:
-        return Reply.err(400, "Action awaited promise must not equal the task ID")
+        return Reply.err(400, "Action awaited promise must not equal the task ID"), NOTHING
     if len(set(r.awaited)) != len(r.awaited):
-        return Reply.err(400, "Awaited promise IDs must be unique")
+        return Reply.err(400, "Awaited promise IDs must be unique"), NOTHING
     if any(origin_of(a) != origin_of(r.id) for a in r.awaited):
-        return Reply.err(400, "Awaited promise must belong to the same origin as the task")
-    o = tx.doc.get(r.id)
+        return Reply.err(400, "Awaited promise must belong to the same origin as the task"), NOTHING
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    t = o.task
-    if t.state != T_ACQUIRED or t.version != r.version:
-        return Reply.err(409, "Task is not acquired or version mismatch")
-    for a in r.awaited:
-        if tx.doc.get(a) is None:
-            return Reply.err(422, "Awaited promise not found")
-    for a in r.awaited:
-        if not tx.doc.get(a).promise.is_external():
-            return Reply.err(422, "Awaited promise is not awaitable")
-    any_settled = any(tx.doc.get(a).promise.state != PENDING for a in r.awaited)
-    # Either way the resumes buffered by a previous suspension are stale.
-    t.resumes.clear()
-    if any_settled:
-        return Reply(300, {"preload": preload(tx.doc, r.id, cfg)})
-    for a in r.awaited:
-        p = tx.doc.get(a).promise
-        if r.id not in p.callbacks:
-            p.callbacks.append(r.id)
-    t.state = T_SUSPENDED
-    t.pid = None
-    t.ttl = None
-    t.disarm()
-    return Reply.ok({})
+        return Reply.err(404, "Task not found"), NOTHING
+    if o.task.state != T_ACQUIRED or o.task.version != r.version:
+        return Reply.err(409, "Task is not acquired or version mismatch"), NOTHING
+    awaited = [doc.get(a) for a in r.awaited]
+    if any(x is None for x in awaited):
+        return Reply.err(422, "Awaited promise not found"), NOTHING
+    if not all(x.promise.is_external() for x in awaited):
+        return Reply.err(422, "Awaited promise is not awaitable"), NOTHING
+    if any(x.promise.state != PENDING for x in awaited):
+        # Nothing to wait for. Either way the resumes buffered by a previous
+        # suspension are stale.
+        c = Commands([replace(o, task=replace(o.task, resumes=set()))]) if o.task.resumes else NOTHING
+        return Reply(300, {"preload": preload(doc, r.id, cfg)}), c
+    rungs = [replace(x, promise=replace(x.promise, callbacks=[*x.promise.callbacks, r.id]))
+             for x in awaited if r.id not in x.promise.callbacks]
+    return Reply.ok({}), Commands([*rungs, replace(o, task=parked(o.task, T_SUSPENDED))])
 
 
-def task_fence(tx: Tx, r: TaskFence, now: int, cfg: KernelCfg) -> Reply:
+def task_fence(doc: Document, r: TaskFence, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
     """Run one promise operation under the task's version, so a worker that
     lost its lease cannot write. The action's outcome comes back as a nested
     response envelope."""
     if r.action.id == r.id:
-        return Reply.err(400, "Action ID must not equal the task ID")
-    o = tx.doc.get(r.id)
+        return Reply.err(400, "Action ID must not equal the task ID"), NOTHING
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
+        return Reply.err(404, "Task not found"), NOTHING
     if o.task.state != T_ACQUIRED or o.task.version != r.version:
-        return Reply.err(409, "Version mismatch")
+        return Reply.err(409, "Version mismatch"), NOTHING
     match r.action:
         case PromiseCreate():
-            kind, nested = "promise.create", promise_create(tx, r.action, now, cfg)
+            kind, (nested, c) = "promise.create", promise_create(doc, r.action, now, cfg)
             if nested.status == 400:
-                return nested
+                return nested, NOTHING
         case PromiseSettle():
-            kind, nested = "promise.settle", promise_settle(tx, r.action, now, cfg)
+            kind, (nested, c) = "promise.settle", promise_settle(doc, r.action, now, cfg)
         case _:
-            return Reply.err(400, "Invalid fence action kind")
+            return Reply.err(400, "Invalid fence action kind"), NOTHING
     return Reply.ok({
         "action": {
             "kind": kind,
             "head": {"corrId": r.corr_id, "status": nested.status, "version": PROTOCOL_VERSION},
             "data": nested.data,
         },
-        "preload": preload(tx.doc, r.id, cfg),
-    })
+        "preload": preload(c.view(doc), r.id, cfg),
+    }), c
 
 
-def task_heartbeat(tx: Tx, r: TaskHeartbeat, now: int) -> Reply:
+def task_heartbeat(doc: Document, r: TaskHeartbeat, now: int) -> tuple[Reply, Commands]:
     """Extend the lease of every task in the batch the caller still owns, and
     silently ignore the rest: a liveness signal, not a query."""
     if len({origin_of(id) for id, _ in r.tasks}) > 1:
-        return Reply.err(400, "All tasks must belong to the same origin")
+        return Reply.err(400, "All tasks must belong to the same origin"), NOTHING
+    c = NOTHING
     for id, version in r.tasks:
-        o = tx.doc.get(id)
+        o = c.view(doc).get(id)
         t = o.task if o is not None else None
-        if t is not None and t.state == T_ACQUIRED and t.version == version and t.pid == r.pid and t.ttl is not None:
-            t.arm_lease(now + t.ttl)
-    return Reply.ok({})
+        if (t is not None and t.state == T_ACQUIRED and t.version == version and t.pid == r.pid
+                and t.ttl is not None and t.lease_at != now + t.ttl):
+            c = c.merge(Commands([replace(o, task=replace(t, lease_at=now + t.ttl))]))
+    return Reply.ok({}), c
 
 
-def task_halt(tx: Tx, r: TaskHalt) -> Reply:
-    o = tx.doc.get(r.id)
+def task_halt(doc: Document, r: TaskHalt) -> tuple[Reply, Commands]:
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    t = o.task
-    if t.state == T_FULFILLED:
-        return Reply.err(409, "Task is fulfilled")
-    if t.state == T_HALTED:
-        return Reply.ok({})
-    t.state = T_HALTED
-    t.pid = None
-    t.ttl = None
-    t.disarm()
-    return Reply.ok({})
+        return Reply.err(404, "Task not found"), NOTHING
+    if o.task.state == T_FULFILLED:
+        return Reply.err(409, "Task is fulfilled"), NOTHING
+    if o.task.state == T_HALTED:
+        return Reply.ok({}), NOTHING
+    # Halted keeps the resumes it buffered, to see them when it continues.
+    halted = replace(o.task, state=T_HALTED, pid=None, ttl=None, retry_at=None, lease_at=None)
+    return Reply.ok({}), Commands([replace(o, task=halted)])
 
 
-def task_continue(tx: Tx, r: TaskContinue, now: int, cfg: KernelCfg) -> Reply:
-    o = tx.doc.get(r.id)
+def task_continue(doc: Document, r: TaskContinue, now: int, cfg: KernelCfg) -> tuple[Reply, Commands]:
+    o = doc.get(r.id)
     if o is None or o.task is None:
-        return Reply.err(404, "Task not found")
-    t = o.task
-    if t.state != T_HALTED:
-        return Reply.err(409, "Task is not halted")
-    t.state = T_PENDING
-    t.arm_retry(now + cfg.retry_timeout)
-    send_execute(tx, r.id, t.version)
-    return Reply.ok({})
+        return Reply.err(404, "Task not found"), NOTHING
+    if o.task.state != T_HALTED:
+        return Reply.err(409, "Task is not halted"), NOTHING
+    o = replace(o, task=replace(o.task, state=T_PENDING, retry_at=now + cfg.retry_timeout))
+    return Reply.ok({}), Commands([o], execute(o))
 
 
 # ---------------------------------------------------------------------------
@@ -782,17 +749,15 @@ def task_continue(tx: Tx, r: TaskContinue, now: int, cfg: KernelCfg) -> Reply:
 # ---------------------------------------------------------------------------
 
 
-def settle(tx: Tx, id: str, state: str, value: Value, now: int, cfg: KernelCfg) -> dict[str, Any]:
+def settle(doc: Document, id: str, state: str, value: Value, now: int,
+           cfg: KernelCfg) -> tuple[dict[str, Any], Commands]:
     """Settle a pending promise and run its settlement chain. Returns the
     record as the caller must report it, captured before the chain runs."""
-    o = tx.doc.get(id)
+    o = doc.get(id)
     assert o is not None and o.promise.state == PENDING
-    o.promise.state = state
-    o.promise.value = copy.deepcopy(value)
-    o.promise.settled_at = now
-    record = o.promise.to_record(id)
-    trigger_settlement(tx, id, now, cfg)
-    return record
+    o = replace(o, promise=replace(o.promise, state=state, value=copy.deepcopy(value), settled_at=now))
+    c = Commands([o])
+    return o.promise.to_record(id), c.merge(trigger_settlement(c.view(doc), id, now, cfg))
 
 
 def preload(doc: Document, id: str, cfg: KernelCfg) -> list[dict[str, Any]]:
@@ -810,32 +775,23 @@ def preload(doc: Document, id: str, cfg: KernelCfg) -> list[dict[str, Any]]:
     ][: cfg.preload_limit]
 
 
-
-def insert_promise(tx: Tx, id: str, r: PromiseCreate, now: int) -> Object:
-    """Insert the promise alone, with no task and no dispatch.
+def new_promise(r: PromiseCreate, now: int) -> Promise:
+    """A new promise, with no task.
 
     A promise created past its own deadline is born settled, resolved if it is
     a timer and timed out otherwise, with `created_at` and `settled_at` both
     stamped at the deadline rather than at `now`."""
-    already_timedout = now >= r.timeout_at
-    p = Promise(
-        state=PENDING,
-        param=copy.deepcopy(r.param),
-        value=Value(),
-        tags=dict(r.tags),
-        timeout_at=r.timeout_at,
-        created_at=r.timeout_at if already_timedout else now,
-    )
-    if already_timedout:
-        p.state = p.timeout_state()
-        p.settled_at = r.timeout_at
-    return tx.doc.insert(Object(id=id, promise=p))
+    p = Promise(param=copy.deepcopy(r.param), tags=dict(r.tags), timeout_at=r.timeout_at,
+                created_at=now)
+    if now >= r.timeout_at:
+        p = replace(p, state=p.timeout_state(), created_at=r.timeout_at, settled_at=r.timeout_at)
+    return p
 
 
-def trigger_settlement(tx: Tx, id: str, now: int, cfg: KernelCfg) -> None:
+def trigger_settlement(doc: Document, id: str, now: int, cfg: KernelCfg) -> Commands:
     """The settlement chain, in one pass and in this order: fulfil the
     promise's own task, wake its awaiters, notify its listeners."""
-    o = tx.doc.get(id)
+    o = doc.get(id)
     assert o is not None
 
     # settlement_enqueued: the settled promise's own task is done. Its
@@ -844,20 +800,17 @@ def trigger_settlement(tx: Tx, id: str, now: int, cfg: KernelCfg) -> None:
     # promise settles, and the fan-out below skips a finished awaiter. (The
     # Rust kernel deletes them here, mirroring its SQL schema; the wire
     # cannot tell the difference, and the catalogue forbids the deletion.)
-    if o.task is not None and o.task.state != T_FULFILLED:
-        o.task.state = T_FULFILLED
-        o.task.pid = None
-        o.task.ttl = None
-        o.task.resumes.clear()
-        o.task.disarm()
+    task = o.task
+    if task is not None and task.state != T_FULFILLED:
+        task = parked(task, T_FULFILLED)
+    c = Commands([replace(o, task=task, promise=replace(o.promise, callbacks=[], listeners=[]))])
 
     # resumption_enqueued: every awaiter registered against `id` observes the
     # settlement, in registration order. A settlement fanning out marks every
     # callback ready whatever state the awaiter's task is in, so a halted
     # awaiter buffers the resume and sees it when it continues.
-    awaiters, o.promise.callbacks = o.promise.callbacks, []
-    for awaiter in awaiters:
-        ao = tx.doc.get(awaiter)
+    for awaiter in o.promise.callbacks:
+        ao = doc.get(awaiter)
         if ao is None or ao.task is None:
             continue
         if ao.promise.state != PENDING or now >= ao.promise.timeout_at:
@@ -866,19 +819,16 @@ def trigger_settlement(tx: Tx, id: str, now: int, cfg: KernelCfg) -> None:
             continue
         t = ao.task
         if t.state == T_SUSPENDED:
-            t.state = T_PENDING
-            t.resumes = {id}
-            t.arm_retry(now + cfg.retry_timeout)
-            send_execute(tx, awaiter, t.version)
-        elif t.state in (T_PENDING, T_ACQUIRED, T_HALTED):
-            t.resumes.add(id)
+            ao = replace(ao, task=replace(t, state=T_PENDING, resumes={id},
+                                          retry_at=now + cfg.retry_timeout))
+            c = c.merge(Commands([ao], execute(ao)))
+        elif t.state in (T_PENDING, T_ACQUIRED, T_HALTED) and id not in t.resumes:
+            c = c.merge(Commands([replace(ao, task=replace(t, resumes=t.resumes | {id}))]))
 
     # listener_unblocked: hand the settled promise to everyone listening, then
     # forget them.
-    listeners, o.promise.listeners = o.promise.listeners, []
     record = o.promise.to_record(id)
-    for address in listeners:
-        tx.sends.append(Send(address, Unblock(record)))
+    return c.merge(Commands(send=[Send(address, Unblock(record)) for address in o.promise.listeners]))
 
 
 # ---------------------------------------------------------------------------

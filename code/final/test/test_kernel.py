@@ -259,7 +259,7 @@ def test_an_expired_lease_hands_the_task_back_pending_at_the_same_version():
     doc = with_targeted("o:a", 100_000)
     t = doc.get("o:a").task
     t.state, t.version, t.pid, t.ttl = T_ACQUIRED, 3, "p1", 5_000
-    t.arm_lease(10_000)
+    t.lease_at, t.retry_at = 10_000, None
     doc.timer_at = 10_000
     nxt, sends, _ = sweep(doc, 10_000)
     t = nxt.get("o:a").task
