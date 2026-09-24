@@ -64,9 +64,10 @@ from typing import Any, Callable
 from . import otel
 from .tracing import trace
 from .kernel import (
-    PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
-    TAG_EXTERNAL, TAG_TIMER, TaskFence, Value, origin_of,
+    PENDING, REJECTED, RESOLVED, TAG_EXTERNAL, TAG_TARGET, TAG_TIMER,
+    origin_of,
 )
+from .types import PromiseCreate, PromiseSettle, TaskFence, Value
 from .ports import Conflict, Unavailable
 
 #: How long a promise this SDK creates has to settle before it times out.

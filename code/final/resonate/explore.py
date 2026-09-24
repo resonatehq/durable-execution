@@ -25,12 +25,15 @@ from itertools import combinations
 
 from . import properties as P
 from .kernel import (
-    PENDING, REJECTED, RESOLVED, T_ACQUIRED, T_HALTED, T_PENDING, T_SUSPENDED,
-    Document, Execute, KernelCfg, PromiseCreate, PromiseGet,
-    PromiseRegisterCallback, PromiseRegisterListener, PromiseSettle, Send,
-    SetDocument, TaskAcquire, TaskContinue, TaskCreate, TaskFence, TaskFulfill,
-    TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend, Unblock, Value,
-    check_invariants, handle_external, handle_internal,
+    Document, KernelCfg, PENDING, REJECTED, RESOLVED, Send, SetDocument,
+    T_ACQUIRED, T_HALTED, T_PENDING, T_SUSPENDED, check_invariants,
+    handle_external, handle_internal,
+)
+from .types import (
+    Execute, PromiseCreate, PromiseGet, PromiseRegisterCallback,
+    PromiseRegisterListener, PromiseSettle, TaskAcquire, TaskContinue,
+    TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat,
+    TaskRelease, TaskSuspend, Unblock, Value,
 )
 
 W = "http://w"

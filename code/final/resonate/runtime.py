@@ -39,9 +39,10 @@ from typing import Any, Callable
 
 from .engine import Timeout
 from . import otel
-from .kernel import (
-    REJECTED, RESOLVED, Execute, PromiseCreate, PromiseSettle, TAG_TARGET,
-    TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend, Unblock, Value, origin_of,
+from .kernel import REJECTED, RESOLVED, TAG_TARGET, origin_of
+from .types import (
+    Execute, PromiseCreate, PromiseSettle, TaskAcquire, TaskFulfill,
+    TaskRelease, TaskSuspend, Unblock, Value,
 )
 from .ports import Conflict, Unavailable
 from .spec.queue import SWEEP
@@ -238,7 +239,7 @@ class Runtime:
             self.swept += 1
             self.engine.process(Timeout(delivery.url[len(SWEEP):]), self.clock())
             return True
-        from .wire import decode_message
+        from .types import decode_message
 
         msg = decode_message(delivery.body)
         if isinstance(msg, Execute):

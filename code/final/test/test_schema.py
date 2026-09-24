@@ -19,7 +19,8 @@ import pytest
 
 from resonate.codec import encode
 from resonate.explore import BROAD, NARROW, explore
-from resonate.kernel import Document, Object, Promise, Task, Value
+from resonate.kernel import Document, Object, Promise, Task
+from resonate.types import Value
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "line.schema.json").read_text())
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)

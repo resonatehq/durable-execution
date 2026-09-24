@@ -48,17 +48,20 @@ from dataclasses import dataclass
 
 from .codec import decode, doc_key, encode
 from .kernel import (
-    DelTimeout, Document, KernelCfg, PromiseCreate, PromiseGet, PromiseRegisterCallback,
-    PromiseRegisterListener, PromiseSettle, Reply, Req, Send, SetDocument,
-    SetTimeout, TaskAcquire, TaskContinue, TaskCreate, TaskFence, TaskFulfill,
-    TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
+    DelTimeout, Document, KernelCfg, Send, SetDocument, SetTimeout,
     handle_external, handle_internal, origin_of,
+)
+from .types import (
+    PromiseCreate, PromiseGet, PromiseRegisterCallback,
+    PromiseRegisterListener, PromiseSettle, Reply, Req, TaskAcquire,
+    TaskContinue, TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt,
+    TaskHeartbeat, TaskRelease, TaskSuspend,
 )
 from . import otel
 from .spec.queue import SWEEP, QueueP
 from .spec.store import StoreP
 from .tracing import trace
-from .wire import encode_message
+from .types import encode_message
 
 
 @dataclass(frozen=True)

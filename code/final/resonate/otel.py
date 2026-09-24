@@ -63,10 +63,12 @@ are the same fact written twice rather than two versions of it.
 
 ## What the kernel knows about any of this
 
-Nothing, and it must stay nothing. `kernel.py` imports no module of this
-system and no library, which is what makes a decision replayable and
-explorable. Everything here is the shell: the engine calls `settled`, the
-worker and the SDK open `attempt`. Off by default, and when off the cost
+Nothing, and it must stay nothing. `kernel.py` imports one module of this
+system -- `types.py`, which is dataclasses and dict parsing and reaches
+nothing outside -- and no library beyond the standard one. It reads no
+clock, generates no id and calls nothing, which is what makes a decision
+replayable and explorable. Everything here is the shell: the engine calls
+`settled`, the worker and the SDK open `attempt`. Off by default, and when off the cost
 is one lookup and a return.
 """
 

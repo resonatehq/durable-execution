@@ -53,12 +53,15 @@ from hypothesis.stateful import (
 
 from resonate import properties as P
 from resonate.kernel import (
-    PENDING, REJECTED, REJECTED_CANCELED, RESOLVED, T_ACQUIRED, T_FULFILLED,
-    T_HALTED, T_PENDING, T_SUSPENDED, Document, Execute, KernelCfg,
-    PromiseCreate, PromiseGet, PromiseRegisterCallback, PromiseRegisterListener,
-    PromiseSettle, Send, SetDocument, TaskAcquire, TaskContinue, TaskCreate,
-    TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat, TaskRelease,
-    TaskSuspend, Unblock, Value, check_invariants, handle_external, handle_internal,
+    Document, KernelCfg, PENDING, REJECTED, REJECTED_CANCELED, RESOLVED, Send,
+    SetDocument, T_ACQUIRED, T_FULFILLED, T_HALTED, T_PENDING, T_SUSPENDED,
+    check_invariants, handle_external, handle_internal,
+)
+from resonate.types import (
+    Execute, PromiseCreate, PromiseGet, PromiseRegisterCallback,
+    PromiseRegisterListener, PromiseSettle, TaskAcquire, TaskContinue,
+    TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat,
+    TaskRelease, TaskSuspend, Unblock, Value,
 )
 
 W = "http://w"

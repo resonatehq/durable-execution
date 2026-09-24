@@ -21,6 +21,15 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+from .types import (
+    Execute, PROTOCOL_VERSION, PromiseCreate,
+    PromiseGet, PromiseRegisterCallback, PromiseRegisterListener, PromiseSettle,
+    Reply, Req, TaskAcquire, TaskContinue,
+    TaskCreate, TaskFence, TaskFulfill, TaskGet,
+    TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
+    Unblock, Value,
+)
+
 # ---------------------------------------------------------------------------
 # States and tags
 # ---------------------------------------------------------------------------
@@ -54,20 +63,6 @@ class KernelCfg:
 # ---------------------------------------------------------------------------
 # The document
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class Value:
-    headers: dict[str, str] | None = None
-    data: str | None = None
-
-    def to_json(self) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        if self.headers is not None:
-            out["headers"] = dict(self.headers)
-        if self.data is not None:
-            out["data"] = self.data
-        return out
 
 
 @dataclass
@@ -218,125 +213,9 @@ def min_deadline(doc: Document) -> int | None:
 # ---------------------------------------------------------------------------
 
 
-PROTOCOL_VERSION = "2026-04-01"
-
-
-@dataclass(frozen=True)
-class PromiseGet:
-    id: str
-
-
-@dataclass(frozen=True)
-class PromiseCreate:
-    id: str
-    timeout_at: int
-    param: Value = field(default_factory=Value)
-    tags: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class PromiseSettle:
-    id: str
-    state: str  # RESOLVED | REJECTED | REJECTED_CANCELED
-    value: Value = field(default_factory=Value)
-
-
-@dataclass(frozen=True)
-class PromiseRegisterCallback:
-    awaited: str
-    awaiter: str  # same origin as `awaited`, and not equal to it
-
-
-@dataclass(frozen=True)
-class PromiseRegisterListener:
-    awaited: str
-    address: str
-
-
-@dataclass(frozen=True)
-class TaskGet:
-    id: str
-
-
-@dataclass(frozen=True)
-class TaskCreate:
-    pid: str
-    ttl: int
-    action: PromiseCreate  # must carry resonate:target, must not carry resonate:delay
-
-
-@dataclass(frozen=True)
-class TaskAcquire:
-    id: str
-    version: int
-    pid: str
-    ttl: int
-
-
-@dataclass(frozen=True)
-class TaskRelease:
-    id: str
-    version: int
-
-
-@dataclass(frozen=True)
-class TaskFulfill:
-    id: str
-    version: int
-    action: PromiseSettle  # action.id == id
-
-
-@dataclass(frozen=True)
-class TaskSuspend:
-    id: str
-    version: int
-    awaited: tuple[str, ...]  # unique, same origin, none equal to `id`; on the wire, one register_callback action each
-
-
-@dataclass(frozen=True)
-class TaskFence:
-    id: str
-    version: int
-    corr_id: str  # the envelope's, echoed in the nested response head
-    action: PromiseCreate | PromiseSettle
-
-
-@dataclass(frozen=True)
-class TaskHeartbeat:
-    pid: str
-    tasks: tuple[tuple[str, int], ...]  # (id, version), all one origin
-
-
-@dataclass(frozen=True)
-class TaskHalt:
-    id: str
-
-
-@dataclass(frozen=True)
-class TaskContinue:
-    id: str
-
-
-Req = (
-    PromiseGet | PromiseCreate | PromiseSettle | PromiseRegisterCallback | PromiseRegisterListener
-    | TaskGet | TaskCreate | TaskAcquire | TaskRelease | TaskFulfill | TaskSuspend | TaskFence
-    | TaskHeartbeat | TaskHalt | TaskContinue
-)
-
 # ---------------------------------------------------------------------------
 # Effects, messages, replies
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Execute:
-    task_id: str
-    version: int
-
-
-@dataclass(frozen=True)
-class Unblock:
-    promise: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -361,20 +240,6 @@ class Send:
 
 
 Effect = SetDocument | SetTimeout | DelTimeout | Send
-
-
-@dataclass(frozen=True)
-class Reply:
-    status: int
-    data: Any
-
-    @staticmethod
-    def ok(data: Any) -> Reply:
-        return Reply(200, data)
-
-    @staticmethod
-    def err(status: int, message: str) -> Reply:
-        return Reply(status, message)
 
 
 SETTLE_STATES = (RESOLVED, REJECTED, REJECTED_CANCELED)  # rejected_timedout is server-owned

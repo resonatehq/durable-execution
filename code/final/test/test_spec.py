@@ -12,7 +12,8 @@ from __future__ import annotations
 from resonate import engine as engine_module
 # The engine's spec, under the name the rest of this file uses for it.
 from resonate.spec import engine as spec
-from resonate.kernel import Execute, KernelCfg, PromiseCreate, PromiseGet, Reply, Value
+from resonate.kernel import KernelCfg
+from resonate.types import Execute, PromiseCreate, PromiseGet, Reply, Value
 from resonate.queue_mem import Queue
 from resonate.spec.engine import EngineP, conformance
 from resonate.store_mem import Store
@@ -59,7 +60,7 @@ def test_the_suite_rejects_an_engine_that_sends_before_it_commits():
     committed state, never of an intention."""
     class Eager(engine_module.Engine):
         def process(self, msg, now):
-            from resonate.wire import encode_message
+            from resonate.types import encode_message
             self.queue.create("http://w", encode_message(Execute("run", 0)))
             return super().process(msg, now)
 

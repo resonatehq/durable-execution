@@ -88,7 +88,7 @@ from .kernel import KernelCfg
 from .ports import Conflict, Unavailable
 from .runtime import Clock, Worker
 from .tracing import because, trace
-from .wire import Invalid, decode_message, encode_reply, parse_request
+from .types import Invalid, decode_message, encode_reply, parse_request
 
 
 def wall_clock() -> int:

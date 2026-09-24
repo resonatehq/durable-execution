@@ -164,7 +164,7 @@ should not have to pretend.
 | `resonate/queue_gcp.py` | a queue in Google Cloud Tasks, with the OIDC token, the schedule floor and the 30-day horizon |
 | `resonate/codec.py` | the document's canonical byte form, and the key it lives under |
 | `resonate/ports.py` | the vocabulary the two ports share: the two failures, the fault injector that cuts power between two effects, and the violation all three contracts report |
-| `resonate/wire.py` | the two JSON seams: the protocol's request envelope in, and the messages a queue carries out |
+| `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
 | `resonate/app.py` | `Routes`: the four routes and the composition root — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, one engine per container — with `handler` the ten lines of HTTP above it |
 | `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler` re-exported in one import. The program above, and the one every test drives, so the example and the thing under test are one file |
 | `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
@@ -614,7 +614,7 @@ rest for tests.
   may be worse than the retries. Measure first.
 - **Wire vocabulary.** Settled: Resonate's envelope (`{"kind":
   "task.acquire", "head": {...}, "data": {...}}`) at the service, parsed by
-  `resonate/wire.py`, so the differential and the trace checker are free. The posts'
+  `resonate/types.py`, so the differential and the trace checker are free. The posts'
   names stay inside the SDK.
 - **Who retries a `409`.** The SDK, with backoff, since every operation is
   idempotent and reports current state. The function never loops.

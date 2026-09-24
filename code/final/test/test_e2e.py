@@ -24,13 +24,14 @@ import pytest
 from resonate import properties as P
 from resonate.codec import decode, doc_key
 from resonate.engine import Engine
-from resonate.kernel import KernelCfg, PromiseRegisterListener, Send
+from resonate.kernel import KernelCfg, Send
+from resonate.types import PromiseRegisterListener
 from resonate.ports import Crash, Fault
 from resonate.queue_mem import Queue
 from resonate.spec.queue import SWEEP
 from resonate.runtime import Clock, Runtime, Worker
 from resonate.store_mem import Store
-from resonate.wire import decode_message
+from resonate.types import decode_message
 from resonate.sdk import Failed, gather, resonate
 
 CFG = KernelCfg(retry_timeout=30_000)

@@ -13,11 +13,12 @@ only.
 
 from resonate.properties import State, internal_failures, state_failures, trans_failures  # noqa: E402
 from resonate.kernel import (
-    PENDING, REJECTED_TIMEDOUT, RESOLVED, T_FULFILLED, T_PENDING, TAG_TIMER,
-    T_ACQUIRED, DelTimeout, Document, Execute, KernelCfg, PromiseCreate, Reply,
-    Send, SetDocument, SetTimeout, Task, Value, check_invariants, dewey,
-    handle_external, handle_internal,
+    DelTimeout, Document, KernelCfg, PENDING, REJECTED_TIMEDOUT, RESOLVED,
+    Send, SetDocument, SetTimeout, TAG_TIMER, T_ACQUIRED, T_FULFILLED,
+    T_PENDING, Task, check_invariants, dewey, handle_external,
+    handle_internal,
 )
+from resonate.types import Execute, PromiseCreate, Reply, Value
 
 W = "http://worker:9999"
 CFG = KernelCfg(retry_timeout=30_000)
@@ -279,11 +280,12 @@ def test_a_sweep_that_fires_nothing_changes_nothing():
 # The remaining operations. Fixtures build documents through the kernel.
 # ===========================================================================
 
-from resonate.kernel import (  # noqa: E402
-    REJECTED, T_HALTED, T_SUSPENDED, PromiseGet, PromiseRegisterCallback,
-    PromiseRegisterListener, PromiseSettle, TaskAcquire, TaskContinue, TaskCreate,
-    TaskFence, TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat, TaskRelease,
-    TaskSuspend, Unblock,
+from resonate.kernel import REJECTED, T_HALTED, T_SUSPENDED
+from resonate.types import (
+    PromiseGet, PromiseRegisterCallback, PromiseRegisterListener,
+    PromiseSettle, TaskAcquire, TaskContinue, TaskCreate, TaskFence,
+    TaskFulfill, TaskGet, TaskHalt, TaskHeartbeat, TaskRelease, TaskSuspend,
+    Unblock,
 )
 
 PID = "pid-1"

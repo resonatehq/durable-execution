@@ -23,7 +23,8 @@ import pytest
 
 from resonate.codec import decode, doc_key
 from resonate.engine import Engine
-from resonate.kernel import PromiseSettle, TAG_EXTERNAL, KernelCfg
+from resonate.kernel import KernelCfg, TAG_EXTERNAL
+from resonate.types import PromiseSettle
 from resonate.queue_mem import Queue
 from resonate.runtime import Clock, Runtime, Worker
 from resonate.sdk import dumps

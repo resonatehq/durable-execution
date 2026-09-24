@@ -50,9 +50,8 @@ from __future__ import annotations
 
 import json
 
-from .kernel import (
-    Document, Object, Promise, Task, Value, dewey,
-)
+from .kernel import Document, Object, Promise, Task, dewey
+from .types import Value
 
 VERSION = 1
 

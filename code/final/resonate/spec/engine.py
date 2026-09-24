@@ -41,15 +41,15 @@ from typing import Protocol, runtime_checkable
 from .. import properties as P
 from ..codec import decode, doc_key
 from ..engine import Timeout
-from ..kernel import (
-    RESOLVED, Document, KernelCfg, PromiseCreate, PromiseRegisterListener,
-    PromiseSettle, Reply, Req, Send, TaskAcquire, TaskFulfill, TaskSuspend,
-    Value, check_invariants,
+from ..kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
+from ..types import (
+    PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
+    TaskAcquire, TaskFulfill, TaskSuspend, Value,
 )
 from ..ports import Conflict, Fault, Violation
 from .queue import SWEEP, QueueP
 from .store import StoreP
-from ..wire import decode_message
+from ..types import decode_message
 
 
 class _Recorded:
