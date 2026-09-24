@@ -69,23 +69,15 @@ def origin_hash(origin: str) -> str:
     return f"{h:016x}"
 
 
-def encode_key(s: str) -> str:
-    """Percent-encode everything that is not safe and stable in a key. `/`
+def doc_key(origin: str, prefix: str = "") -> str:
+    """Where an origin's document lives. The origin is percent-encoded: `/`
     would create a path segment and `:` is the origin separator this design
     reserves, so both are escaped along with everything non-alphanumeric."""
-    out = []
-    for b in s.encode("utf-8"):
+    escaped = []
+    for b in origin.encode("utf-8"):
         c = chr(b)
-        out.append(c if (c.isalnum() and b < 128) or c in ".-" else f"%{b:02X}")
-    return "".join(out)
-
-
-def doc_key(origin: str, prefix: str = "") -> str:
-    return f"{prefix}wf/{encode_key(origin)}"
-
-
-def _line(obj: dict) -> str:
-    return json.dumps(obj, separators=(",", ":"), ensure_ascii=True)
+        escaped.append(c if (c.isalnum() and b < 128) or c in ".-" else f"%{b:02X}")
+    return f"{prefix}wf/{''.join(escaped)}"
 
 
 def _value(v: Value) -> dict:
@@ -104,7 +96,7 @@ def encode(doc: Document, origin: str) -> bytes:
         header["ta"] = doc.timer_at
     if doc.timer_name is not None:
         header["tn"] = doc.timer_name
-    lines = [_line(header)]
+    rows = [header]
     for o in doc.objects:
         p, t = o.promise, o.task
         row: dict = {"t": "o", "id": o.id, "st": p.state}
@@ -135,13 +127,9 @@ def encode(doc: Document, origin: str) -> bytes:
             if t.lease_at is not None:
                 task["la"] = t.lease_at
             row["k"] = task
-        lines.append(_line(row))
-    return "\n".join(lines).encode("ascii")
-
-
-def _read_value(d: dict | None) -> Value:
-    d = d or {}
-    return Value(headers=d.get("h"), data=d.get("d"))
+        rows.append(row)
+    return "\n".join(json.dumps(r, separators=(",", ":"), ensure_ascii=True)
+                     for r in rows).encode("ascii")
 
 
 def decode(raw: bytes, origin: str) -> Document:
@@ -162,10 +150,11 @@ def decode(raw: bytes, origin: str) -> Document:
     for row in rows[1:]:
         if not isinstance(row, dict) or row.get("t") != "o":
             continue  # a line type this reader does not know: skip it, as the format allows
+        pm, vl = row.get("pm") or {}, row.get("vl") or {}
         p = Promise(
             state=row["st"],
-            param=_read_value(row.get("pm")),
-            value=_read_value(row.get("vl")),
+            param=Value(headers=pm.get("h"), data=pm.get("d")),
+            value=Value(headers=vl.get("h"), data=vl.get("d")),
             tags=dict(row.get("tg", {})),
             timeout_at=row["to"],
             created_at=row["ca"],
