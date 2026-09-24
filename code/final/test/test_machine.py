@@ -7,10 +7,10 @@ breaks.
 
 Steering is `@precondition`, so the long chains (acquire, suspend, settle,
 wake, re-acquire, fulfil) are walked rather than stumbled into. Ids, tags
-and deadlines still come from an adversarial alphabet, so the doors are knocked on too — but only where no guided rule
-covers them. Breadth over refusals is `explore.py`'s job, which enumerates
-them; this machine is for the long chains, which no exhaustive search
-reaches.
+and deadlines still come from an adversarial alphabet, so the doors are
+knocked on too — but only where no guided rule covers them. Breadth over
+refusals is `explore.py`'s job, which enumerates them; this machine is for
+scripts longer than any exhaustive search's bound.
 
 Rules are grouped by what they need rather than by which operation they
 send, and the operation is drawn inside. That is not tidiness: Hypothesis
