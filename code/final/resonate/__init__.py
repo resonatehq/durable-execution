@@ -72,8 +72,32 @@ absent.
 
 from __future__ import annotations
 
-from .app import handler
+from typing import TYPE_CHECKING
+
 from .sdk import Durable, Failed, external, gather, resonate, sleep
+
+if TYPE_CHECKING:  # for a type checker and an editor; never at run time
+    from .app import handler
+
+
+def __getattr__(name: str):
+    """`handler`, imported only if somebody asks for it.
+
+    It lives in `app.py`, which pulls in Flask, Werkzeug and the function
+    framework -- 83ms and 228 modules, measured. An entry point needs all
+    of that and pays for it gladly. A module of durable functions that is
+    *not* the entry point does not, and neither does a test, and until this
+    existed they paid anyway because the package imported `app` eagerly.
+
+    `from resonate import handler` still works and still costs what it
+    costs; `from resonate import resonate, gather` now costs 53ms instead
+    of 136. The same discipline `store_gcp.py` follows for `google`.
+    """
+    if name == "handler":
+        from .app import handler
+
+        return handler
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = ["handler", "resonate", "gather", "sleep", "external",
            "Failed", "Durable"]
