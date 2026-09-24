@@ -1,7 +1,8 @@
 # The research agent
 
 The program from the repository's README, as something you can deploy. It
-is also the example every test in this project drives, so the thing being
+is also the application `test_http.py` serves over a real socket, and
+`test_deploy.py` checks it stays the README's program, so the thing being
 demonstrated and the thing under test are one file rather than two that
 drift apart.
 
@@ -29,9 +30,14 @@ and a deadline in the document brings the run back.
 | `main.py` | the four functions, and `handler = serve()` on the last line |
 | `requirements.txt` | one line |
 
-That is the whole application. `--function handler` looks for a
-module-level function by that name, and `serve()` builds it from the
-environment.
+That is the whole application. `--target=handler` locally, and
+`--function handler` on Cloud Run, look for a module-level function by that
+name; `serve()` builds it from the environment.
+
+Every function runs in this one service: with `BASE_URL` set, `serve()`
+routes each of them to `BASE_URL/`, which is where `search.rpc(q)` sends its
+dispatches. `ROUTES_WORKERS` (JSON, function name to URL) moves one
+elsewhere.
 
 ## Running it
 
@@ -44,7 +50,8 @@ nothing else: same engine, same kernel, same codec. `PYTHONPATH=../..` is
 how the package is found while it is a sibling directory in this repository
 rather than an install.
 
-Start a run:
+Start a run. Everything goes to `POST /`; the body's `kind` says what it is,
+and the `resonate:target` tag says where the run's task is dispatched:
 
 ```bash
 curl -sX POST localhost:8080/ -H 'content-type: application/json' -d '{
@@ -61,18 +68,18 @@ gcloud run deploy research-agent --source . --function handler \
   --set-env-vars BUCKET=...,PROJECT=...,LOCATION=...,QUEUE=...,BASE_URL=...
 ```
 
-One caveat, stated plainly because it is the one thing here that has not
-been run. Only this directory is uploaded, so the buildpack installs
-`resonate` from `requirements.txt` — and the package is not published, so
-that line has to name where it really is until it is:
+`BASE_URL` is the service's own URL. Add `ROUTES_ACCOUNT` (and `AUDIENCE`)
+to have Cloud Tasks sign its `execute` and `timeout` deliveries and the
+service check them; `resonate/config.py` lists the rest.
+
+One caveat, stated plainly because it has not been run. Only this directory
+is uploaded, so the buildpack installs `resonate` from `requirements.txt` —
+and the package is not published, so that line has to name where it really
+is until it is:
 
 ```
 resonate @ git+https://github.com/resonatehq/durable-execution@main#subdirectory=code/final
 ```
 
-An earlier layout kept `main.py` at the root of `code/final` beside the
-package, and *that* has run on Cloud Run — a full research run, six
-promises, twenty-two commits. Moving the examples into directories of their
-own made each of them a user application by the same rules as any other,
-which is worth more than the shortcut, but it does mean this exact
-requirements line is untested. `../travel-agent/` has the same caveat.
+This exact requirements line is untested. `../travel-agent/` has the same
+caveat.

@@ -47,7 +47,7 @@ not take.
     SIMULATED=1 functions-framework --target=handler
 
 Then start a run, read the document to find the pending question, and
-answer it by settling that promise. `README.md` has the four curl commands.
+answer it by settling that promise. `README.md` has the curl commands.
 With no Anthropic credentials the planner falls back to a scripted one, so
 this runs end to end on a laptop with no key.
 """

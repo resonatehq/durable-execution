@@ -28,8 +28,8 @@ BUCKET="${BUCKET:-de-contract-28425}"
 URL="${URL:-https://de-svc-570193643085.europe-west1.run.app}"
 ORIGIN="${ORIGIN:-research.crash1}"
 
-#: `RETRY_TIMEOUT` on the service, plus room for the sweep to be delivered
-#: and the run to finish. Shorter than this and a pass is luck.
+#: `RETRY_TIMEOUT` on the service, plus room for the timeout message to be
+#: delivered and the run to finish. Shorter than this and a pass is luck.
 WAIT="${WAIT:-90}"
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
@@ -93,8 +93,8 @@ gcloud storage cat "gs://$BUCKET/wf/$ORIGIN" --project="$PROJECT"
 
 cat <<'NOTE'
 
-Read the first line: `g` is how many conditional writes happened. Then read
-the root promise's state.
+The document is one JSON object. `gen` is how many conditional writes
+happened; then find the root promise in `objects` and read its state.
 
   resolved, six promises      the deadline rescued a run whose only dispatch
                               was destroyed. That is the claim.

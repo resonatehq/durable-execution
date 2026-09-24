@@ -1,7 +1,7 @@
 """What a user writes. The whole of it.
 
 This is not part of the engine. It is the file you would write to deploy
-something of your own, and it is the file this project deploys, so the
+something of your own, and it is the file `test_http.py` serves, so the
 example and the thing under test are the same file rather than two that
 drift.
 
@@ -11,7 +11,7 @@ entry point is `handler`, built by `serve()` on the last line --
 `--function handler` looks for a module-level function by that name.
 
     gcloud run deploy my-agent --source . --function handler \
-      --set-env-vars BUCKET=...,QUEUE=...
+      --set-env-vars BUCKET=...,PROJECT=...,LOCATION=...,QUEUE=...,BASE_URL=...
 
 Beside it you need a `requirements.txt` naming this package, and that is
 the end of the list.
@@ -62,10 +62,10 @@ async def nap(ms: int):
 
     Nothing runs while this waits. The worker suspends, the container is
     free to go away, and what brings the run back is a deadline in the
-    document that the shell handed to the queue as a schedule. On a laptop
-    that is a clock a test moves; on Cloud Run it is Cloud Tasks deciding
-    the time has come, which is the only version of the claim that is not a
-    simulation.
+    document that the engine handed to the queue as a scheduled `timeout`
+    message. On a laptop that is a clock a test moves; on Cloud Run it is
+    Cloud Tasks deciding the time has come, which is the only version of
+    the claim that is not a simulation.
     """
     await sleep(ms)
     return {"slept": ms}

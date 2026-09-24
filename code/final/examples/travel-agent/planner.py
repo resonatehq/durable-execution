@@ -13,7 +13,7 @@ succeed exactly once.
 `plan` is a durable call either way. With credentials it asks Claude; with
 none it follows `SCRIPT`, a planner that can complete this one goal and
 nothing else. The script exists so the example runs, and the tests pass,
-on a laptop with no key and no network -- and so that `test_agent.py` is
+on a laptop with no key and no network -- and so that `test_example_agent.py` is
 testing the agent rather than the weather inside a model.
 
 ## Why the output is a schema and not a parse

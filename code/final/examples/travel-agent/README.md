@@ -54,7 +54,7 @@ directly, mid-conversation, by reading the user's words out of the promises
 rather than out of anything the run wrote.
 
 This is also why there is no query handler. The conversation is in the
-bucket, in a document anyone can `GET`, whether or not anything is running.
+bucket, in a document anyone can read, whether or not anything is running.
 Temporal's `get_conversation_history` query needs a live workflow to answer
 it; here the last container exited three weeks ago and the answer is still
 there.
@@ -93,7 +93,7 @@ it — one line, outside.
 That is a real difference and not a wash. Temporal's version is more
 convenient. This one has a property Temporal's does not: there is exactly
 one writer per document, which is what makes a single conditional write
-sufficient and the whole engine about five thousand lines.
+sufficient and keeps the whole engine small.
 
 ## Running it
 
@@ -125,7 +125,7 @@ curl -s localhost:8080/ -X POST -H 'content-type: application/json' \
   -d '{"kind": "promise.get", "data": {"id": "trip.1:1"}}'
 ```
 
-Answer it:
+Answer it, by settling that promise:
 
 ```bash
 curl -sX POST localhost:8080/ -H 'content-type: application/json' -d '{
@@ -137,10 +137,10 @@ curl -sX POST localhost:8080/ -H 'content-type: application/json' -d '{
 Then repeat. Each answer wakes the run, which asks its next question at the
 next free position — `trip.1:1`, `:5`, `:9`, `:11` for the four in a full
 booking, the gaps being the planner and the tools in between. Do not
-compute them; read the document and take the pending one, which is what a
-front end would do. A front end would read
-the document, render the pending question, and POST the answer; that is the
-whole of the integration, and it is why there is no API layer here.
+compute them; read the document and take the pending one. A front end
+would do exactly that — read the document, render the pending question,
+POST the answer to `/` — and that is the whole of the integration, which is
+why there is no API layer here.
 
 ## Files
 
