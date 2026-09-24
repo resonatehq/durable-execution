@@ -24,11 +24,13 @@ of that name, and re-exporting ours puts one there. It is never called by
 your code, which is why the `noqa` is not decoration -- a linter that
 strips unused imports will delete your service's entry point.
 
-## The five names
+## The six names
 
 `resonate` marks a function durable. `gather` awaits several durable calls
 at once, dispatching all of them before anything blocks. `sleep` waits,
-durably, with nothing running while it does. `Failed` is what a durable
+durably, with nothing running while it does. `external` waits for somebody
+outside to answer -- a person approving, a webhook, a form -- which is what
+other systems spell as a signal handler and a wait condition. `Failed` is what a durable
 call raises when the call it is replaying was recorded as rejected --
 catch it like any other exception. `handler` is the entry point above.
 
@@ -71,9 +73,10 @@ absent.
 from __future__ import annotations
 
 from .app import handler
-from .sdk import Durable, Failed, gather, resonate, sleep
+from .sdk import Durable, Failed, external, gather, resonate, sleep
 
-__all__ = ["handler", "resonate", "gather", "sleep", "Failed", "Durable"]
+__all__ = ["handler", "resonate", "gather", "sleep", "external",
+           "Failed", "Durable"]
 
 #: Kept in step with `pyproject.toml`, which reads it rather than repeating
 #: it -- two spellings of a version number is one spelling too many.

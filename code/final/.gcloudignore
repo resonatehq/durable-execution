@@ -10,6 +10,7 @@ __pycache__/
 test/
 requirements-dev.txt
 live/
+examples/
 
 # What IS uploaded: `main.py`, the `resonate/` package beside it, and
 # `requirements.txt`. The package is a sibling rather than an installed

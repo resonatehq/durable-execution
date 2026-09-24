@@ -65,7 +65,7 @@ from . import otel
 from .tracing import trace
 from .kernel import (
     PENDING, REJECTED, RESOLVED, PromiseCreate, PromiseSettle, TAG_TARGET,
-    TAG_TIMER, TaskFence, Value, origin_of,
+    TAG_EXTERNAL, TAG_TIMER, TaskFence, Value, origin_of,
 )
 from .ports import Conflict, Unavailable
 
@@ -454,6 +454,46 @@ async def sleep(ms: int) -> None:
     if data["promise"]["state"] == PENDING:
         raise Blocked([id])
     return None
+
+
+async def external(ask: Any = None, timeout: int = DEFAULT_TIMEOUT) -> Any:
+    """Wait for something outside this system to answer.
+
+    A person clicking approve, a webhook, another service, a form nobody
+    has filled in yet. The run suspends: no coroutine parked, no thread, no
+    row marked in-progress, no container kept alive. What is left is a
+    pending promise in a bucket, and whoever has the answer settles it:
+
+        POST /  {"kind": "promise.settle",
+                 "data": {"id": "<the promise's id>", "state": "resolved",
+                          "value": {"data": "\"yes\""}}}
+
+    Its id is a position, like every other durable call, so it is the same
+    on every replay and a client can find it by reading the document rather
+    than by being told. `ask` is recorded in the parameter so whatever
+    renders the question knows what is being asked.
+
+    This is the whole of what other systems spell as a signal handler, a
+    wait condition, and the mutable field between them. There is no handler
+    because there is nothing to hold state in: the promise *is* the state,
+    and it is in the bucket rather than in a process's memory.
+
+    A deadline still applies. An external promise is not a timer, so an
+    unanswered one is rejected rather than resolved when it expires, and
+    the `await` raises `Failed`. That is usually what you want -- a
+    confirmation nobody gave is not a confirmation -- and it is why the
+    timeout is a parameter rather than a constant.
+    """
+    if timeout < 0:
+        raise ValueError("a deadline cannot be in the past")
+    inv, frame = current()
+    id = frame.child()
+    _, data = inv.fence(PromiseCreate(
+        id, inv.now() + timeout, dumps({"ask": ask}), {TAG_EXTERNAL: "true"}))
+    record = data["promise"]
+    if record["state"] == PENDING:
+        raise Blocked([id])
+    return read_back(record)
 
 
 async def gather(*awaitables) -> list[Any]:

@@ -1,0 +1,7 @@
+# The engine. A sibling directory here; an install in a real project.
+resonate
+
+# Only reached when there are credentials -- `planner.py` falls back to a
+# scripted planner without them, so the example runs and the tests pass on
+# a laptop with no key and no network.
+anthropic

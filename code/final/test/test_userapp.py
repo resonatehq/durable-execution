@@ -182,7 +182,7 @@ def test_the_public_surface_is_small_and_deliberate():
     """Everything else is the engine. A user reaching past this list is a
     gap in it, not a clever workaround."""
     assert set(resonate.__all__) == {
-        "handler", "resonate", "gather", "sleep", "Failed", "Durable"}
+        "handler", "resonate", "gather", "sleep", "external", "Failed", "Durable"}
     for name in resonate.__all__:
         assert hasattr(resonate, name), name
 
