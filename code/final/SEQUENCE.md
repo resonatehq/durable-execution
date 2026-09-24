@@ -1,6 +1,6 @@
 # The Cloud Run function, in sequence
 
-Four routes, one engine, and one rule about the order effects happen in.
+Three routes, one engine, and one rule about the order effects happen in.
 Everything below is what `server.py`, `engine.py` and `worker.py` actually
 do; where a diagram says a name, it is the name in the code.
 
@@ -64,9 +64,6 @@ sequenceDiagram
 
     Note over Q,F: /execute and /sweep carry an OIDC token<br/>for ROUTES_ACCOUNT. / does not: a client<br/>is not the queue, and whatever fronts the<br/>service protects it instead.
 ```
-
-The function also answers `GET /ready`, which asks the bucket whether it is
-there and nothing else.
 
 ---
 

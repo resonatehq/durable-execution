@@ -18,6 +18,7 @@ at the bottom of a user's `main.py`, after their `@resonate` functions.
     RETRY_TIMEOUT    ms a claimed task may go quiet before it is offered again
     LEASE            ms a worker holds a task
     K_REVISION       this worker's id (set by Cloud Run)
+    K_SERVICE        this service's name in traces (set by Cloud Run)
     TRACE            export spans to Cloud Trace
 """
 
@@ -52,7 +53,7 @@ def serve(env: Mapping[str, str] = os.environ):
 
 def build(env: Mapping[str, str]) -> Server:
     if env.get("TRACE"):
-        install_tracing()
+        install_tracing(env)
     store, queue, clock = backends(env)
     register_targets(env)
     engine = Engine(store, queue, KernelCfg(
@@ -61,8 +62,7 @@ def build(env: Mapping[str, str]) -> Server:
                     ttl=int(env.get("LEASE", 60_000)))
     return Server(engine, worker, clock,
                   account=env.get("ROUTES_ACCOUNT"),
-                  audience=env.get("AUDIENCE"),
-                  simulated=bool(env.get("SIMULATED")))
+                  audience=env.get("AUDIENCE"))
 
 
 def backends(env: Mapping[str, str]):
@@ -90,11 +90,13 @@ def register_targets(env: Mapping[str, str]) -> None:
         TARGETS[name] = url
 
 
-def install_tracing() -> None:
+def install_tracing(env: Mapping[str, str]) -> None:
     try:
         from . import otel_gcp
 
-        otel_gcp.install()
+        otel_gcp.install(project=env.get("PROJECT"),
+                         service=env.get("K_SERVICE", "durable-execution"),
+                         instance=env.get("K_REVISION", "local"))
     except Exception as e:  # pragma: no cover - needs a broken environment
         logging.getLogger(__name__).warning("tracing is off: %s", e)
 

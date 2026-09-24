@@ -1,9 +1,8 @@
-"""The HTTP service: four routes over one engine and one worker.
+"""The HTTP service: three routes over one engine and one worker.
 
     POST /                the protocol, for clients
     POST /execute         a task dispatched by the queue
     POST /sweep/<origin>  a deadline fired by the queue
-    GET  /ready           whether the bucket answers
 
 `config.py` builds a `Server` from the environment.
 """
@@ -29,7 +28,6 @@ class Server:
     clock: Callable[[], int]
     account: str | None = None      # the queue's service account; None turns auth off
     audience: str | None = None
-    simulated: bool = False
 
     def handle(self, request: flask.Request):
         """A Flask request in, a Flask response out."""
@@ -48,8 +46,6 @@ class Server:
 
     def dispatch(self, method: str, path: str, body: dict,
                  authorization: str) -> tuple[dict, int]:
-        if method == "GET" and path == "/ready":
-            return self.ready()
         if method != "POST":
             return {"error": "POST"}, 405
         if path == "/":
@@ -85,14 +81,6 @@ class Server:
         with because(f"POST /sweep/{origin}"):
             self.engine.process(Timeout(origin), self.clock())
             return {"swept": origin}, 200
-
-    @trace
-    def ready(self) -> tuple[dict, int]:
-        try:
-            self.engine.store.list("", 1)
-        except Unavailable as e:
-            return {"ready": False, "why": str(e)}, 503
-        return {"ready": True, "simulated": self.simulated}, 200
 
     def authorized(self, authorization: str) -> bool:
         """Whether the request carries an OIDC token for `account`."""

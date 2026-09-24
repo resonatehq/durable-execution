@@ -23,7 +23,6 @@ from resonate.worker import Worker
 from resonate.server import Server
 from resonate.codec import doc_key
 from resonate.kernel import KernelCfg, TAG_TARGET
-from resonate.errors import Conflict, Unavailable
 from resonate.testing.sim import Clock
 from resonate.sdk import dumps, route
 from resonate.store_mem import Store
@@ -118,26 +117,6 @@ def test_a_malformed_request_is_a_400_and_never_reaches_the_bucket(envelope):
     body, status = svc.protocol(envelope)
     assert status == 400, body
     assert store.objects == {}, "a request that was never understood wrote something"
-
-
-# --- readiness -------------------------------------------------------------
-
-
-class Unreachable(Store):
-    """A bucket that has stopped answering."""
-
-    def list(self, prefix, limit):
-        raise Unavailable("the bucket did not answer")
-
-
-def test_ready_says_whether_the_bucket_answers():
-    svc, _, _, _ = service()
-    body, status = svc.ready()
-    assert status == 200 and body["ready"] is True
-
-    svc.engine.store = Unreachable()
-    body, status = svc.ready()
-    assert status == 503 and body["ready"] is False
 
 
 # --- the queue's routes ----------------------------------------------------

@@ -81,7 +81,6 @@ def build(monkeypatch):
         app = functions_framework.create_app("handler", str(path_to("research-agent")))
         server = sys.modules["main"].handler.server
         client = app.test_client()
-        assert client.get("/ready").status_code == 200, "the service would not build"
         # Loading the example registers its own functions. These are different
         # ones -- `@resonate` refuses two registrations of a name, so they have
         # to be -- and they only need saying where they run.
@@ -143,12 +142,6 @@ def test_a_request_with_no_json_at_all_is_a_400(client):
     or a stray probe sends."""
     r = client.post("/", data="", content_type="text/plain")
     assert r.status_code == 400, r.get_data(as_text=True)
-
-
-def test_ready_answers_and_admits_it_is_simulated(client):
-    r = client.get("/ready")
-    assert r.status_code == 200
-    assert r.get_json() == {"ready": True, "simulated": True}
 
 
 def test_an_unknown_route_is_a_404_and_a_bad_method_a_405(client):

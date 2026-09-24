@@ -245,7 +245,7 @@ RUNTIME_OWNED = {
 }
 
 #: Ones the service reads on purpose because the platform sets them.
-BORROWED = {"K_REVISION"}
+BORROWED = {"K_REVISION", "K_SERVICE"}
 
 
 def configured_names() -> set[str]:

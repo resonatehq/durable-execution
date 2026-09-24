@@ -12,7 +12,7 @@ flowchart TB
 
     subgraph container["one Cloud Run container"]
         direction TB
-        routes["<b>Server</b> — resonate/server.py<br/>POST / · /execute · /sweep/&lt;origin&gt; · GET /ready"]
+        routes["<b>Server</b> — resonate/server.py<br/>POST / · /execute · /sweep/&lt;origin&gt;"]
         worker["<b>Worker</b> — resonate/worker.py<br/>runs the function until it blocks"]
         app["<b>examples/*/main.py</b> — the user's file<br/>@resonate, REGISTRY, TARGETS"]
         engine["<b>Engine</b> — resonate/engine.py<br/>read · decide · write once"]

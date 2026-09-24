@@ -167,7 +167,7 @@ should not have to pretend.
 | `resonate/testing/faults.py` | the fault injector that cuts power between two effects |
 | `resonate/spec/violation.py` | what all three contracts report |
 | `resonate/types.py` | the protocol: fifteen requests, the reply, the two messages a queue carries, and the parsing that turns an envelope into one of them. The alphabet the kernel decides over, beside the grammar for writing it down |
-| `resonate/server.py` | `Server`: the four routes — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready` — over one engine and one worker |
+| `resonate/server.py` | `Server`: the three routes — `POST /`, `POST /execute`, `POST /sweep/<origin>` — over one engine and one worker |
 | `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
 | `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler = serve()` on the last line. The program above, and the one every test drives, so the example and the thing under test are one file |
 | `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
@@ -688,7 +688,7 @@ user's own `app.py` won the lookup, and the deploy failed pointing at
 silently and served nothing.
 
 One service, because Cloud Tasks is push-only: a worker is not a loop, it
-is an endpoint. Four routes, and the shape falls out of the queue rather
+is an endpoint. Three routes, and the shape falls out of the queue rather
 than out of a preference.
 
 | route | who calls it |
@@ -696,7 +696,6 @@ than out of a preference.
 | `POST /` | a client that does not embed the engine. One protocol request, one reply |
 | `POST /execute` | the queue, delivering a dispatch |
 | `POST /sweep/<origin>` | the queue, delivering a deadline |
-| `GET /ready` | the platform, asking whether the bucket answers |
 
 Everything a container needs comes from its environment, and
 `resonate/config.py` is the one place that reads it:

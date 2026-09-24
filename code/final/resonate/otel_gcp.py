@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import atexit
 import logging
-import os
 import threading
 from typing import Any
 
@@ -122,7 +121,8 @@ class Exporter:
     having when the flush latency shows up in a request and not before.
     """
 
-    def __init__(self, project: str | None = None, batch: int = BATCH) -> None:
+    def __init__(self, project: str | None = None, service: str = "durable-execution",
+                 instance: str = "local", batch: int = BATCH) -> None:
         from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
         from opentelemetry.sdk.resources import Resource
 
@@ -132,8 +132,8 @@ class Exporter:
         self.dropped = 0
         self.sent = 0
         self.resource = Resource.create({
-            "service.name": os.environ.get("K_SERVICE", "durable-execution"),
-            "service.instance.id": os.environ.get("K_REVISION", "local"),
+            "service.name": service,
+            "service.instance.id": instance,
         })
         self.gcp = CloudTraceSpanExporter(project_id=project)
 
@@ -163,9 +163,10 @@ class Exporter:
             log.warning("dropped %d spans: %s", len(batch), e)
 
 
-def install(project: str | None = None) -> Exporter:
+def install(project: str | None = None, service: str = "durable-execution",
+            instance: str = "local") -> Exporter:
     """Send this process's spans to Cloud Trace, until it exits."""
-    exporter = Exporter(project or os.environ.get("PROJECT"))
+    exporter = Exporter(project, service, instance)
     otel.to(exporter)
     atexit.register(exporter.flush)
     return exporter

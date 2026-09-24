@@ -82,7 +82,6 @@ def load(tmp_path):
 
     client = functions_framework.create_app(
         "handler", str(tmp_path / "main.py")).test_client()
-    assert client.get("/ready").status_code == 200
     return client, sys.modules["main"].handler.server
 
 
