@@ -80,9 +80,9 @@ def client(monkeypatch):
     # per container, which is right in production and wrong across tests:
     # another module leaves that global set or cleared, and whichever test
     # ran first would decide what this one is talking to.
-    from resonate import app as service
+    from resonate.app import service
 
-    service.ROUTES = None
+    service.cache_clear()
     app = functions_framework.create_app("handler", str(path_to("research-agent")))
     client = app.test_client()
     assert client.get("/ready").status_code == 200, "the service would not build"
@@ -268,9 +268,9 @@ def test_the_two_ways_a_bucket_refuses_are_two_statuses(client, error, status):
     against a document that no longer exists, so the caller must ask again
     and the kernel must decide again. One is a retry, the other is a
     re-decision, and a single status for both would lose that."""
-    from resonate import app as service
+    from resonate.app import service
 
-    engine = service.ROUTES.engine
+    engine = service().engine
     was, engine.store = engine.store, Refuses(error)
     try:
         # An id of its own. `promise.create` is idempotent, so a create that

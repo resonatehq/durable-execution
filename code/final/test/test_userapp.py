@@ -72,10 +72,10 @@ def user_repo(tmp_path, monkeypatch):
     # One container builds one service, at the first request, and keeps it.
     # That is right in production and wrong across tests: a service built
     # from an earlier test's environment would answer this one.
-    app.ROUTES = None
+    app.service.cache_clear()
     local.reset()
     yield tmp_path
-    app.ROUTES = None
+    app.service.cache_clear()
     REGISTRY.clear(), REGISTRY.update(before_registry)
     TARGETS.clear(), TARGETS.update(before_targets)
 

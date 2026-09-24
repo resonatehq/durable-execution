@@ -10,8 +10,9 @@ deployment falls out of the queue rather than out of a preference:
     POST /sweep/<origin>   a deadline, delivered by the queue
     GET  /ready            whether the bucket answers
 
-One instance builds one engine, at import, because that is once per
-container rather than once per request. Everything it needs comes from the
+One instance builds one engine, on the first request and not at import,
+because that is once per container rather than once per request -- see
+`service()`. Everything it needs comes from the
 environment, and nothing in this file decides policy: which bucket, which
 queue, which account, and where the other workers live are all deployment.
 
@@ -86,6 +87,7 @@ the expensive one.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -336,7 +338,23 @@ def verify(request) -> bool:
     return claims.get("email") == account and claims.get("email_verified", False)
 
 
-ROUTES: Routes | None = None
+@functools.lru_cache(maxsize=1)
+def service() -> Routes:
+    """The service this container serves, built once and kept.
+
+    Once per container rather than once per request, which is what the
+    cache is for -- and lazily rather than at import, which is what the
+    *function* is for. `resonate/__init__.py` imports this module so that
+    `from resonate import handler` works, so building at module scope would
+    mean `import resonate` demanded `BUCKET`, `PROJECT` and `QUEUE` from
+    anyone who only wanted the decorator.
+
+    A cache rather than a global and an `if`: the laziness is forced, the
+    bookkeeping is not. `service.cache_clear()` is how a test asks for a
+    service built from its own environment, which beats reaching in and
+    setting a module attribute to `None`.
+    """
+    return from_environment()
 
 
 @functions_framework.http
@@ -354,13 +372,9 @@ def handler(request):
     nothing about HTTP, so a test can drive a whole research agent without
     a request object.
     """
-    global ROUTES
-    if ROUTES is None:
-        ROUTES = from_environment()
-
-    method, path = request.method, request.path
+    routes, method, path = service(), request.method, request.path
     if method == "GET" and path == "/ready":
-        return answer(*ROUTES.ready())
+        return answer(*routes.ready())
     if method != "POST":
         return answer({"error": "POST"}, 405)
 
@@ -374,11 +388,11 @@ def handler(request):
     body = request.get_json(silent=True) or {}
     try:
         if path == "/":
-            return answer(*ROUTES.protocol(body))
+            return answer(*routes.protocol(body))
         if path == "/execute":
-            return answer(*ROUTES.execute(body))
+            return answer(*routes.execute(body))
         if path.startswith("/sweep/"):
-            return answer(*ROUTES.sweep(path[len("/sweep/"):]))
+            return answer(*routes.sweep(path[len("/sweep/"):]))
     except Invalid as e:
         # Never a request. Nothing was read and nothing written.
         return answer({"error": str(e)}, 400)
