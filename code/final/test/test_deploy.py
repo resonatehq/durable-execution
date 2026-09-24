@@ -37,13 +37,18 @@ ROOT = Path(__file__).parent.parent
 
 #: Production is everything the container runs. `test/` is not in the image
 #: at all (see `.gcloudignore`), and `conftest.py` is pytest's.
-#: Production is what the container runs: the package, and the `main.py`
-#: beside it that the buildpack loads. `test/` is not in the image at all
-#: (see `.gcloudignore`), `conftest.py` is pytest's, and the relative
-#: imports inside the package are skipped by `imported_modules` -- a
-#: `from .kernel import` names no distribution and never could.
+#: Production is the package. The applications under `examples/` are not
+#: part of it -- each ships its own `requirements.txt` and is checked
+#: against that instead, by `test_each_example_declares_what_it_imports`,
+#: because an example that needed `anthropic` would say so in its own file
+#: and not in the engine's. Relative imports inside the package are skipped
+#: by `imported_modules`: a `from .kernel import` names no distribution and
+#: never could.
 def production_files() -> list[Path]:
-    return sorted([*ROOT.glob("resonate/**/*.py"), ROOT / "main.py"])
+    return sorted(ROOT.glob("resonate/**/*.py"))
+
+
+EXAMPLES = sorted(p for p in (ROOT / "examples").iterdir() if p.is_dir())
 
 
 def imported_modules(path: Path) -> set[tuple[str, ...]]:
@@ -65,8 +70,13 @@ def imported_modules(path: Path) -> set[tuple[str, ...]]:
 
 
 def declared() -> set[str]:
-    """The distributions `requirements.txt` names, normalised."""
-    text = (ROOT / "requirements.txt").read_text()
+    """The distributions the engine's `requirements.txt` names."""
+    return named_in(ROOT / "requirements.txt")
+
+
+def named_in(requirements: Path) -> set[str]:
+    """The distributions a requirements file names, normalised."""
+    text = requirements.read_text()
     names = set()
     for line in text.splitlines():
         line = line.split("#")[0].strip()
@@ -177,12 +187,52 @@ def test_the_function_runtime_is_named_even_though_nothing_imports_it():
     assert "functions-framework" in declared()
 
 
-def test_the_entry_point_the_buildpack_looks_for_exists():
+@pytest.mark.parametrize("example", EXAMPLES, ids=lambda p: p.name)
+def test_the_entry_point_the_buildpack_looks_for_exists(example):
     """`main.py` is not a convenience. Google's Python buildpack fails with
     `MissingSourceException` without it, which is a deploy-time failure no
-    amount of local testing reaches."""
-    assert (ROOT / "main.py").is_file()
-    assert "handler" in (ROOT / "main.py").read_text()
+    amount of local testing reaches. Every deployable thing in this
+    repository is an example directory, so every one of them needs it."""
+    assert (example / "main.py").is_file(), example.name
+    src = (example / "main.py").read_text()
+    assert "handler" in src, f"{example.name} has no entry point to deploy"
+    assert "from resonate import" in src, f"{example.name} does not use the package"
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=lambda p: p.name)
+def test_each_example_declares_what_it_imports(example):
+    """An example is a user application, so it answers for its own
+    dependencies. `travel-agent` reaches for `anthropic`; the engine does
+    not, and neither file should have to carry the other's list."""
+    requirements = example / "requirements.txt"
+    assert requirements.is_file(), f"{example.name} has no requirements.txt"
+
+    names = named_in(requirements) | {"resonate"}
+    # Declared *or* installed. The engine's own dependencies are always
+    # installed here, so they resolve by the file they come from -- which is
+    # the check that catches a namespace package. An example may name one
+    # that is not installed in this environment (`anthropic` is optional
+    # even for the example that uses it), and naming it is the whole of
+    # what this test asks of it.
+    have = reachable(names)
+    owners = _owner_of_file()
+    siblings = {p.stem for p in example.glob("*.py")}
+
+    missing = {}
+    for path in sorted(example.glob("*.py")):
+        for candidates in imported_modules(path):
+            root = candidates[0].split(".")[0]
+            if root in sys.stdlib_module_names or root in siblings or root == "resonate":
+                continue
+            if root.lower().replace("_", "-") in names:
+                continue
+            found = [owning_distribution(c, owners) for c in candidates]
+            if any(o in have for o in found if o):
+                continue
+            missing.setdefault(candidates[0], set()).add(path.name)
+    assert not missing, (
+        f"{example.name} imports what its requirements.txt does not name: "
+        + "; ".join(f"{k} in {', '.join(sorted(v))}" for k, v in sorted(missing.items())))
 
 
 #: Every environment variable `functions-framework` reads for itself,
@@ -271,6 +321,11 @@ def test_a_worker_with_no_application_module_registers_nothing():
         # it is what registers and there is nothing to name. This asserts the
         # override still works, because a split deployment needs it.
 
+        # An importable module by that name, which is what `ROUTES_APP`
+        # takes. In a user's deployment it is their own module; here it is
+        # an example, whose directory goes on the path exactly as the
+        # platform would have put it there.
+        sys.path.insert(0, str(ROOT / "examples" / "research-agent"))
         os.environ["ROUTES_APP"] = "main"
         app._route()
         # Derived from the module, not listed here: a hardcoded set goes stale
@@ -281,15 +336,19 @@ def test_a_worker_with_no_application_module_registers_nothing():
         assert set(sdk.REGISTRY) == expected, sorted(sdk.REGISTRY)
     finally:
         os.environ.pop("ROUTES_APP", None)
+        example = str(ROOT / "examples" / "research-agent")
+        if example in sys.path:
+            sys.path.remove(example)
+        sys.modules.pop("main", None)
         sdk.REGISTRY.clear()
         sdk.REGISTRY.update(before)
 
 
 def test_the_example_the_deployment_runs_is_the_one_in_the_readme():
-    """`main.py` is both the example a user copies and the thing this
-    project deploys, so it has to stay the program the README describes
-    rather than drift into a second version of it."""
-    src = (ROOT / "main.py").read_text()
+    """`examples/research-agent/main.py` is both the program a reader copies
+    out of the README and the one every test drives, so it has to stay that
+    program rather than drift into a second version of it."""
+    src = (ROOT / "examples" / "research-agent" / "main.py").read_text()
     for step in ("Plan the searches", "Fan out the searches",
                  "Synthesize the results", "gather(search.rpc(q)"):
         assert step in src, step

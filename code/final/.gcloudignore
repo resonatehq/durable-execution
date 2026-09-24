@@ -1,6 +1,10 @@
-# What the build does not need. The suite, its fixtures and its caches are
-# not part of the service, and uploading them makes a slower build and a
-# larger image for no benefit.
+# Left from the layout where `main.py` sat here and this directory was the
+# thing deployed. The deployable units are the `examples/*` directories
+# now, and each is uploaded on its own, so this file only matters if you
+# build from here. Kept because the exclusions are still the right ones and
+# the reasoning is worth not rediscovering: the suite, its fixtures and its
+# caches are not part of any service, and uploading them makes a slower
+# build and a larger image for no benefit.
 .git/
 __pycache__/
 *.pyc
@@ -12,7 +16,6 @@ requirements-dev.txt
 live/
 examples/
 
-# What IS uploaded: `main.py`, the `resonate/` package beside it, and
-# `requirements.txt`. The package is a sibling rather than an installed
-# distribution here, which is what makes `--source .` deploy this
-# repository's own example; a user installs it and uploads one file.
+# An example deployed from its own directory uploads that directory alone:
+# its `main.py`, its `requirements.txt`, and whatever else it is made of.
+# The package arrives as an install, exactly as it would for a user.

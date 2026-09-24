@@ -215,7 +215,8 @@ def test_the_logical_span_is_the_promise_not_the_process():
 
 def test_waiting_is_the_difference_between_the_layers():
     """The question neither layer answers alone, and the reason for both."""
-    from main import nap
+    from exampleapp import load
+    nap = load("research-agent").nap
     rt, store, clock = world(nap)
     with otel.collecting() as spans:
         rt.start("nap.1", nap, 5_000)
@@ -234,7 +235,8 @@ def test_waiting_is_the_difference_between_the_layers():
 
 def test_a_timer_has_no_attempt_because_nothing_runs_it():
     """Time settles it. There is no process to have a physical span."""
-    from main import nap
+    from exampleapp import load
+    nap = load("research-agent").nap
     rt, store, clock = world(nap)
     with otel.collecting() as spans:
         rt.start("nap.1", nap, 5_000)

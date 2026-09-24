@@ -166,7 +166,8 @@ should not have to pretend.
 | `resonate/ports.py` | the vocabulary the two ports share: the two failures, the fault injector that cuts power between two effects, and the violation all three contracts report |
 | `resonate/wire.py` | the two JSON seams: the protocol's request envelope in, and the messages a queue carries out |
 | `resonate/app.py` | `Routes`: the four routes and the composition root — `POST /`, `POST /execute`, `POST /sweep/<origin>`, `GET /ready`, one engine per container — with `handler` the ten lines of HTTP above it |
-| `main.py` | what a user writes: their `@resonate` functions and `handler` re-exported in one import. This project deploys it, so the example and the thing under test are one file |
+| `examples/research-agent/main.py` | what a user writes: their `@resonate` functions and `handler` re-exported in one import. The program above, and the one every test drives, so the example and the thing under test are one file |
+| `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
 | `resonate/__init__.py` | the public surface, and the whole of it: `handler`, `resonate`, `gather`, `sleep`, `Failed` |
 | `pyproject.toml` | what makes `from resonate import ...` an install rather than a copy of somebody else's repository |
 | `resonate/otel.py` | spans derived from durable ids, so a trace needs no propagated context: one per promise, one per attempt |
@@ -717,10 +718,17 @@ RETRY_TIMEOUT    how long a claimed task may go quiet before it is offered
 LEASE            how long a worker holds one (default 60s)
 ```
 
-```
-SIMULATED=1 functions-framework --target=handler      # the whole thing, on a laptop
+You deploy an application, not this repository. Both of the ones under
+`examples/` are ordinary user applications by the rules above —
+`test_userapp.py` checks that neither reaches past the published surface —
+and each is deployed from its own directory:
 
-gcloud run deploy engine --source . --function handler \
+```
+cd examples/research-agent
+
+PYTHONPATH=../.. SIMULATED=1 functions-framework --target=handler   # on a laptop
+
+gcloud run deploy research-agent --source . --function handler \
   --set-env-vars BUCKET=...,PROJECT=...,LOCATION=...,QUEUE=...,BASE_URL=...
 ```
 
@@ -728,11 +736,13 @@ The name `main.py` is the buildpack's: it looks for that name at the root
 of what you deploy and fails the build otherwise — found by running the
 framework locally, which is the cheapest place to find it.
 
-This repository deploys its own `main.py`, which is a user application by
-these rules and not a privileged one, with the `resonate/` package beside
-it rather than installed. That is the only difference between what is
-deployed here and what you would deploy, and `test_userapp.py` asserts the
-example reaches into nothing a user could not.
+Only the example's own directory is uploaded, so the buildpack installs
+`resonate` from its `requirements.txt` like any other dependency. Until the
+package is published that line has to say where it really is
+(`resonate @ git+https://github.com/...#subdirectory=code/final`), and that
+exact line has not been run — see `examples/research-agent/README.md`. What
+*has* run on Cloud Run is an earlier layout with `main.py` beside the
+package: a full research run, six promises, twenty-two commits.
 
 Two things the deployment must get right, because no amount of code here
 can:

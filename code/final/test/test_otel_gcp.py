@@ -136,7 +136,9 @@ class FakeTrace:
 
 def a_whole_run():
     """The README's agent, run to completion, with its spans collected."""
-    import main as demo
+    from exampleapp import load
+
+    demo = load("research-agent")
     from resonate.engine import Engine
     from resonate.kernel import KernelCfg
     from resonate.queue_mem import Queue

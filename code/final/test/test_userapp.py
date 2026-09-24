@@ -187,13 +187,22 @@ def test_the_public_surface_is_small_and_deliberate():
         assert hasattr(resonate, name), name
 
 
-def test_the_example_this_project_deploys_is_the_same_shape():
-    """`main.py` at the root of this repository is a user application by
-    these rules, not a privileged one. If it ever needs something a user
-    could not write, the story has quietly stopped being true."""
-    src = (ROOT / "main.py").read_text()
-    assert "from resonate import" in src
-    assert "handler" in src
-    for private in ("from resonate.sdk", "from resonate.app", "from resonate.engine",
-                    "from resonate.kernel", "import resonate.sdk"):
-        assert private not in src, f"the example reaches into {private}"
+@pytest.mark.parametrize(
+    "example", sorted(p for p in (ROOT / "examples").iterdir() if p.is_dir()),
+    ids=lambda p: p.name)
+def test_the_examples_are_user_applications_by_these_rules(example):
+    """They are not privileged. Every example in this repository is written
+    the way the contract above says a user writes one -- one import for the
+    wiring, nothing reaching past the published surface -- so if one of them
+    ever needs something a user could not have, the story has quietly
+    stopped being true and this is what notices."""
+    for source in sorted(example.glob("*.py")):
+        src = source.read_text()
+        for private in ("from resonate.sdk", "from resonate.app",
+                        "from resonate.engine", "from resonate.kernel",
+                        "from resonate.codec", "import resonate.sdk"):
+            assert private not in src, f"{example.name}/{source.name} reaches into {private}"
+
+    entry = (example / "main.py").read_text()
+    assert "from resonate import" in entry, example.name
+    assert "handler" in entry, example.name

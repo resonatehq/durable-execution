@@ -1,0 +1,2 @@
+# The engine. A sibling here; an install in a real project.
+resonate

@@ -14,7 +14,7 @@ flowchart TB
         direction TB
         routes["<b>Routes</b> — resonate/app.py<br/>POST / · /execute · /sweep/&lt;origin&gt; · GET /ready"]
         worker["<b>Worker</b> — resonate/runtime.py<br/>runs the function until it blocks"]
-        app["<b>main.py</b> — the user's file<br/>@resonate, REGISTRY, TARGETS"]
+        app["<b>examples/*/main.py</b> — the user's file<br/>@resonate, REGISTRY, TARGETS"]
         engine["<b>Engine</b> — resonate/engine.py<br/>read · decide · write once"]
         kernel["<b>resonate/kernel.py</b> — pure<br/>doc, request, now → effects, reply"]
     end

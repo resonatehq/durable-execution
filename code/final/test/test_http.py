@@ -9,13 +9,13 @@ it is exactly the layer a deployment gets wrong.
 So this drives `app.handler` itself, through a real Flask app built the way
 Cloud Run builds it:
 
-    functions_framework.create_app("handler", "main.py")
+    functions_framework.create_app("handler", "examples/research-agent/main.py")
 
-`main.py` is what a user writes and what this project deploys: their
-functions, and `handler` re-exported from the package in a single import.
-Driving the example rather than the package is the point -- the import
-that makes the entry point exist is in `main.py`, so a test that loaded
-`resonate/app.py` directly would pass with that line deleted.
+That file is what a user writes: their functions, and `handler` re-exported
+from the package in a single import. Driving an example rather than the
+package is the point -- the import that makes the entry point exist is in
+the example, so a test that loaded `resonate/app.py` directly would pass
+with that line deleted.
 
 `create_app` loads it as a module object of its own, which is why the
 service has to be constructible from the environment rather than injected —
@@ -44,6 +44,7 @@ from resonate import local
 from resonate.codec import decode, doc_key
 from resonate.kernel import TAG_TARGET
 from resonate.spec.queue import SWEEP
+from exampleapp import path_to
 from resonate.sdk import dumps, route
 from test_e2e import (
     CALLS, EXPECTED, ORIGIN, QUESTION, counted_agent, counted_research,
@@ -70,12 +71,12 @@ def client(monkeypatch):
     monkeypatch.delenv("ROUTES_ACCOUNT", raising=False)
     local.reset()
     CALLS.clear()
-    # `main.py`, not the package: that is the file the platform loads, and
-    # the re-exported `handler` in it is the only wiring a user writes. An
-    # entry point that worked when imported directly and not through the
-    # example would be a broken deployment with a green suite.
-    app = functions_framework.create_app("handler", str(ROOT / "main.py"))
-    # Loading `main.py` registers its own functions. These are different
+    # The example's `main.py`, not the package: that is the file the
+    # platform loads, and the re-exported `handler` in it is the only wiring
+    # a user writes. An entry point that worked when imported directly and
+    # not through an example would be a broken deployment with a green suite.
+    app = functions_framework.create_app("handler", str(path_to("research-agent")))
+    # Loading the example registers its own functions. These are different
     # ones -- `@resonate` refuses two registrations of a name, so they have
     # to be -- and they only need saying where they run.
     for fn in (counted_research, counted_agent, counted_search):
