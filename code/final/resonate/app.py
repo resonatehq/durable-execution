@@ -338,21 +338,13 @@ def verify(request) -> bool:
     return claims.get("email") == account and claims.get("email_verified", False)
 
 
-@functools.lru_cache(maxsize=1)
+@functools.cache
 def service() -> Routes:
-    """The service this container serves, built once and kept.
+    """Built once per container, on the first request rather than at import.
 
-    Once per container rather than once per request, which is what the
-    cache is for -- and lazily rather than at import, which is what the
-    *function* is for. `resonate/__init__.py` imports this module so that
-    `from resonate import handler` works, so building at module scope would
-    mean `import resonate` demanded `BUCKET`, `PROJECT` and `QUEUE` from
-    anyone who only wanted the decorator.
-
-    A cache rather than a global and an `if`: the laziness is forced, the
-    bookkeeping is not. `service.cache_clear()` is how a test asks for a
-    service built from its own environment, which beats reaching in and
-    setting a module attribute to `None`.
+    Lazily because an example's `main.py` is both the user's functions and
+    the entry point, and importing it to get at a function -- a test does,
+    another worker's `ROUTES_APP` does -- must not require a bucket.
     """
     return from_environment()
 
