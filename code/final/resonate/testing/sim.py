@@ -8,7 +8,6 @@ from typing import Any
 
 from ..kernel import TAG_TARGET
 from ..sdk import call_param, route
-from ..tracing import because
 from ..types import Execute, PromiseCreate, Timeout, Unblock, decode_message
 from ..worker import Worker
 
@@ -62,29 +61,17 @@ class Runtime:
 
     def start(self, id: str, fn, *args, timeout: int = 10 ** 9) -> None:
         """What a client does to begin a run: create a promise with a
-        target. Named as the route it would arrive on, because that is
-        what it is."""
+        target."""
         from ..sdk import TARGETS
         target = TARGETS.get(fn.name)
         if target is None:
             raise RuntimeError(f"{fn.name} is not routed anywhere, so nothing can run it")
-        with because("POST /"):
-            self.engine.process(PromiseCreate(
-                id, self.clock() + timeout, call_param(fn, args),
-                {TAG_TARGET: target}), self.clock())
+        self.engine.process(PromiseCreate(
+            id, self.clock() + timeout, call_param(fn, args),
+            {TAG_TARGET: target}), self.clock())
 
     def handle(self, delivery) -> bool:
-        """What the URL means. Returns whether the handler answered.
-
-        The URL is named in the trace rather than left to be inferred,
-        because in production this is a route on a service and the thing
-        that caused the work is the delivery. `Server` does the
-        same for a real request.
-        """
-        with because(delivery.url):
-            return self._handle(delivery)
-
-    def _handle(self, delivery) -> bool:
+        """Deliver one task. Returns whether the handler answered."""
         msg = decode_message(delivery.body)
         if isinstance(msg, Timeout):
             self.swept += 1

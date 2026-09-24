@@ -15,12 +15,3 @@ google-cloud-storage
 google-cloud-tasks
 google-auth
 functions-framework
-
-# Only reached when `TRACE` is set, and shipped anyway: turning tracing on
-# in an incident is worth an environment variable and not worth a redeploy.
-# `otel_gcp.py` is the one file that imports them, at the edge.
-opentelemetry-sdk
-# 1.15.0 deprecates `CloudTraceSpanExporter` in favour of OTLP against
-# telemetry.googleapis.com. Kept because this path is tested end to end and
-# that one is not; `otel_gcp.py` says what changing it would take.
-opentelemetry-exporter-gcp-trace

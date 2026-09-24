@@ -56,10 +56,8 @@ from .types import (
     TaskContinue, TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt,
     TaskHeartbeat, TaskRelease, TaskSuspend,
 )
-from . import otel
 from .spec.queue import QueueP
 from .spec.store import StoreP
-from .tracing import trace
 from .types import HERE, Timeout, encode_message
 
 
@@ -104,7 +102,6 @@ class Engine:
         self.store, self.queue = store, queue
         self.cfg, self.prefix = cfg, prefix
 
-    @trace
     def process(self, msg: Req | Timeout, now: int) -> Reply:
         origin = origin_of_msg(msg)
         key = doc_key(origin, self.prefix)
@@ -155,12 +152,6 @@ class Engine:
             # else's disarm.
             if isinstance(e, DelTimeout) and doc.timer_name is not None:
                 self.queue.delete(doc.timer_name)
-        # After the commit, because a span for a settlement that was never
-        # written would be the one kind of lie a trace must not tell. Before
-        # the sends only in the sense that it is cheap and cannot fail the
-        # request: `emit` swallows nothing, but the sink is the shell's and
-        # off by default.
-        otel.settled(doc, new, origin)
         for e in fx:
             if isinstance(e, Send):
                 # No schedule: deliver as soon as you can, which is what an

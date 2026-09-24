@@ -173,13 +173,7 @@ should not have to pretend.
 | `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
 | `resonate/__init__.py` | the public surface, and the whole of it: `serve`, `resonate`, `gather`, `sleep`, `Failed` |
 | `pyproject.toml` | what makes `from resonate import ...` an install rather than a copy of somebody else's repository |
-| `resonate/otel.py` | spans derived from durable ids, so a trace needs no propagated context: one per promise, one per attempt |
-| `resonate/otel_gcp.py` | those spans as OpenTelemetry's objects, in Cloud Trace. The only file that imports the library |
 | `test/test_userapp.py` | that a user's whole repository is `main.py` and a one-line `requirements.txt`, asserted by building one |
-| `test/test_otel.py` | that the ids survive a process boundary, that the two layers have two parent rules, and that an attempt which wrote nothing still left a span |
-| `resonate/tracing.py` | what happened, in the order it happened: a decorator on what we own, a protocol-derived wrapper on what we do not, and the request that caused it |
-| `test/research.trace` | the path one run takes through the system — every call in and every call out — reviewed and checked in. A change to it is a diff somebody has to accept |
-| `test/research.mmd` | the same run as a sequence diagram, generated rather than drawn, starting at `Server` because that is where a request arrives. `SEQUENCE.md` says what the design means; this says what the code did |
 | `line.schema.json` | what a line of a document may be. An oracle, maintained by hand against the protocol, never edited to make a test pass |
 | `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `Blocked` |
 | `resonate/worker.py` | a worker: `run` claims the task and decides what the outcome means, `_attempt` runs the function from the top |
@@ -198,7 +192,6 @@ should not have to pretend.
 | `test/test_queue.py` | the simulated queue on its own, the agent over an unkind one, and the scheduling order watched through the queue and the store at once |
 | `SEQUENCE.md` | the Cloud Run function as five sequence diagrams: the routes, one request in full, a worker running to its block, a deadline, and a whole run across four deliveries |
 | `test/test_types.py` | the three module specs, run past a type checker, which is the only thing that can check a claim made in types |
-| `test/test_tracing.py` | that the path is still the reviewed path, and that a trace is faithful (a raise is a raise), cheap (nothing when off) and repeatable (the same fingerprint in any process) |
 | `test/test_check.py` | that `resonate.spec.check` sees all five implementations, admits what it skipped, and can say no |
 | `test/test_conformance.py` | both contracts against every implementation — simulated, adapter-over-a-double, and a real bucket when there is one — plus what only an adapter can get wrong |
 | `test/test_app.py` | the router: methods, paths, status codes, who may knock, and the whole research agent through `Server` |
@@ -714,8 +707,6 @@ ROUTES_WORKERS   {"search": "https://search-xyz.a.run.app/"} — the
                  shape, and needed only when that shape is more than one
                  service. Every registered function otherwise routes to
                  this one, derived from BASE_URL
-TRACE            1 sends spans to Cloud Trace. Off is the default and off
-                 is free
 RETRY_TIMEOUT    how long a claimed task may go quiet before it is offered
                  again (default 30s)
 LEASE            how long a worker holds one (default 60s)

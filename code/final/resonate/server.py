@@ -17,7 +17,6 @@ import flask
 
 from .engine import Engine
 from .errors import Conflict, Unavailable
-from .tracing import because, trace
 from .types import (
     Execute, Invalid, Timeout, decode_message, encode_reply, parse_request,
 )
@@ -63,27 +62,21 @@ class Server:
             case _:
                 return self.protocol(body)
 
-    @trace
     def protocol(self, envelope: dict) -> tuple[dict, int]:
-        with because("POST /"):
-            try:
-                request = parse_request(envelope)
-            except Invalid as e:
-                return {"head": {"status": 400}, "data": str(e)}, 400
-            reply = self.engine.process(request, self.clock())
-            return encode_reply(reply), 200 if reply.status < 400 else reply.status
+        try:
+            request = parse_request(envelope)
+        except Invalid as e:
+            return {"head": {"status": 400}, "data": str(e)}, 400
+        reply = self.engine.process(request, self.clock())
+        return encode_reply(reply), 200 if reply.status < 400 else reply.status
 
-    @trace
     def execute(self, message: Execute) -> tuple[dict, int]:
-        with because("POST / execute"):
-            outcome = self.worker.run(message.task_id, message.version)
-            return {"outcome": outcome}, 200
+        outcome = self.worker.run(message.task_id, message.version)
+        return {"outcome": outcome}, 200
 
-    @trace
     def timeout(self, message: Timeout) -> tuple[dict, int]:
-        with because(f"POST / timeout {message.origin}"):
-            self.engine.process(message, self.clock())
-            return {"timeout": message.origin}, 200
+        self.engine.process(message, self.clock())
+        return {"timeout": message.origin}, 200
 
     def authorized(self, authorization: str) -> bool:
         """Whether the request carries an OIDC token for `account`."""

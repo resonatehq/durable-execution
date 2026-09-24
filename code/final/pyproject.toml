@@ -28,8 +28,6 @@ dependencies = [
     "google-cloud-tasks",
     "google-auth",
     "functions-framework",
-    "opentelemetry-sdk",
-    "opentelemetry-exporter-gcp-trace",
 ]
 
 [project.optional-dependencies]

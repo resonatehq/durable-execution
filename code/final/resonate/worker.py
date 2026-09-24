@@ -14,13 +14,11 @@ from __future__ import annotations
 import asyncio
 from typing import Callable
 
-from . import otel
-from .kernel import REJECTED, RESOLVED, origin_of
+from .kernel import REJECTED, RESOLVED
 from .sdk import (
     _FRAME, _INVOCATION, PLATFORM, Blocked, Invocation, _Call, called,
     describe, dumps, loads, lookup,
 )
-from .tracing import trace
 from .types import PromiseSettle, TaskAcquire, TaskFulfill, TaskRelease, TaskSuspend
 
 
@@ -29,7 +27,6 @@ class Worker:
         self.engine, self.clock, self.pid, self.ttl = engine, clock, pid, ttl
         self.ran: list[str] = []  # which task ids this worker picked up, for tests
 
-    @trace
     def run(self, task_id: str, version: int) -> str:
         """Claim one task and see its run through, whatever the run does.
 
@@ -53,58 +50,38 @@ class Worker:
         fn = lookup(name, version)
 
         while True:
-            # One span per turn of this loop, because one turn is one attempt
-            # at the function. The loop is why the attempt is the unit and
-            # the delivery is not: a suspension with nothing left to wait for
-            # runs the body again, in this same request.
-            with otel.attempt(task_id, origin_of(task_id), self.clock,
-                              name=fn.label, **{"de.worker": self.pid,
-                                                 "de.task.version": v}) as span:
-                try:
-                    result = self._attempt(fn, args, task_id, v)
-                except Blocked as b:
-                    # Not a failure. Waiting for a value you do not have is
-                    # how this system makes progress, and colouring it red
-                    # would colour every fan-out red.
-                    span["de.outcome"] = "suspended"
-                    span["de.waiting"] = len(b.ids)
-                    suspend = self.engine.process(
-                        TaskSuspend(task_id, v, tuple(b.ids)), self.clock())
-                    if suspend.status == 300:
-                        # One of them settled while we were deciding to wait
-                        # for it. Nothing to wait for, so carry on from the
-                        # top -- and that is a new attempt, hence a new span.
-                        continue
-                    return "suspended"
-                except PLATFORM as e:
-                    # Not the function's answer: this attempt could not
-                    # produce one. Hand the task back at the same version so
-                    # it is offered again, to this worker or another.
-                    span["de.outcome"] = "released"
-                    span["de.error"] = type(e).__name__
-                    span["status"] = otel.ERROR
-                    self.engine.process(TaskRelease(task_id, v), self.clock())
-                    return "released"
-                except Exception as e:
-                    # The function's answer, and an unwelcome one. A rejection
-                    # is a result: it is recorded, it wakes whoever was
-                    # awaiting it, and replay reads it back rather than
-                    # running again.
-                    span["de.outcome"] = "rejected"
-                    span["de.error"] = type(e).__name__
-                    span["status"] = otel.ERROR
-                    self.engine.process(TaskFulfill(
-                        task_id, v, PromiseSettle(task_id, REJECTED, dumps(describe(e)))),
-                        self.clock())
-                    return "rejected"
-                span["de.outcome"] = "done"
-                span["status"] = otel.OK
+            try:
+                result = self._attempt(fn, args, task_id, v)
+            except Blocked as b:
+                # Not a failure. Waiting for a value you do not have is
+                # how this system makes progress.
+                suspend = self.engine.process(
+                    TaskSuspend(task_id, v, tuple(b.ids)), self.clock())
+                if suspend.status == 300:
+                    # One of them settled while we were deciding to wait
+                    # for it. Nothing to wait for, so carry on from the top.
+                    continue
+                return "suspended"
+            except PLATFORM:
+                # Not the function's answer: this attempt could not
+                # produce one. Hand the task back at the same version so
+                # it is offered again, to this worker or another.
+                self.engine.process(TaskRelease(task_id, v), self.clock())
+                return "released"
+            except Exception as e:
+                # The function's answer, and an unwelcome one. A rejection
+                # is a result: it is recorded, it wakes whoever was
+                # awaiting it, and replay reads it back rather than
+                # running again.
                 self.engine.process(TaskFulfill(
-                    task_id, v, PromiseSettle(task_id, RESOLVED, dumps(result))),
+                    task_id, v, PromiseSettle(task_id, REJECTED, dumps(describe(e)))),
                     self.clock())
-                return "done"
+                return "rejected"
+            self.engine.process(TaskFulfill(
+                task_id, v, PromiseSettle(task_id, RESOLVED, dumps(result))),
+                self.clock())
+            return "done"
 
-    @trace
     def _attempt(self, fn, args, task_id: str, version: int):
         """One attempt at the function, from the top.
 
