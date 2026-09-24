@@ -93,15 +93,15 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import flask
+import functions_framework
+
 from . import queue_gcp
 from . import store_gcp
 from .engine import Timeout
 from .kernel import KernelCfg
 from .ports import Conflict, Unavailable
 from .runtime import Clock, Worker
-import flask
-import functions_framework
-
 from .tracing import because, trace
 from .types import Invalid, decode_message, encode_reply, parse_request
 

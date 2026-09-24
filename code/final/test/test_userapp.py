@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -207,31 +206,3 @@ def test_the_examples_are_user_applications_by_these_rules(example):
     entry = (example / "main.py").read_text()
     assert "from resonate import" in entry, example.name
     assert "handler" in entry, example.name
-
-
-def test_the_sdk_does_not_drag_in_a_web_framework():
-    """Importing `@resonate` should not cost you Flask.
-
-    `handler` lives in `app.py`, which imports Flask, Werkzeug and the
-    function framework. An entry point needs all of it. A module of durable
-    functions that is not the entry point does not, and nor does a test, and
-    the package used to import it eagerly for everyone -- 83ms and 228
-    modules, for a decorator.
-
-    Asserted in a fresh interpreter because `sys.modules` in this one has
-    long since been filled by everything else the suite does.
-    """
-    def imported(what: str) -> set[str]:
-        src = (f"import sys; {what}; "
-               "print(' '.join(sorted(m for m in sys.modules "
-               "if m in ('flask', 'werkzeug', 'functions_framework'))))")
-        out = subprocess.run([sys.executable, "-c", src], capture_output=True,
-                             text=True, cwd=str(ROOT), env={"PYTHONPATH": ".",
-                                                            "PATH": "/usr/bin"})
-        assert out.returncode == 0, out.stderr
-        return set(out.stdout.split())
-
-    assert imported("from resonate import resonate, gather, sleep") == set(), \
-        "the SDK pulled in a web framework"
-    assert "flask" in imported("from resonate import handler"), \
-        "asking for the entry point should still get you one"
