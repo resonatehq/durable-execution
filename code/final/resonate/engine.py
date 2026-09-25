@@ -72,10 +72,6 @@ from .spec.store import StoreP
 from .types import HERE, Timeout, encode_message
 
 
-#: The document, as the store keeps it. One adapter rather than one per
-#: call: building it is the expensive half, and `by_alias` below is the
-#: camelCase wire format, which is a property of the document rather than a
-#: choice a caller gets to make.
 DOCUMENT = TypeAdapter(Document)
 
 
@@ -146,8 +142,6 @@ class Engine:
         found = self.store.get(key)
         version = None if found is None else found[1]
         doc = Document() if found is None else decode(found[0])
-        # Fold the clock forward rather than taking it: a caller whose clock
-        # has regressed must not be able to un-expire anything.
         now = max(now, doc.clock)
 
         if isinstance(msg, Timeout):
@@ -161,15 +155,9 @@ class Engine:
         new.clock, new.gen = now, doc.gen + 1
         for e in fx:
             if isinstance(e, SetTimeout):
-                # A deadline is a timeout message to this service itself, and
-                # the name it comes back with is the only handle anyone will
-                # ever have on it.
                 new.timer_name = self.queue.create(
                     HERE, encode_message(Timeout(origin)), not_before=e.at)
         if new.timer_at is None:
-            # The name names the armed deadline. With nothing armed there is
-            # nothing to name, and a leftover name is a handle on something
-            # that no longer exists.
             new.timer_name = None
         body = encode(new)
         if version is None:
@@ -177,17 +165,9 @@ class Engine:
         else:
             self.store.put(key, body, if_match=version)
         for e in fx:
-            # By name, never by coordinates: the deadline being removed is the
-            # one this document's predecessor armed, and a deadline that became
-            # the nearest one again would otherwise be removed by someone
-            # else's disarm.
             if isinstance(e, DelTimeout) and doc.timer_name is not None:
                 self.queue.delete(doc.timer_name)
         for e in fx:
             if isinstance(e, Send):
-                # No schedule: deliver as soon as you can, which is what an
-                # immediate dispatch is. Its name is dropped, because a
-                # dispatch is never cancelled — that is the whole of the
-                # difference between it and the arm above.
                 self.queue.create(e.address, encode_message(e.msg))
         return reply
