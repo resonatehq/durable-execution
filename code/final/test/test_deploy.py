@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -164,6 +165,50 @@ def owning_distribution(module: str, owners: dict[str, str]) -> str | None:
     if spec is None or not spec.origin or spec.origin == "built-in":
         return None
     return owners.get(str(Path(spec.origin).resolve()))
+
+
+#: What the engine is allowed to need. Pydantic is not deferred anywhere and
+#: is not worth deferring; everything else in `requirements.txt` belongs to
+#: the runtime or to Google, and is imported inside the method that needs it.
+DEFERRED = ("flask", "google", "functions_framework")
+
+#: Refuse those three, then import the package and the simulators.
+WITHOUT_THEM = """
+import sys
+BLOCKED = %r
+class Refuse:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            raise ImportError(name + " is not installed")
+        return None
+sys.meta_path.insert(0, Refuse())
+import resonate
+import resonate.kernel, resonate.engine
+import resonate.testing.explore, resonate.testing.sim
+""" % (DEFERRED,)
+
+
+def test_the_engine_imports_without_the_things_only_a_deployment_needs():
+    """`resonate/__init__.py` re-exports `serve`, so every import of this
+    package reaches `server.py`. While that file imported Flask at the top,
+    `import resonate.kernel` needed a web framework -- and so did every
+    simulation, every exploration and the whole suite, on a machine that had
+    only what the kernel actually uses. `store_gcp` and `queue_gcp` had
+    always deferred their Google imports for this reason; `server.py` was
+    the one that had not, and nothing noticed because the machines that run
+    the tests happen to have Flask.
+    """
+    done = subprocess.run([sys.executable, "-c", WITHOUT_THEM],
+                          cwd=ROOT, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+
+
+def test_that_check_can_fail():
+    """The blocker has to actually block, or the test above passes on a
+    machine with Flask installed and says nothing."""
+    done = subprocess.run([sys.executable, "-c", WITHOUT_THEM + "\nimport flask\n"],
+                          cwd=ROOT, capture_output=True, text=True)
+    assert done.returncode != 0 and "flask" in done.stderr
 
 
 def test_the_function_runtime_is_named_even_though_nothing_imports_it():

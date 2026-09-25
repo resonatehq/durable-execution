@@ -11,9 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
-
-import flask
+from typing import TYPE_CHECKING, Callable
 
 from .engine import Engine
 from .errors import Conflict, Unavailable
@@ -21,6 +19,9 @@ from .types import (
     Execute, Invalid, Timeout, decode_message, encode_reply, parse_request,
 )
 from .worker import Worker
+
+if TYPE_CHECKING:  # Flask is the runtime's, not the engine's: see `handle`.
+    import flask
 
 
 @dataclass
@@ -32,7 +33,15 @@ class Server:
     audience: str | None = None
 
     def handle(self, request: flask.Request):
-        """A Flask request in, a Flask response out."""
+        """A Flask request in, a Flask response out.
+
+        The import is here rather than at the top of the file because this
+        method is the only thing in the package that needs Flask, and
+        `resonate/__init__.py` re-exports `serve`, so a top-level import
+        made `import resonate.kernel` -- and every simulation and every
+        exploration -- fail without a web framework installed.
+        """
+        import flask
         try:
             body, status = self.dispatch(
                 request.method, request.path,
