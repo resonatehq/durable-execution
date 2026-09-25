@@ -1,6 +1,6 @@
 """Is every interface implemented, and does every implementation hold?
 
-    python -m resonate.testing.spec.check
+    python -m resonate.testing.conformance.check
 
 Three interfaces, top to bottom, and for each one every implementation of
 it. Three questions per implementation, in order, because each only makes
@@ -12,7 +12,7 @@ sense if the one before it passed:
    but it asks at a moment nobody is watching.
 2. **Does the thing have the operations?** Every member of `StoreP` present
    on the class. Structural, so it catches a rename and nothing subtler.
-3. **Does it behave?** The contract from the spec module — 11 claims for a
+3. **Does it behave?** The contract from `conformance/` — 11 claims for a
    store, 8 for a queue, and for the engine a script graded against the
    specification's own 93-entry catalogue.
 
@@ -28,10 +28,13 @@ import os
 import sys
 
 from ... import engine, queue_gcp, store_gcp
+from ...spec import engine as engine_spec
+from ...spec import queue as queue_spec
+from ...spec import store as store_spec
 from .. import queue_mem, store_mem
-from . import engine as engine_spec
-from . import queue as queue_spec
-from . import store as store_spec
+from . import engine as engine_suite
+from . import queue as queue_suite
+from . import store as store_suite
 
 OK, BAD, SKIP = "ok", "FAIL", "skip"
 failures: list[str] = []
@@ -82,24 +85,24 @@ def holds(label: str, violations, detail: str = "") -> None:
 
 # ---------------------------------------------------------------------------
 
-print("\nengine — spec/engine.py")
+print("\nengine — spec/engine.py, conformance/engine.py")
 
 print("  engine")
 cls = offers(engine, engine_spec.EngineM)
 if cls is not None and implements(cls, engine_spec.EngineP):
-    holds("conformance", engine_spec.conformance(engine),
-          f"{len(engine_spec.STANDARD_SCRIPT)} steps, every state and "
+    holds("conformance", engine_suite.conformance(engine),
+          f"{len(engine_suite.STANDARD_SCRIPT)} steps, every state and "
           f"transition against the catalogue")
 
 # ---------------------------------------------------------------------------
 
-print("\nstore — spec/store.py")
+print("\nstore — spec/store.py, conformance/store.py")
 
 print("  store_mem")
 cls = offers(store_mem, store_spec.StoreM)
 if cls is not None and implements(cls, store_spec.StoreP):
-    holds("conformance", store_spec.conformance(store_mem),
-          f"{len(store_spec.CLAIMS)} claims")
+    holds("conformance", store_suite.conformance(store_mem),
+          f"{len(store_suite.CLAIMS)} claims")
 
 print("  store_gcp")
 cls = offers(store_gcp, store_spec.StoreM)
@@ -110,19 +113,19 @@ if cls is not None and implements(cls, store_spec.StoreP):
     else:  # pragma: no cover - only with credentials
         from google.cloud import storage
 
-        holds("conformance", store_spec.conformance(
+        holds("conformance", store_suite.conformance(
             store_gcp, bucket=bucket, client=storage.Client(),
-            prefix=f"check/{os.getpid()}/"), f"{len(store_spec.CLAIMS)} claims, on {bucket}")
+            prefix=f"check/{os.getpid()}/"), f"{len(store_suite.CLAIMS)} claims, on {bucket}")
 
 # ---------------------------------------------------------------------------
 
-print("\nqueue — spec/queue.py")
+print("\nqueue — spec/queue.py, conformance/queue.py")
 
 print("  queue_mem")
 cls = offers(queue_mem, queue_spec.QueueM)
 if cls is not None and implements(cls, queue_spec.QueueP):
-    holds("conformance", queue_spec.conformance(queue_mem),
-          f"{len(queue_spec.CLAIMS)} claims")
+    holds("conformance", queue_suite.conformance(queue_mem),
+          f"{len(queue_suite.CLAIMS)} claims")
 
 print("  queue_gcp")
 cls = offers(queue_gcp, queue_spec.QueueM)
@@ -140,10 +143,10 @@ if cls is not None and implements(cls, queue_spec.QueueP):
         project, location, name = live.split("/")
         # A paused queue is the safe way to do this: it accepts creation and
         # deletion, which is the whole contract, and dispatches nothing.
-        holds("conformance", queue_spec.conformance(
+        holds("conformance", queue_suite.conformance(
             queue_gcp, project=project, location=location, queue=name,
             base_url="https://example.invalid", client=tasks_v2.CloudTasksClient()),
-            f"{len(queue_spec.CLAIMS)} claims, on {name}")
+            f"{len(queue_suite.CLAIMS)} claims, on {name}")
 
 # ---------------------------------------------------------------------------
 

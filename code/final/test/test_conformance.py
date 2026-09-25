@@ -1,6 +1,6 @@
 """Every implementation, against the contract its interface publishes.
 
-`spec.store.conformance` and `spec.queue.conformance` are the claims; this
+`conformance.store` and `conformance.queue` are the claims; this
 file is the list of things to run them against. The simulated ones run always. The
 real store runs when `GCS_BUCKET` names a bucket this machine can reach,
 and is skipped otherwise, so a green suite never implies a live one.
@@ -32,8 +32,8 @@ gcp = pytest.importorskip("google.api_core.exceptions")
 
 from resonate import queue_gcp
 from resonate.testing import queue_mem
-from resonate.testing.spec import queue as queue_spec
-from resonate.testing.spec import store as store_spec
+from resonate.testing.conformance import queue as queue_suite
+from resonate.testing.conformance import store as store_suite
 from resonate import store_gcp
 from resonate.testing import store_mem
 from resonate.errors import Unavailable
@@ -172,27 +172,27 @@ QUEUES = [
 @pytest.mark.parametrize("implementation", STORES)
 def test_a_store_honours_its_contract(implementation):
     module, config = implementation
-    assert store_spec.conformance(module, **config) == []
+    assert store_suite.conformance(module, **config) == []
 
 
 @pytest.mark.parametrize("implementation", QUEUES)
 def test_a_queue_honours_its_contract(implementation):
     module, config = implementation
-    assert queue_spec.conformance(module, **config) == []
+    assert queue_suite.conformance(module, **config) == []
 
 
 @pytest.mark.parametrize("implementation", STORES)
 def test_a_store_satisfies_the_interface_at_runtime(implementation):
     module, config = implementation
-    m: store_spec.StoreM = module
-    assert isinstance(m.Store(**config), store_spec.StoreP)
+    m: store_suite.StoreM = module
+    assert isinstance(m.Store(**config), store_suite.StoreP)
 
 
 @pytest.mark.parametrize("implementation", QUEUES)
 def test_a_queue_satisfies_the_interface_at_runtime(implementation):
     module, config = implementation
-    m: queue_spec.QueueM = module
-    assert isinstance(m.Queue(**config), queue_spec.QueueP)
+    m: queue_suite.QueueM = module
+    assert isinstance(m.Queue(**config), queue_suite.QueueP)
 
 
 def test_the_contracts_can_fail():
@@ -206,9 +206,9 @@ def test_the_contracts_can_fail():
         def create(self, url, body, *, not_before=0):
             return "the-same-name-every-time"
 
-    bad = store_spec.conformance(type("M", (), {"Store": BadStore}))
+    bad = store_suite.conformance(type("M", (), {"Store": BadStore}))
     assert bad and any("create" in v.msg for v in bad), bad
-    bad = queue_spec.conformance(type("M", (), {"Queue": BadQueue}))
+    bad = queue_suite.conformance(type("M", (), {"Queue": BadQueue}))
     assert bad and any("two creates" in v.msg for v in bad), bad
 
 

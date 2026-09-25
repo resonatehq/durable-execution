@@ -134,18 +134,26 @@ the document lives under.
 
 ### The two ports and their contracts
 
-The engine is written against two protocols in `resonate/ports.py`.
-`StoreP` has `get`, `put`, `delete` and `list`, and `QueueP` has `create`
-and `delete`. A store or queue refuses in one of two ways
-(`resonate/errors.py`). `Conflict` means the write lost a race. `Unavailable`
-means there was no answer. Each interface has a spec module in
-`resonate/testing/spec/`, which also names its implementations:
+The engine is written against two protocols. `StoreP` has `get`, `put`,
+`delete` and `list`, and `QueueP` has `create` and `delete`. A store or
+queue refuses in one of two ways (`resonate/errors.py`). `Conflict` means
+the write lost a race. `Unavailable` means there was no answer.
+
+What each interface *is* lives in `resonate/spec/`, one module per
+interface. What an implementation has to *do* to be one lives next door in
+`resonate/testing/conformance/`, one suite per interface:
 
 ```
 spec/engine.py   EngineP  EngineC  EngineM    engine.py
 spec/store.py    StoreP   StoreC   StoreM     store_mem.py   store_gcp.py
 spec/queue.py    QueueP   QueueC   QueueM     queue_mem.py   queue_gcp.py
 ```
+
+The split is the one the deployment already makes. `spec/` is types and
+nothing else, which is what lets `engine.py` be written against `StoreP`
+without importing anything from the test harness; `conformance/` is how an
+implementation is checked, so it sits under `testing/` with the simulators
+and nothing in production imports it.
 
 Each has the same three layers. `…P` is the thing once it exists, `…C` is
 how one is made, and `…M` is a module that offers one under an agreed name
@@ -156,7 +164,7 @@ configure one. Only `EngineC` fixes a signature, because every engine takes
 the same two ports. `StoreC` and `QueueC` name nothing, because their
 arguments are a deployment, not an interface.
 
-The contract lives in the interface's module, not beside an implementation.
+A contract lives with its interface rather than beside an implementation.
 A suite that shipped with the simulator would grade the bucket against a
 rival instead of against a contract. The store has 11 claims and the queue
 has 8. The engine is graded on a script, against the specification's
@@ -165,15 +173,17 @@ catalogue:
 ```python
 from resonate import engine
 from resonate.testing import store_mem, queue_mem
-from resonate.testing.spec import engine as engine_spec, store as store_spec, queue as queue_spec
+from resonate.testing.conformance import engine as engine_suite
+from resonate.testing.conformance import store as store_suite
+from resonate.testing.conformance import queue as queue_suite
 
-assert engine_spec.conformance(engine) == []
-assert store_spec.conformance(store_mem) == []
-assert queue_spec.conformance(queue_mem) == []
+assert engine_suite.conformance(engine) == []
+assert store_suite.conformance(store_mem) == []
+assert queue_suite.conformance(queue_mem) == []
 ```
 
 ```
-python -m resonate.testing.spec.check
+python -m resonate.testing.conformance.check
 ```
 
 This command walks all three interfaces. For each implementation it asks
@@ -210,7 +220,9 @@ where they happened.
 | `resonate/worker.py` | `Worker.run(task_id, version)` claims a task and decides what the outcome means; `_attempt` runs the function from the top |
 | `resonate/server.py` | `Server`: `POST /`, dispatched on the body's `kind` |
 | `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
-| `resonate/ports.py` | `StoreP` and `QueueP` |
+| `resonate/spec/engine.py` | what an engine is: `EngineP`, `EngineC`, `EngineM` |
+| `resonate/spec/store.py` | what a store is: four operations, two errors, `StoreP`, `StoreC`, `StoreM` |
+| `resonate/spec/queue.py` | what a queue is: two operations, `QueueP`, `QueueC`, `QueueM` |
 | `resonate/errors.py` | `Conflict` and `Unavailable` |
 | `resonate/store_gcp.py` | a store in Cloud Storage: generation preconditions, the two failures mapped, measured write rates |
 | `resonate/queue_gcp.py` | a queue in Cloud Tasks: the OIDC token, service-chosen names, the 30-day horizon |
@@ -220,11 +232,11 @@ where they happened.
 | `resonate/testing/queue_mem.py` | a queue in a dict: duplicate delivery, no order, lateness, giving up, and a power cut |
 | `resonate/testing/properties.py` | the conformance catalogue from `resonatehq/resonate-specification`: 43 state and 50 transition entries, the sweeper checks, the known gaps |
 | `resonate/testing/explore.py` | bounded exhaustive search: every reachable state to a depth, with the catalogue on every edge |
-| `resonate/testing/spec/engine.py` | what an engine is, as three protocols, and a conformance suite |
-| `resonate/testing/spec/store.py` | the same for a store, and its 11 claims |
-| `resonate/testing/spec/queue.py` | the same for a queue, and its 8 claims |
-| `resonate/testing/spec/violation.py` | what all three contracts report |
-| `resonate/testing/spec/check.py` | every interface against every implementation, in one command |
+| `resonate/testing/conformance/engine.py` | what an engine has to do: a script, graded against the catalogue |
+| `resonate/testing/conformance/store.py` | what a store has to do: 11 claims |
+| `resonate/testing/conformance/queue.py` | what a queue has to do: 8 claims |
+| `resonate/testing/conformance/violation.py` | what all three contracts report |
+| `resonate/testing/conformance/check.py` | every interface against every implementation, in one command |
 | `examples/research-agent/` | the program above as a deployable application |
 | `examples/travel-agent/` | a translation of Temporal's durable-AI-agent tutorial: a conversation, tools, and a person confirming the step that spends money |
 | `pyproject.toml` | the package, so a user installs `resonate` instead of copying it |
@@ -245,7 +257,7 @@ where they happened.
 | `test/test_external.py` | `external`: a run waits on a promise somebody outside settles |
 | `test/test_versions.py` | duplicate names are refused; versions of one function coexist |
 | `test/test_types.py` | the three module specs, run past mypy |
-| `test/test_check.py` | that `resonate.testing.spec.check` sees every implementation, admits what it skipped, and can say no |
+| `test/test_check.py` | that `resonate.testing.conformance.check` sees every implementation, admits what it skipped, and can say no |
 | `test/test_conformance.py` | the store and queue contracts against every implementation, plus what only an adapter can get wrong |
 | `test/test_app.py` | `Server` without HTTP: status codes, the queue's messages, and the research agent through the service |
 | `test/test_http.py` | the `handler` that `serve()` returns, in a real Flask app: routes, methods, auth, and the agent over HTTP |

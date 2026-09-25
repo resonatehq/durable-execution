@@ -57,7 +57,8 @@ from .types import (
     TaskContinue, TaskCreate, TaskFence, TaskFulfill, TaskGet, TaskHalt,
     TaskHeartbeat, TaskRelease, TaskSuspend,
 )
-from .ports import QueueP, StoreP
+from .spec.queue import QueueP
+from .spec.store import StoreP
 from .types import HERE, Timeout, encode_message
 
 

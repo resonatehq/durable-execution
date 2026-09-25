@@ -17,7 +17,7 @@ Every one of those is a knob, off by default so a test can turn on one at a
 time and say which one it is about. Deterministic under a seed, so a run
 that finds something can be run again and find it again.
 
-`take`, `ack` and `nack` are not part of `ports.QueueP` and could not be:
+`take`, `ack` and `nack` are not part of `spec.queue.QueueP` and could not be:
 Cloud Tasks is push-only, and taking delivery belongs to whatever is being
 delivered to. They are here because something has to play the queue's own
 side in a test.

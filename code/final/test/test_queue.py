@@ -13,7 +13,7 @@ import json
 import pytest
 
 from resonate.testing import queue_mem
-from resonate.testing.spec import queue as queue_spec
+from resonate.testing.conformance import queue as queue_suite
 from resonate.codec import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
@@ -36,7 +36,7 @@ CFG = KernelCfg(retry_timeout=30_000)
 def test_the_simulated_queue_satisfies_the_contract():
     """The same claims `queue_gcp` is held to. Everything below is about
     what a simulator can do that a real queue cannot be asked to."""
-    assert queue_spec.conformance(queue_mem) == []
+    assert queue_suite.conformance(queue_mem) == []
 
 
 def test_nothing_is_eligible_before_its_time():

@@ -1,6 +1,6 @@
 """A store, for real: Google Cloud Storage.
 
-`store_gcp.Store` is `ports.StoreP` over a bucket, and it is almost empty,
+`store_gcp.Store` is `spec.store.StoreP` over a bucket, and it is almost empty,
 which is the test of whether the interface was drawn in the right place.
 Everything the design rests on, GCS already offers: a generation per object,
 and writes conditioned on it.
@@ -44,8 +44,8 @@ reach; we were slower than it for a simpler reason.
 
 ## What is verified, and what is not
 
-The store contract in `testing/spec/store.py` runs against a real bucket
-when `GCS_BUCKET` is set, from `python -m resonate.testing.spec.check` and
+The store contract in `testing/conformance/store.py` runs against a real bucket
+when `GCS_BUCKET` is set, from `python -m resonate.testing.conformance.check` and
 from `test_conformance.py`. Generation preconditions behave as this file
 reads them -- `if_generation_match=0` creates exactly once, and a matched
 generation replaces exactly what was read.

@@ -1,13 +1,10 @@
-"""What a queue is, and what it has to do to be one.
+"""What a queue has to do to be one: eight claims, in order.
 
-The same three layers `engine.py` draws around an engine and `store.py`
-around a store. `QueueP` itself is defined in `ports.py`:
+`spec/queue.py` says what a queue *is* -- two operations, one of them
+serving both deadlines and dispatches. This is the part a real queue can
+fail.
 
-    QueueP   a queue, once it exists: two operations
-    QueueC   how one is made: its configuration in, a queue out
-    QueueM   a module that offers one, under the name `Queue`
-
-    from resonate.testing.spec.queue import conformance
+    from resonate.testing.conformance.queue import conformance
     from resonate import queue_gcp
     from resonate.testing import queue_mem
 
@@ -15,75 +12,30 @@ around a store. `QueueP` itself is defined in `ports.py`:
     assert conformance(queue_gcp, project="p", location="l", queue="q",
                        base_url="https://svc") == []
 
-## One port for deadlines and dispatches
-
-A deadline is a task with an HTTP target and a time before which it must
-not be delivered; a dispatch is a task whose time is now. Both are
-`create`, told apart by the message's `kind` (`timeout` or `execute`), and
-by what the caller does with the name it gets back: a deadline's is
-recorded in the document, because cancelling is by name, and a dispatch's
-is dropped, because a dispatch is never cancelled. When each happens — arm
-before the commit, send after — is stated in the kernel's effects
-(`SetTimeout`, `DelTimeout`, `Send`), not in the shape of the port.
-
-## What the interface is not
-
-There is no third operation for receiving. That is not an omission: Cloud
-Tasks is push-only, a task is delivered by an HTTP POST to the URL it
-carries, and that is why `server.py` exists and why a worker is a service
-rather than a loop. Taking delivery belongs to whatever is being delivered
-to; a simulator adds `take`/`ack`/`nack` for its own tests and the
-interface stays two methods.
-
-Modelling a deadline as a well-behaved gadget would hide everything
-interesting, which is why `queue_mem` is a queue with the failures a queue
-really has rather than a heap.
-
 ## What the contract can and cannot claim
 
 Only what a real queue can be asked to do without being watched. That a
 deadline carries its instant, that a dispatch carries none, that the
-thirty-day horizon is clamped — those are claims about the *request* an
+thirty-day horizon is clamped -- those are claims about the *request* an
 adapter builds, and they are checked against a double in
 `test_conformance.py`. What is here is what both ends must agree on: names
 come from the service, cancelling is idempotent, and nothing is refused for
 being scheduled oddly.
+
+A run against a real queue can be made harmless: a paused queue accepts
+creation and deletion, which is the whole contract, and dispatches nothing,
+so the eight claims run without a single POST escaping.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
+from ...spec.queue import QueueM, QueueP
 from ...types import HERE
-from ...ports import QueueP
 from .violation import Violation
 
-
-# ---------------------------------------------------------------------------
-# The three layers
-# ---------------------------------------------------------------------------
-
-
-class QueueC(Protocol):
-    """How a queue is made. Unpinned, for the reason `store.StoreC` gives
-    at length: the arguments are a deployment rather than an interface, and
-    the caller is the one that knows them."""
-
-    def __call__(self, *config: Any, **keywords: Any) -> QueueP: ...
-
-
-class QueueM(Protocol):
-    """A module that offers a queue. A property rather than an attribute,
-    for the reason `store.StoreM` gives."""
-
-    @property
-    def Queue(self) -> QueueC: ...
-
-
-# ---------------------------------------------------------------------------
-# The contract
-# ---------------------------------------------------------------------------
 
 #: Every claim, in order. A claim is handed a queue and a list to record
 #: every name it creates in, so whatever it leaves behind is cancelled even

@@ -20,7 +20,7 @@ flowchart TB
         kernel["<b>resonate/kernel.py</b> — pure<br/>doc, request, now → effects, reply"]
     end
 
-    subgraph ports["two ports — resonate/ports.py"]
+    subgraph ports["two ports — resonate/spec/"]
         direction LR
         store["<b>StoreP</b><br/>get put delete list"]
         queue["<b>QueueP</b><br/>create delete"]
@@ -68,7 +68,7 @@ to a bucket.
 queue, and that is the entire surface the engine is allowed to touch. The
 memory implementations in `resonate/testing/` are not mocks; they are held
 to the same contracts as the Google ones, by
-`python -m resonate.testing.spec.check`. Nothing else in the diagram changes
+`python -m resonate.testing.conformance.check`. Nothing else in the diagram changes
 when you swap them, which is the test of whether the line was drawn in the
 right place.
 
@@ -84,7 +84,7 @@ of the same run.
 Effects happen in an order: **arm the deadline → commit → disarm the old →
 send**. Every crash window in between leaves the run recoverable, which is
 the difference between durable and merely persistent. `SEQUENCE.md` draws
-it; `resonate/testing/spec/engine.py` grades it.
+it; `resonate/testing/conformance/engine.py` grades it.
 
 ## What a run costs
 

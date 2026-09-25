@@ -2,7 +2,7 @@
 
 This is what every test in the project runs on, so it is not a toy: the
 conditional writes are real, the versions are opaque, and the power can go
-out in the middle. `spec.store.conformance(store_mem)` holds it to the
+out in the middle. `conformance.store.conformance(store_mem)` holds it to the
 same contract as the bucket.
 
 Versions are strings and deliberately not numbers a caller could do
@@ -57,7 +57,7 @@ class Store:
 
     def delete(self, key: str) -> None:
         if self.fault is not None:
-            # "remove", not "delete": in the write log `spec.engine._kind`
+            # "remove", not "delete": in the write log `conformance.engine._kind`
             # reads, a "delete" is a deadline being disarmed.
             self.fault.tick(f"remove {key}")
         self.objects.pop(key, None)

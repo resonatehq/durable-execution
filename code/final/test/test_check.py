@@ -1,4 +1,4 @@
-"""`python -m resonate.testing.spec.check` says what it sees, and can say no.
+"""`python -m resonate.testing.conformance.check` says what it sees, and can say no.
 
 A checker that has never failed is a wish, so this breaks one thing of
 each kind and confirms the checker notices: a module that does not offer
@@ -17,15 +17,16 @@ import pytest
 
 from resonate.testing import queue_mem
 from resonate.testing import store_mem
-from resonate.testing.spec import queue as queue_spec
-from resonate.testing.spec import store as store_spec
+from resonate.spec import store as store_spec
+from resonate.testing.conformance import queue as queue_suite
+from resonate.testing.conformance import store as store_suite
 
 #: Where the code is. The tests live one level down, in `test/`.
 ROOT = Path(__file__).parent.parent
 
 
 def run(**overrides: str | None) -> subprocess.CompletedProcess:
-    """`resonate.testing.spec.check` in a subprocess, with the environment under our control.
+    """`resonate.testing.conformance.check` in a subprocess, with the environment under our control.
 
     `GCS_BUCKET=None` removes it, so a machine that happens to have
     credentials runs the same test as one that does not. Reading the
@@ -35,7 +36,7 @@ def run(**overrides: str | None) -> subprocess.CompletedProcess:
     environ = dict(os.environ)
     for name, value in overrides.items():
         environ.pop(name, None) if value is None else environ.update({name: value})
-    return subprocess.run([sys.executable, "-m", "resonate.testing.spec.check"],
+    return subprocess.run([sys.executable, "-m", "resonate.testing.conformance.check"],
                           cwd=ROOT, capture_output=True, text=True, env=environ)
 
 
@@ -100,11 +101,11 @@ def test_a_missing_operation_is_caught():
     assert missing == ["delete"]
 
 
-@pytest.mark.parametrize("spec_module, implementation, broken", [
-    (store_spec, store_mem, "Store"),
-    (queue_spec, queue_mem, "Queue"),
+@pytest.mark.parametrize("suite, implementation, broken", [
+    (store_suite, store_mem, "Store"),
+    (queue_suite, queue_mem, "Queue"),
 ])
-def test_behaviour_that_does_not_hold_is_caught(spec_module, implementation, broken):
+def test_behaviour_that_does_not_hold_is_caught(suite, implementation, broken):
     """The third question, the one shape cannot answer."""
     class Liar(getattr(implementation, broken)):
         def create(self, url, body, *, not_before=0):
@@ -113,4 +114,4 @@ def test_behaviour_that_does_not_hold_is_caught(spec_module, implementation, bro
         def put(self, key, body, *, if_match=None, if_absent=False):
             return super().put(key, body)  # ignores every precondition
 
-    assert spec_module.conformance(type("M", (), {broken: Liar})) != []
+    assert suite.conformance(type("M", (), {broken: Liar})) != []

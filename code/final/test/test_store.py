@@ -1,6 +1,6 @@
 """What is true of the simulated store and of no other.
 
-The four operations are not tested here. They are `spec.store.CLAIMS`, and
+The four operations are not tested here. They are `conformance.store.CLAIMS`, and
 `test_conformance.py` runs them against every implementation: a claim
 written beside one implementation is a claim the other is graded against
 by accident.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from resonate.testing.spec import store as store_spec
+from resonate.testing.conformance import store as store_suite
 from resonate.testing import store_mem
 from resonate.testing.faults import Crash, Fault
 from resonate.errors import Conflict
@@ -25,7 +25,7 @@ def test_the_simulated_store_satisfies_the_contract():
     """Here as well as in `test_conformance.py`, because everything else in
     this project runs on this store: if it drifts, nothing else means
     anything, and the failure should surface next to it."""
-    assert store_spec.conformance(store_mem) == []
+    assert store_suite.conformance(store_mem) == []
 
 
 def test_reads_never_fault():

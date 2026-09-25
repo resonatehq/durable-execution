@@ -1,41 +1,27 @@
-"""What an engine is, and what it has to do to be one.
+"""What an engine has to do to be one: a script, and every state it commits.
 
-Three layers, because there are three things to name and they are not the
-same thing:
+`spec/engine.py` says what an engine *is* -- one method, and the two ports
+it is made from. This is the part an implementation can fail.
 
-    EngineP   an engine, once it exists: it processes
-    EngineC   how one is made: ports in, engine out
-    EngineM   a module that offers one, under the name `Engine`
-
-`EngineM` is the useful one. A conformance suite cannot be handed a class,
-because a real implementation may want to choose its class at import time,
-and it cannot be handed an instance, because the suite has to supply the
-world the engine runs in. It is handed the module, and reaches for `Engine`.
-
-`EngineM.Engine` is a read-only property rather than a plain attribute, and
-that is not a style choice: a protocol's mutable attribute is invariant, so
-`Engine: EngineC` demands a value that is *exactly* `EngineC` and a type
-checker rejects `class Engine:` for it. A property is covariant, and a class
-object satisfies it by being callable with the right arguments, with no
-adapter. `test_types.py` checks it with mypy.
-
-The types alone say nothing about behaviour. The rest of this file is the
-part that does: `conformance` drives an engine through a script and holds
-every state it commits to the catalogue in `properties.py`, which is the
-specification's, not ours. An implementation that passes has the same
-observable behaviour as the reference, whatever it does inside — a different
-language, a different store, a kernel written from the specification rather
-than transcribed from it.
-
-    from . import conformance
-    from ... import engine
+    from resonate.testing.conformance.engine import conformance
+    from resonate import engine
 
     assert conformance(engine) == []
+
+The suite drives an engine through a script and holds every state it
+commits to the catalogue in `testing/properties.py`, which is the
+specification's rather than ours. An implementation that passes has the
+same observable behaviour as the reference, whatever it does inside -- a
+different language, a different store, a kernel written from the
+specification rather than transcribed from it.
+
+The effect order and the write law are claims about *when* an engine wrote,
+so the suite wraps the ports it hands over and reads the log back. That is
+also why it supplies the world rather than taking an engine: an engine that
+brought its own store could not be watched.
 """
 
 from __future__ import annotations
-
-from typing import Protocol, runtime_checkable
 
 from .. import properties as P
 from ...codec import decode, doc_key
@@ -43,10 +29,12 @@ from ...errors import Conflict
 from ...kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
 from ..faults import Fault
 from ...types import (
-    PromiseCreate, PromiseRegisterListener, PromiseSettle, Reply, Req,
+    PromiseCreate, PromiseRegisterListener, PromiseSettle,
     TaskAcquire, TaskFulfill, TaskSuspend, Timeout, Value, decode_message,
 )
-from ...ports import QueueP, StoreP
+from ...spec.engine import EngineM, Msg
+from ...spec.queue import QueueP
+from ...spec.store import StoreP
 from .violation import Violation
 
 
@@ -105,58 +93,6 @@ class _Watched:
 
 #: Everything an engine can be asked to do. A protocol request, which a
 #: client sent, or a deadline coming due, which nobody did.
-Msg = Req | Timeout
-
-
-# ---------------------------------------------------------------------------
-# The three layers
-# ---------------------------------------------------------------------------
-
-
-@runtime_checkable
-class EngineP(Protocol):
-    """An engine.
-
-    One method, because there is one thing to do: a request and a deadline
-    differ in which way the state machine is consulted and in nothing else,
-    so a caller never has to know which kind of shell it is talking to.
-
-    `process` returns the protocol's answer and raises only when the world
-    refused: `Conflict` when the write lost its race, which the caller
-    retries because every operation is idempotent, and whatever the ports
-    raise when they cannot answer at all.
-
-    One member, and deliberately no more. An engine has no name, no
-    identity and no lifecycle to manage: everything it knows is in the
-    bucket, so two of them are interchangeable and a conformance report
-    names the module it was handed rather than asking the engine who it is.
-    """
-
-    def process(self, msg: Msg, now: int) -> Reply: ...
-
-
-class EngineC(Protocol):
-    """How an engine is made: the two ports, and the dials.
-
-    The ports are arguments rather than imports because the suite below has
-    to supply them. That is not a testing convenience — it is the same seam
-    that lets one engine run over a bucket in production and over a dict in
-    a simulation, and it is why a simulated run is a real run.
-    """
-
-    def __call__(self, store: StoreP, queue: QueueP,
-                 cfg: KernelCfg = ..., prefix: str = ...) -> EngineP: ...
-
-    # This signature is real: every engine takes the same two ports,
-    # because a port is an interface rather than a configuration. `StoreC`
-    # and `QueueC` cannot say as much, and say so.
-
-
-class EngineM(Protocol):
-    """A module that offers an engine."""
-
-    @property
-    def Engine(self) -> EngineC: ...
 
 
 # ---------------------------------------------------------------------------

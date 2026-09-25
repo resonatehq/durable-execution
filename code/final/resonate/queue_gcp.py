@@ -1,6 +1,6 @@
 """A queue, for real: Google Cloud Tasks.
 
-`queue_gcp.Queue` is `ports.QueueP` over a real queue. Two methods, because
+`queue_gcp.Queue` is `spec.queue.QueueP` over a real queue. Two methods, because
 that is all the engine needs: put a task in, take one out again. There is
 no third method for receiving, and that is not an omission — Cloud Tasks is
 push-only. A task is delivered by an HTTP POST to the URL it carries, which
@@ -32,7 +32,7 @@ nothing -- so nothing re-arms it.
 
 ## What is verified
 
-The queue contract in `testing/spec/queue.py` runs against a real queue
+The queue contract in `testing/conformance/queue.py` runs against a real queue
 when `TASKS_QUEUE` names one. A paused queue is enough: it accepts creation
 and deletion, which is the whole contract, and dispatches nothing.
 

@@ -33,9 +33,9 @@ if TYPE_CHECKING:
     from resonate.testing import queue_mem
     from resonate import store_gcp
     from resonate.testing import store_mem
-    from resonate.testing.spec import engine as spec
-    from resonate.testing.spec import queue as queue_spec
-    from resonate.testing.spec import store as store_spec
+    from resonate.spec import engine as spec
+    from resonate.spec import queue as queue_spec
+    from resonate.spec import store as store_spec
 
     # A module offers what its spec says it offers.
     an_engine: spec.EngineM = engine

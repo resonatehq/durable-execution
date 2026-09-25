@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 .hypothesis/
 .mypy_cache/
+
+# What `pip install .` leaves behind.
+build/
+*.egg-info/
