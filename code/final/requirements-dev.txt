@@ -1,4 +1,4 @@
-# The kernel, the engine, the codec, the simulators and the SDK depend on
+# The kernel, the engine, the simulators and the SDK depend on
 # nothing. That is a property worth keeping, so it is stated here as much as
 # anywhere: the first group is what it takes to *check* the code, and the
 # second is what it takes to *deploy* it. Nothing in the first group is

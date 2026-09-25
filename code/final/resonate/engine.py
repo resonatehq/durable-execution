@@ -41,12 +41,22 @@ What is left at each point the process can stop:
 | committing | the transition is durable, the old deadline still armed | it fires; the sweep does only what is due, usually nothing |
 | disarming | durable, but the messages did not go | the task's retry deadline, committed before the message left |
 | sending | the caller was told nothing | it retries, and every operation is idempotent |
+
+Above the class are the three things a caller needs to find the document
+and read it: `doc_key`, `encode`, `decode`. They were a module of their own
+called `codec`, which named one topic and held two -- where a document
+lives is not how it is written -- and whose `encode` had exactly one
+caller, this file. They are here because this is the only production code
+that reads or writes a document at all. The tests and the conformance suite
+import them from here, because looking at what the engine wrote means
+knowing where it wrote it.
 """
 
 from __future__ import annotations
 
 
-from .codec import decode, doc_key, encode
+from pydantic import TypeAdapter
+
 from .kernel import (
     DelTimeout, Document, KernelCfg, Send, SetDocument, SetTimeout,
     handle_external, handle_internal, origin_of,
@@ -60,6 +70,39 @@ from .types import (
 from .spec.queue import QueueP
 from .spec.store import StoreP
 from .types import HERE, Timeout, encode_message
+
+
+#: The document, as the store keeps it. One adapter rather than one per
+#: call: building it is the expensive half, and `by_alias` below is the
+#: camelCase wire format, which is a property of the document rather than a
+#: choice a caller gets to make.
+DOCUMENT = TypeAdapter(Document)
+
+
+def doc_key(origin: str, prefix: str = "") -> str:
+    """Where an origin's document lives. The origin is percent-encoded: `/`
+    would create a path segment and `:` is the origin separator this design
+    reserves, so both are escaped along with everything non-alphanumeric."""
+    escaped = []
+    for b in origin.encode("utf-8"):
+        c = chr(b)
+        escaped.append(c if (c.isalnum() and b < 128) or c in ".-" else f"%{b:02X}")
+    return f"{prefix}wf/{''.join(escaped)}"
+
+
+def encode(doc: Document) -> str:
+    """The document as the JSON a store is handed.
+
+    Text, not bytes, because that is what `StoreP` takes: Pydantic dumps
+    bytes and this is the one place that decodes them, rather than every
+    caller doing it on the line after the call.
+    """
+    return DOCUMENT.dump_json(doc, by_alias=True).decode("utf-8")
+
+
+def decode(raw: str) -> Document:
+    """A document back from what a store returned."""
+    return DOCUMENT.validate_json(raw)
 
 
 def origin_of_msg(msg: Req | Timeout) -> str:
@@ -100,10 +143,9 @@ class Engine:
     def process(self, msg: Req | Timeout, now: int) -> Reply:
         origin = origin_of_msg(msg)
         key = doc_key(origin, self.prefix)
-        # The store speaks text and the codec speaks bytes.
         found = self.store.get(key)
         version = None if found is None else found[1]
-        doc = Document() if found is None else decode(found[0].encode("utf-8"))
+        doc = Document() if found is None else decode(found[0])
         # Fold the clock forward rather than taking it: a caller whose clock
         # has regressed must not be able to un-expire anything.
         now = max(now, doc.clock)
@@ -129,7 +171,7 @@ class Engine:
             # nothing to name, and a leftover name is a handle on something
             # that no longer exists.
             new.timer_name = None
-        body = encode(new).decode("utf-8")
+        body = encode(new)
         if version is None:
             self.store.put(key, body, if_absent=True)
         else:

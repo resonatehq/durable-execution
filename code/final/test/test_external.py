@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, TAG_EXTERNAL
 from resonate.types import PromiseSettle
@@ -61,7 +61,7 @@ def world():
 
 def document(store, origin=ORIGIN):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode()) if found else None
+    return decode(found[0]) if found else None
 
 
 def waiting_on(store):

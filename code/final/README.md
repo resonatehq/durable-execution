@@ -128,9 +128,11 @@ that must wait does so by having a deadline.
 Serialization is Pydantic everywhere. Request dataclasses carry Pydantic
 field metadata. `types.py` has the `wire`, `adapter` and `record` helpers,
 and replies (`Promise.to_record`, `Task.to_record`) are Pydantic dumps. The
-codec (`resonate/codec.py`) is `encode(doc)`/`decode(raw)`: the document as
-camelCase JSON, through a `TypeAdapter(Document)`. `doc_key` gives the key
-the document lives under.
+document's own three functions sit in `resonate/engine.py`, which is the
+only production code that reads or writes one: `encode(doc)`/`decode(raw)`
+are the document as camelCase JSON through a `TypeAdapter(Document)`, in
+text rather than bytes because that is what a store takes, and `doc_key`
+gives the key it lives under.
 
 ### The two ports and their contracts
 
@@ -215,8 +217,7 @@ where they happened.
 | `resonate/sdk.py` | the programming model: `@resonate`, durable calls memoized by position, `.rpc`, `gather`, `sleep`, `external`, `Blocked`, versions |
 | `resonate/kernel.py` | the protocol's state machine as pure functions: fifteen operations, `sweep`, `commit`, `handle_external`, `handle_internal` |
 | `resonate/types.py` | the protocol: fifteen requests, the reply, the queue's messages (`Execute`, `Unblock`, `Timeout`), `parse_request`, and the Pydantic helpers |
-| `resonate/codec.py` | the document as JSON, through Pydantic, and `doc_key` |
-| `resonate/engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send |
+| `resonate/engine.py` | `Engine.process(msg, now)`: load, decide, arm, commit, disarm, send; and the document's `doc_key`, `encode`, `decode` |
 | `resonate/worker.py` | `Worker.run(task_id, version)` claims a task and decides what the outcome means; `_attempt` runs the function from the top |
 | `resonate/server.py` | `Server`: `POST /`, dispatched on the body's `kind` |
 | `resonate/config.py` | `serve()` and `build()`: the service from the environment, and every variable it reads |
@@ -248,7 +249,7 @@ where they happened.
 | `test/test_properties.py` | one hand-built violator per catalogue entry, so every entry is shown falsifiable |
 | `test/test_machine.py` | a Hypothesis state machine: randomized scripts with shrinking |
 | `test/test_explore.py` | the exhaustive search at two profiles: broad and shallow, narrow and deep |
-| `test/test_engine.py` | the codec, the write law, the effect order, and every window the process can stop in |
+| `test/test_engine.py` | the document's key and JSON, the write law, the effect order, and every window the process can stop in |
 | `test/test_spec.py` | our engine through the conformance suite, and two broken engines the suite has to reject |
 | `test/test_store.py` | what only a simulated store has: the power cut |
 | `test/test_queue.py` | the simulated queue, the agent over an unkind one, and the scheduling order |
@@ -268,7 +269,7 @@ where they happened.
 ### Dependencies
 
 Pydantic is the core package's one third-party dependency. `types.py` uses
-it to validate requests, and `codec.py` uses it to read and write
+it to validate requests, and `engine.py` uses it to read and write
 documents. Three places need more. `server.py` needs Flask (through
 `functions-framework`). `store_gcp.py` and `queue_gcp.py` need Google's
 client libraries, and so does the token check in `Server.authorized`. Those

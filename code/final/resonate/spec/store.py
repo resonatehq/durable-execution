@@ -19,7 +19,7 @@ offer these four and a version token, and every one of them offers the
 conditional writes the whole design rests on. An adapter should be nearly
 empty; if it is not, this interface is wrong.
 
-Text in, text out: the engine hands the store the codec's JSON, and a
+Text in, text out: the engine hands the store the document's JSON, and a
 bucket stores bytes, so the store does not interpret the body.
 
 `get` returns the body and its version, or `None` when nothing is there.

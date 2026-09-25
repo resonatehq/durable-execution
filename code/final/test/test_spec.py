@@ -10,7 +10,7 @@ ever passed is a wish.
 from __future__ import annotations
 
 from resonate import engine as engine_module
-from resonate.codec import doc_key
+from resonate.engine import doc_key
 from resonate.kernel import KernelCfg
 from resonate.spec.engine import EngineM, EngineP
 from resonate.types import Execute, PromiseCreate, PromiseGet, Reply, Value
@@ -77,7 +77,7 @@ def test_the_suite_rejects_an_engine_that_sends_before_it_commits():
 def test_the_standard_script_exercises_what_it_claims_to():
     """A conformance script that never suspends a task, never expires a
     lease and never settles a timer grades nothing."""
-    from resonate.codec import decode
+    from resonate.engine import decode
     from resonate.testing.queue_mem import Queue
     from resonate.testing.store_mem import Store
     store = Store()
@@ -85,7 +85,7 @@ def test_the_standard_script_exercises_what_it_claims_to():
     seen = set()
     for msg, now in suite.STANDARD_SCRIPT:
         e.process(msg, now)
-        raw = store.get(doc_key(suite.ORIGIN))[0].encode()
+        raw = store.get(doc_key(suite.ORIGIN))[0]
         for o in decode(raw).objects:
             if o.task is not None:
                 seen.add(o.task.state)

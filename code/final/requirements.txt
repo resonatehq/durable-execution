@@ -3,7 +3,7 @@
 # Google's Python buildpack installs from this file, not from
 # `requirements-dev.txt`, so a dependency that is only named there is a
 # dependency the deployed service does not have. The split is the same one
-# `requirements-dev.txt` describes: the kernel, the engine, the codec, the
+# `requirements-dev.txt` describes: the kernel, the engine, the
 # simulators and the SDK import none of these, and each import below happens
 # inside the method that needs it, so the suite still runs without them.
 #

@@ -1,4 +1,4 @@
-"""The engine: the codec, the write law, the effect order, and every window
+"""The engine: the document, the write law, the effect order, and every window
 the process can stop in.
 
 The kernel's suites prove what a transition *is*. These prove that what the
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from resonate.codec import decode, doc_key, encode
+from resonate.engine import decode, doc_key, encode
 from resonate.engine import Engine, origin_of_msg
 from resonate.types import Timeout
 from resonate.kernel import (
@@ -62,7 +62,7 @@ def create(id, to=100_000, tags=None):
 
 def read(store, origin="o"):
     found = store.get(doc_key(origin))
-    return Document() if found is None else decode(found[0].encode())
+    return Document() if found is None else decode(found[0])
 
 
 def substance(doc):
@@ -72,7 +72,7 @@ def substance(doc):
     return [(o.id, o.promise, o.task) for o in doc.objects]
 
 
-# --- the codec -------------------------------------------------------------
+# --- the document: its key, and its JSON -------------------------------------
 
 
 def test_a_document_round_trips():
@@ -80,7 +80,7 @@ def test_a_document_round_trips():
     e.process(create("o:a"), 0)
     e.process(TaskAcquire("o:a", 0, "p1", 5_000), 10)
     e.process(PromiseRegisterListener("o:a", "http://l"), 20)
-    doc = decode(store.get(doc_key("o"))[0].encode())
+    doc = decode(store.get(doc_key("o"))[0])
     assert decode(encode(doc)) == doc
 
 

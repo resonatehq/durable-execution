@@ -24,7 +24,6 @@ brought its own store could not be watched.
 from __future__ import annotations
 
 from .. import properties as P
-from ...codec import decode, doc_key
 from ...errors import Conflict
 from ...kernel import Document, KernelCfg, RESOLVED, Send, check_invariants
 from ..faults import Fault
@@ -32,6 +31,11 @@ from ...types import (
     PromiseCreate, PromiseRegisterListener, PromiseSettle,
     TaskAcquire, TaskFulfill, TaskSuspend, Timeout, Value, decode_message,
 )
+# Where a document lives and how it is written are the reference
+# implementation's, because that is the only place they are written down.
+# A second implementation that keeps documents elsewhere hands the suite
+# its own pair.
+from ...engine import decode, doc_key
 from ...spec.engine import EngineM, Msg
 from ...spec.queue import QueueP
 from ...spec.store import StoreP

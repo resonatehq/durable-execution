@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, TAG_EXTERNAL
 from resonate.types import PromiseSettle
@@ -65,7 +65,7 @@ def world(agent):
 
 def document(store, origin=ORIGIN):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode()) if found else None
+    return decode(found[0]) if found else None
 
 
 def pending_question(store):
@@ -224,5 +224,5 @@ def test_the_example_only_uses_the_published_surface(agent):
     src = (EXAMPLE / "main.py").read_text()
     assert "from resonate import" in src
     for private in ("resonate.sdk", "resonate.server", "resonate.engine",
-                    "resonate.kernel", "resonate.codec"):
+                    "resonate.kernel", "resonate.spec"):
         assert private not in src, f"the example reaches into {private}"

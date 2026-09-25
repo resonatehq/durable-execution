@@ -46,7 +46,7 @@ PYTHONPATH=../.. SIMULATED=1 functions-framework --target=handler --port 8080
 ```
 
 `SIMULATED=1` swaps the bucket and the queue for in-memory ones and changes
-nothing else: same engine, same kernel, same codec. `PYTHONPATH=../..` is
+nothing else: same engine, same kernel, same document. `PYTHONPATH=../..` is
 how the package is found while it is a sibling directory in this repository
 rather than an install.
 

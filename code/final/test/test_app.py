@@ -20,7 +20,7 @@ import pytest
 from resonate.engine import Engine
 from resonate.worker import Worker
 from resonate.server import Server
-from resonate.codec import doc_key
+from resonate.engine import doc_key
 from resonate.kernel import KernelCfg, TAG_TARGET
 from resonate.testing.sim import Clock
 from resonate.sdk import dumps, route
@@ -151,11 +151,11 @@ DONE = {"agent": 2, "search:durable execution": 1,
 
 
 def root(store, origin: str = ORIGIN):
-    from resonate.codec import decode
+    from resonate.engine import decode
 
     found = store.get(doc_key(origin))
     assert found, "nothing was ever written"
-    return decode(found[0].encode()).get(origin).promise
+    return decode(found[0]).get(origin).promise
 
 
 def start(svc, clock, question: str = QUESTION) -> None:

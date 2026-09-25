@@ -24,7 +24,7 @@ from importlib import util
 
 import pytest
 
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg
 from resonate.testing.queue_mem import Queue
@@ -207,7 +207,7 @@ def world(*functions):
 
 def document(store, origin):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode()) if found else None
+    return decode(found[0]) if found else None
 
 
 def test_a_run_finishes_on_the_body_it_started_on():

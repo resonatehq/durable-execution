@@ -18,7 +18,7 @@ on the last line. Driving an example rather than the package is the point
 `create_app` loads it as a module object of its own and registers it in
 `sys.modules` as `main`, which is how a test reaches the `Server` behind
 the handler. `SIMULATED=1` gives it the in-memory store, queue and clock
-and changes nothing else: same engine, same kernel, same codec.
+and changes nothing else: same engine, same kernel, same document.
 
 A Flask test client rather than a socket, on purpose. It builds a genuine
 request object and runs the genuine view, so everything this file is about
@@ -39,7 +39,7 @@ from pathlib import Path
 import pytest
 
 from resonate.testing import store_mem
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.kernel import TAG_TARGET
 from exampleapp import path_to
 from resonate.errors import Conflict, Unavailable
@@ -196,7 +196,7 @@ def test_the_research_agent_runs_end_to_end_over_http(client, server):
 
     found = server.engine.store.get(doc_key(ORIGIN))
     assert found, "nothing was ever written"
-    root = decode(found[0].encode()).get(ORIGIN).promise
+    root = decode(found[0]).get(ORIGIN).promise
     assert root.state == "resolved", root.state
     assert json.loads(root.value.data) == EXPECTED
     assert dict(CALLS) == {"agent": 2, "search:durable execution": 1,

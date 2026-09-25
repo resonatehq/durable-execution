@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import resonate
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.kernel import TAG_TARGET
 from resonate.sdk import REGISTRY, TARGETS, dumps
 
@@ -137,7 +137,7 @@ def test_a_whole_run_from_a_file_a_user_wrote(user_repo):
 
     found = server.engine.store.get(doc_key("define.1"))
     assert found, "nothing was ever written"
-    root = decode(found[0].encode()).get("define.1").promise
+    root = decode(found[0]).get("define.1").promise
     assert root.state == "resolved", root.state
     assert json.loads(root.value.data) == {
         "defined": ["ping means something", "pong means something"]}
@@ -174,7 +174,7 @@ def test_the_examples_are_user_applications_by_these_rules(example):
         src = source.read_text()
         for private in ("from resonate.sdk", "from resonate.server",
                         "from resonate.engine", "from resonate.kernel",
-                        "from resonate.codec", "import resonate.sdk"):
+                        "from resonate.spec", "import resonate.sdk"):
             assert private not in src, f"{example.name}/{source.name} reaches into {private}"
 
     entry = (example / "main.py").read_text()

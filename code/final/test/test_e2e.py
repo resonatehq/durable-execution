@@ -20,7 +20,7 @@ from collections import Counter
 import pytest
 
 from resonate.testing import properties as P
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, Send
 from resonate.types import PromiseRegisterListener
@@ -94,13 +94,13 @@ def dispatched(rt) -> list[Send]:
 
 def document(store: Store, origin: str = ORIGIN):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode()) if found else None
+    return decode(found[0]) if found else None
 
 
 def check_bytes(store: Store) -> None:
     """Every document in the bucket decodes."""
     for key, (body, _) in store.objects.items():
-        decode(body.encode())
+        decode(body)
 
 
 def answer(store: Store, origin: str = ORIGIN):
@@ -289,7 +289,7 @@ def run(fn, id, *args, extra=()):
     rt.serve(AGENT, Worker(engine, clock, "w"), fn, *extra)
     rt.start(id, fn, *args)
     rt.drain()
-    return decode(store.get(doc_key(id))[0].encode())
+    return decode(store.get(doc_key(id))[0])
 
 
 def test_a_durable_call_can_contain_one():
@@ -348,7 +348,7 @@ def test_a_rejection_is_read_back_rather_than_re_raised_by_running_again():
     for _ in range(6):
         clock.advance(40_000)
         rt.drain()
-    doc = decode(store.get(doc_key("boom.2"))[0].encode())
+    doc = decode(store.get(doc_key("boom.2"))[0])
     assert doc.get("boom.2").promise.state == "rejected"
     assert CALLS["on_fire"] == called_once, "the failing call was made again"
 

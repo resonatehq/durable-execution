@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 
-from resonate.codec import decode, doc_key
+from resonate.engine import decode, doc_key
 from resonate.engine import Engine
 from resonate.kernel import KernelCfg, TAG_TIMER
 from resonate.testing.queue_mem import Queue
@@ -66,7 +66,7 @@ def world():
 
 def document(store: Store, origin: str = ORIGIN):
     found = store.get(doc_key(origin))
-    return decode(found[0].encode()) if found else None
+    return decode(found[0]) if found else None
 
 
 def root(store: Store):
